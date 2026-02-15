@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}Beekeeper - New Project{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <a href="/" class="back-btn">&larr; Back</a>
+    <h1>New Project</h1>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div class="card flash-card">
+    {% for category, message in messages %}
+    <p class="flash flash-{{ category }}">{{ message }}</p>
+    {% endfor %}
+</div>
+{% endif %}
+{% endwith %}
+
+<form action="{{ url_for('project.create') }}" method="POST" class="card">
+    <div class="form-group">
+        <label for="name">Project Name (no spaces)</label>
+        <input type="text" id="name" name="name" required
+               pattern="[a-zA-Z0-9_-]+" placeholder="my-training-run">
+    </div>
+
+    <div class="form-group">
+        <label for="git_url">Git URL</label>
+        <input type="text" id="git_url" name="git_url" required
+               placeholder="https://github.com/user/repo.git">
+    </div>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label for="branch">Default Branch</label>
+            <input type="text" id="branch" name="branch" value="main">
+        </div>
+
+        <div class="form-group">
+            <label for="python_version">Python Version</label>
+            <select id="python_version" name="python_version">
+                <option value="3.12" selected>Python 3.12</option>
+                <option value="3.11">Python 3.11</option>
+                <option value="3.10">Python 3.10</option>
+                <option value="3.9">Python 3.9</option>
+                <option value="3.13">Python 3.13</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label for="train_file">Training Script</label>
+        <input type="text" id="train_file" name="train_file" value="train.py">
+    </div>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label for="tensorboard_log_dir">Tensorboard Log Dir</label>
+            <input type="text" id="tensorboard_log_dir" name="tensorboard_log_dir" value="runs">
+        </div>
+
+        <div class="form-group">
+            <label for="requirements_file">Requirements File</label>
+            <input type="text" id="requirements_file" name="requirements_file" value="requirements.txt">
+        </div>
+    </div>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Create Project</button>
+        <a href="/" class="btn btn-cancel">Cancel</a>
+    </div>
+</form>
+{% endblock %}

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Beekeeper - Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Dashboard</h1>
+</div>
+
+<section class="card" id="system-stats">
+    <h2>System Stats</h2>
+    <div id="stats-content">
+        <p class="muted">Loading stats...</p>
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>Projects</h2>
+        <a href="{{ url_for('project.new') }}" class="btn btn-primary">+ New Project</a>
+    </div>
+    {% if projects %}
+    <div class="project-list">
+        {% for p in projects %}
+        <a href="/projects/{{ p.name }}" class="project-item">
+            <span class="project-name">{{ p.name }}</span>
+            <span class="project-meta">
+                <span class="status-badge status-{{ p.get('setup_status', 'pending') }}">{{ p.get('setup_status', 'pending') | replace('_', ' ') }}</span>
+                <span class="project-branch">{{ p.branch }}</span>
+            </span>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted">No projects yet. Create one to get started.</p>
+    {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Beekeeper - {{ project.name }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <a href="/" class="back-btn">&larr; Back</a>
+    <h1>{{ project.name }}</h1>
+    <span class="status-badge status-{{ project.get('setup_status', 'pending') }}">
+        {{ project.get('setup_status', 'pending') | replace('_', ' ') }}
+    </span>
+</div>
+
+{% if project.get('setup_error') %}
+<div class="card flash-card">
+    <p class="flash flash-error">{{ project.setup_error }}</p>
+</div>
+{% endif %}
+
+<section class="card">
+    <h2>Project Info</h2>
+    <dl class="info-grid">
+        <dt>Git URL</dt><dd>{{ project.git_url }}</dd>
+        <dt>Branch</dt><dd>{{ project.branch }}</dd>
+        <dt>Python</dt><dd>{{ project.python_version }}</dd>
+        <dt>Train File</dt><dd>{{ project.train_file }}</dd>
+        <dt>TB Log Dir</dt><dd>{{ project.tensorboard_log_dir }}</dd>
+        <dt>Req. File</dt><dd>{{ project.requirements_file }}</dd>
+    </dl>
+</section>
+
+<section class="card">
+    <h2>Controls</h2>
+    <p class="muted">Run/Stop controls coming soon.</p>
+</section>
+
+<section class="card">
+    <h2>Logs</h2>
+    <p class="muted">Live log streaming coming soon.</p>
+</section>
+
+<section class="card">
+    <h2>Tensorboard</h2>
+    <p class="muted">Tensorboard integration coming soon.</p>
+</section>
+
+<section class="card danger-zone">
+    <h2>Danger Zone</h2>
+    <form action="{{ url_for('project.delete', name=project.name) }}" method="POST"
+          onsubmit="return confirm('Delete project {{ project.name }}? This cannot be undone.')">
+        <button type="submit" class="btn btn-danger">Delete Project</button>
+    </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+{% if project.get('setup_status') not in ['ready', 'error'] %}
+<script>
+    // Auto-refresh while setup is in progress
+    setTimeout(() => location.reload(), 3000);
+</script>
+{% endif %}
+{% endblock %}
