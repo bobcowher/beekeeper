@@ -7,13 +7,15 @@ from flask import (
 )
 
 from services.project_service import create_project, delete_project
+from services.python_versions import find_available
 
 project_bp = Blueprint("project", __name__, url_prefix="/projects")
 
 
 @project_bp.route("/new")
 def new():
-    return render_template("create_project.html")
+    python_versions = find_available()
+    return render_template("create_project.html", python_versions=python_versions)
 
 
 @project_bp.route("/create", methods=["POST"])

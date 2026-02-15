@@ -5,6 +5,7 @@ import threading
 import logging
 
 from models.project import Project
+from services.python_versions import find_python
 
 log = logging.getLogger(__name__)
 
@@ -58,7 +59,10 @@ def _setup_project(projects_dir, project):
 
     # --- Create venv ---
     _save_status("creating_venv")
-    python_bin = f"python{project.python_version}"
+    python_bin = find_python(project.python_version)
+    if not python_bin:
+        _save_status("error", f"No Python found for version {project.python_version}")
+        return
     try:
         subprocess.run(
             [python_bin, "-m", "venv", venv_dir],
