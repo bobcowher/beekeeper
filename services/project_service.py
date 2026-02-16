@@ -5,7 +5,7 @@ import threading
 import logging
 
 from models.project import Project
-from services.python_versions import find_python
+from services.python_versions import find_python, _find_conda_bin
 
 log = logging.getLogger(__name__)
 
@@ -103,19 +103,20 @@ def _create_venv(project, env_dir, _save_status):
 
 def _create_conda_env(project, env_dir, _save_status):
     """Create a conda environment. Returns pip path or None on failure."""
+    conda_bin = _find_conda_bin()
+    if not conda_bin:
+        _save_status("error", "conda not found on this system")
+        return None
     try:
         subprocess.run(
             [
-                "conda", "create", "-y", "-p", env_dir,
+                conda_bin, "create", "-y", "-p", env_dir,
                 f"python={project.python_version}", "pip",
             ],
             check=True, capture_output=True, text=True, timeout=300,
         )
     except subprocess.CalledProcessError as e:
         _save_status("error", f"Conda env creation failed: {e.stderr.strip()[-500:]}")
-        return None
-    except FileNotFoundError:
-        _save_status("error", "conda not found on this system")
         return None
     return os.path.join(env_dir, "bin", "pip")
 

@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 import json as _json
@@ -5,9 +6,32 @@ import json as _json
 CANDIDATES = ["3.13", "3.12", "3.11", "3.10", "3.9"]
 
 
+def _find_conda_bin():
+    """Find the conda binary, checking PATH first, then well-known install locations."""
+    path = shutil.which("conda")
+    if path:
+        return path
+
+    # Conda init only modifies the shell profile, so systemd services won't see it.
+    # Check common install locations as a fallback.
+    home = os.path.expanduser("~")
+    for dirname in ["anaconda3", "miniconda3", "miniforge3"]:
+        candidate = os.path.join(home, dirname, "bin", "conda")
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+
+    # Also check /opt for system-wide installs
+    for dirname in ["anaconda3", "miniconda3", "miniforge3", "conda"]:
+        candidate = os.path.join("/opt", dirname, "bin", "conda")
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+
+    return None
+
+
 def has_conda():
     """Check if conda is available on this system."""
-    return shutil.which("conda") is not None
+    return _find_conda_bin() is not None
 
 
 def find_available():
@@ -41,10 +65,11 @@ def find_available():
                 pass
 
     # Conda pythons
-    if has_conda():
+    conda_bin = _find_conda_bin()
+    if conda_bin:
         try:
             out = subprocess.run(
-                ["conda", "search", "python", "--json"],
+                [conda_bin, "search", "python", "--json"],
                 capture_output=True, text=True, timeout=30,
             )
             data = _json.loads(out.stdout)
