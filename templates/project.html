@@ -26,6 +26,7 @@
         <dt>Train File</dt><dd>{{ project.train_file }}</dd>
         <dt>TB Log Dir</dt><dd>{{ project.tensorboard_log_dir }}</dd>
         <dt>Req. File</dt><dd>{{ project.requirements_file }}</dd>
+        <dt>Env Type</dt><dd>{{ project.get('env_type', 'venv') }}</dd>
     </dl>
 </section>
 

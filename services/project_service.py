@@ -20,10 +20,10 @@ def create_project(projects_dir, data):
         train_file=data.get("train_file", "train.py"),
         tensorboard_log_dir=data.get("tensorboard_log_dir", "runs"),
         requirements_file=data.get("requirements_file", "requirements.txt"),
+        env_type=data.get("env_type", "venv"),
     )
     project.save(projects_dir)
 
-    # Run the slow setup steps in a background thread
     thread = threading.Thread(
         target=_setup_project, args=(projects_dir, project), daemon=True
     )
@@ -33,10 +33,10 @@ def create_project(projects_dir, data):
 
 
 def _setup_project(projects_dir, project):
-    """Clone repo, create venv, install deps. Updates project.json status as it goes."""
+    """Clone repo, create env, install deps. Updates project.json status as it goes."""
     project_dir = os.path.join(projects_dir, project.name)
     src_dir = os.path.join(project_dir, "src")
-    venv_dir = os.path.join(project_dir, "venv")
+    env_dir = os.path.join(project_dir, "venv")
 
     def _save_status(status, error=None):
         project.setup_status = status
@@ -57,26 +57,21 @@ def _setup_project(projects_dir, project):
         _save_status("error", "Git clone timed out (5 min)")
         return
 
-    # --- Create venv ---
-    _save_status("creating_venv")
-    python_bin = find_python(project.python_version)
-    if not python_bin:
-        _save_status("error", f"No Python found for version {project.python_version}")
-        return
-    try:
-        subprocess.run(
-            [python_bin, "-m", "venv", venv_dir],
-            check=True, capture_output=True, text=True, timeout=120,
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        _save_status("error", f"Venv creation failed: {e}")
-        return
+    # --- Create environment ---
+    _save_status("creating_env")
+
+    if project.env_type == "conda":
+        pip_bin = _create_conda_env(project, env_dir, _save_status)
+    else:
+        pip_bin = _create_venv(project, env_dir, _save_status)
+
+    if pip_bin is None:
+        return  # _save_status("error", ...) already called
 
     # --- Pip install ---
     req_path = os.path.join(src_dir, project.requirements_file)
     if os.path.isfile(req_path):
         _save_status("installing_deps")
-        pip_bin = os.path.join(venv_dir, "bin", "pip")
         try:
             subprocess.run(
                 [pip_bin, "install", "-r", req_path],
@@ -87,6 +82,42 @@ def _setup_project(projects_dir, project):
             return
 
     _save_status("ready")
+
+
+def _create_venv(project, env_dir, _save_status):
+    """Create a standard Python venv. Returns pip path or None on failure."""
+    python_bin = find_python(project.python_version)
+    if not python_bin:
+        _save_status("error", f"No Python found for version {project.python_version}")
+        return None
+    try:
+        subprocess.run(
+            [python_bin, "-m", "venv", env_dir],
+            check=True, capture_output=True, text=True, timeout=120,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        _save_status("error", f"Venv creation failed: {e}")
+        return None
+    return os.path.join(env_dir, "bin", "pip")
+
+
+def _create_conda_env(project, env_dir, _save_status):
+    """Create a conda environment. Returns pip path or None on failure."""
+    try:
+        subprocess.run(
+            [
+                "conda", "create", "-y", "-p", env_dir,
+                f"python={project.python_version}", "pip",
+            ],
+            check=True, capture_output=True, text=True, timeout=300,
+        )
+    except subprocess.CalledProcessError as e:
+        _save_status("error", f"Conda env creation failed: {e.stderr.strip()[-500:]}")
+        return None
+    except FileNotFoundError:
+        _save_status("error", "conda not found on this system")
+        return None
+    return os.path.join(env_dir, "bin", "pip")
 
 
 def delete_project(projects_dir, name):

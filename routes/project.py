@@ -7,7 +7,7 @@ from flask import (
 )
 
 from services.project_service import create_project, delete_project
-from services.python_versions import find_available
+from services.python_versions import find_available, has_conda
 
 project_bp = Blueprint("project", __name__, url_prefix="/projects")
 
@@ -15,7 +15,12 @@ project_bp = Blueprint("project", __name__, url_prefix="/projects")
 @project_bp.route("/new")
 def new():
     python_versions = find_available()
-    return render_template("create_project.html", python_versions=python_versions)
+    conda_available = has_conda()
+    return render_template(
+        "create_project.html",
+        python_versions=python_versions,
+        conda_available=conda_available,
+    )
 
 
 @project_bp.route("/create", methods=["POST"])
@@ -46,6 +51,7 @@ def create():
         "train_file": request.form.get("train_file", "train.py").strip() or "train.py",
         "tensorboard_log_dir": request.form.get("tensorboard_log_dir", "runs").strip() or "runs",
         "requirements_file": request.form.get("requirements_file", "requirements.txt").strip() or "requirements.txt",
+        "env_type": request.form.get("env_type", "venv"),
     }
 
     create_project(projects_dir, data)

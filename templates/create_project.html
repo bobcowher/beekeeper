@@ -40,12 +40,32 @@
         <div class="form-group">
             <label for="python_version">Python Version</label>
             <select id="python_version" name="python_version">
-                {% for ver, path in python_versions %}
-                <option value="{{ ver }}" {% if loop.first %}selected{% endif %}>Python {{ ver }}</option>
+                {% for pv in python_versions %}
+                <option value="{{ pv.version }}"
+                        data-source="{{ pv.source }}"
+                        {% if loop.first %}selected{% endif %}>
+                    Python {{ pv.version }} ({{ pv.source }})
+                </option>
                 {% endfor %}
             </select>
         </div>
     </div>
+
+    {% if conda_available %}
+    <div class="form-group">
+        <label>Environment Type</label>
+        <div class="env-toggle">
+            <label class="toggle-option">
+                <input type="radio" name="env_type" value="venv" checked>
+                <span class="toggle-label">venv</span>
+            </label>
+            <label class="toggle-option">
+                <input type="radio" name="env_type" value="conda">
+                <span class="toggle-label">conda</span>
+            </label>
+        </div>
+    </div>
+    {% endif %}
 
     <div class="form-group">
         <label for="train_file">Training Script</label>
@@ -69,4 +89,21 @@
         <a href="/" class="btn btn-cancel">Cancel</a>
     </div>
 </form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Auto-select conda when a conda-only version is picked
+    const versionSelect = document.getElementById("python_version");
+    const envRadios = document.querySelectorAll('input[name="env_type"]');
+    if (versionSelect && envRadios.length) {
+        versionSelect.addEventListener("change", function () {
+            const opt = this.options[this.selectedIndex];
+            const source = opt.dataset.source;
+            if (source === "conda") {
+                envRadios.forEach(r => { if (r.value === "conda") r.checked = true; });
+            }
+        });
+    }
+</script>
 {% endblock %}

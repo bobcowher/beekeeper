@@ -13,6 +13,7 @@ class Project:
     train_file: str = "train.py"
     tensorboard_log_dir: str = "runs"
     requirements_file: str = "requirements.txt"
+    env_type: str = "venv"
     setup_status: str = "pending"
     setup_error: str = ""
 
