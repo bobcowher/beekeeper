@@ -1,4 +1,5 @@
 import os
+import json as _json
 import shutil
 import subprocess
 import threading
@@ -8,6 +9,28 @@ from models.project import Project
 from services.python_versions import find_python, _find_conda_bin
 
 log = logging.getLogger(__name__)
+
+CONDA_ENV_PREFIX = "beekeeper-"
+
+
+def _conda_env_name(project_name):
+    return f"{CONDA_ENV_PREFIX}{project_name}"
+
+
+def _resolve_conda_env_path(conda_bin, env_name):
+    """Get the filesystem path for a named conda environment."""
+    try:
+        out = subprocess.run(
+            [conda_bin, "info", "--envs", "--json"],
+            capture_output=True, text=True, timeout=30,
+        )
+        data = _json.loads(out.stdout)
+        for env_path in data.get("envs", []):
+            if os.path.basename(env_path) == env_name:
+                return env_path
+    except Exception:
+        pass
+    return None
 
 
 def create_project(projects_dir, data):
@@ -36,7 +59,6 @@ def _setup_project(projects_dir, project):
     """Clone repo, create env, install deps. Updates project.json status as it goes."""
     project_dir = os.path.join(projects_dir, project.name)
     src_dir = os.path.join(project_dir, "src")
-    env_dir = os.path.join(project_dir, "venv")
 
     def _save_status(status, error=None):
         project.setup_status = status
@@ -61,8 +83,9 @@ def _setup_project(projects_dir, project):
     _save_status("creating_env")
 
     if project.env_type == "conda":
-        pip_bin = _create_conda_env(project, env_dir, _save_status)
+        pip_bin = _create_conda_env(project, _save_status)
     else:
+        env_dir = os.path.join(project_dir, "venv")
         pip_bin = _create_venv(project, env_dir, _save_status)
 
     if pip_bin is None:
@@ -101,16 +124,18 @@ def _create_venv(project, env_dir, _save_status):
     return os.path.join(env_dir, "bin", "pip")
 
 
-def _create_conda_env(project, env_dir, _save_status):
-    """Create a conda environment. Returns pip path or None on failure."""
+def _create_conda_env(project, _save_status):
+    """Create a named conda environment. Returns pip path or None on failure."""
     conda_bin = _find_conda_bin()
     if not conda_bin:
         _save_status("error", "conda not found on this system")
         return None
+
+    env_name = _conda_env_name(project.name)
     try:
         subprocess.run(
             [
-                conda_bin, "create", "-y", "-p", env_dir,
+                conda_bin, "create", "-y", "-n", env_name,
                 f"python={project.python_version}", "pip",
             ],
             check=True, capture_output=True, text=True, timeout=300,
@@ -118,11 +143,35 @@ def _create_conda_env(project, env_dir, _save_status):
     except subprocess.CalledProcessError as e:
         _save_status("error", f"Conda env creation failed: {e.stderr.strip()[-500:]}")
         return None
-    return os.path.join(env_dir, "bin", "pip")
+
+    env_path = _resolve_conda_env_path(conda_bin, env_name)
+    if not env_path:
+        _save_status("error", f"Conda env created but could not resolve path for '{env_name}'")
+        return None
+
+    return os.path.join(env_path, "bin", "pip")
 
 
 def delete_project(projects_dir, name):
-    """Remove a project directory entirely."""
+    """Remove a project directory and its conda env (if any)."""
     project_dir = os.path.join(projects_dir, name)
+    config_path = os.path.join(project_dir, "project.json")
+
+    # Clean up conda env if this was a conda project
+    if os.path.isfile(config_path):
+        try:
+            with open(config_path) as f:
+                data = _json.load(f)
+            if data.get("env_type") == "conda":
+                conda_bin = _find_conda_bin()
+                if conda_bin:
+                    env_name = _conda_env_name(name)
+                    subprocess.run(
+                        [conda_bin, "env", "remove", "-y", "-n", env_name],
+                        capture_output=True, text=True, timeout=120,
+                    )
+        except Exception:
+            pass
+
     if os.path.isdir(project_dir):
         shutil.rmtree(project_dir)
