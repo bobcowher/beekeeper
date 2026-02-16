@@ -52,25 +52,29 @@
     </div>
 </section>
 
-<section class="card">
-    <h2>Logs</h2>
-    <div class="log-controls">
-        <button class="btn btn-secondary" id="btn-clear-log">Clear Display</button>
-        <a href="{{ url_for('training.logs_download', name=project.name) }}" class="btn btn-secondary">Download Log</a>
+<section class="card collapsible" id="logs-section">
+    <h2 class="collapsible-header" data-target="logs-body">Logs <span class="collapse-icon">&#9654;</span></h2>
+    <div class="collapsible-body" id="logs-body" style="display:none">
+        <div class="log-controls">
+            <button class="btn btn-secondary" id="btn-clear-log">Clear Display</button>
+            <a href="{{ url_for('training.logs_download', name=project.name) }}" class="btn btn-secondary">Download Log</a>
+        </div>
+        <pre class="log-terminal" id="log-terminal"></pre>
     </div>
-    <pre class="log-terminal" id="log-terminal"></pre>
 </section>
 
-<section class="card">
-    <h2>Tensorboard</h2>
-    {% if training.tb_port %}
-    <div class="tensorboard-container">
-        <iframe src="http://{{ request.host.split(':')[0] }}:{{ training.tb_port }}"
-                id="tensorboard-frame"></iframe>
+<section class="card collapsible" id="tb-section">
+    <h2 class="collapsible-header" data-target="tb-body">Tensorboard <span class="collapse-icon">&#9654;</span></h2>
+    <div class="collapsible-body" id="tb-body" style="display:none">
+        {% if training.tb_port %}
+        <div class="tensorboard-container">
+            <iframe data-src="http://{{ request.host.split(':')[0] }}:{{ training.tb_port }}"
+                    id="tensorboard-frame"></iframe>
+        </div>
+        {% else %}
+        <p class="muted">Tensorboard will appear here when training is running.</p>
+        {% endif %}
     </div>
-    {% else %}
-    <p class="muted">Tensorboard will appear here when training is running.</p>
-    {% endif %}
 </section>
 {% else %}
 <section class="card">

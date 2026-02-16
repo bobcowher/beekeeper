@@ -12,7 +12,40 @@
     const elapsedEl = document.getElementById("elapsed-time");
 
     let eventSource = null;
-    let statusPollId = null;
+
+    // --- Collapsible sections ---
+
+    document.querySelectorAll(".collapsible-header").forEach(header => {
+        header.addEventListener("click", () => {
+            const targetId = header.dataset.target;
+            const body = document.getElementById(targetId);
+            const icon = header.querySelector(".collapse-icon");
+            if (!body) return;
+
+            const isHidden = body.style.display === "none";
+            body.style.display = isHidden ? "block" : "none";
+            icon.textContent = isHidden ? "\u25BC" : "\u25B6";
+
+            // Lazy-load behaviors on first expand
+            if (isHidden) {
+                if (targetId === "logs-body" && !eventSource && config.status === "running") {
+                    startLogStream();
+                }
+                if (targetId === "tb-body") {
+                    const iframe = document.getElementById("tensorboard-frame");
+                    if (iframe && iframe.dataset.src && !iframe.src) {
+                        iframe.src = iframe.dataset.src;
+                    }
+                }
+            } else {
+                // Stop SSE when collapsing logs
+                if (targetId === "logs-body" && eventSource) {
+                    eventSource.close();
+                    eventSource = null;
+                }
+            }
+        });
+    });
 
     // --- Start / Stop ---
 
@@ -79,7 +112,6 @@
 
         eventSource.onmessage = (e) => {
             logTerminal.textContent += e.data + "\n";
-            // Auto-scroll to bottom
             logTerminal.scrollTop = logTerminal.scrollHeight;
         };
 
@@ -91,9 +123,12 @@
         eventSource.onerror = () => {
             eventSource.close();
             eventSource = null;
-            // Retry after a delay
+            // Retry after a delay if logs section is still open
             setTimeout(() => {
-                if (config.status === "running") startLogStream();
+                const logsBody = document.getElementById("logs-body");
+                if (logsBody && logsBody.style.display !== "none" && config.status === "running") {
+                    startLogStream();
+                }
             }, 3000);
         };
     }
@@ -115,36 +150,27 @@
 
     // --- Status polling ---
 
-    function startStatusPoll() {
-        statusPollId = setInterval(async () => {
-            try {
-                const resp = await fetch(`/projects/${name}/status`);
-                if (!resp.ok) return;
-                const data = await resp.json();
+    setInterval(async () => {
+        try {
+            const resp = await fetch(`/projects/${name}/status`);
+            if (!resp.ok) return;
+            const data = await resp.json();
 
-                // If status changed from running to something else, reload
-                if (config.status === "running" && data.status !== "running") {
-                    location.reload();
-                }
-                // If status changed from idle/stopped/crashed to running, reload
-                if (config.status !== "running" && data.status === "running") {
-                    location.reload();
-                }
-            } catch (e) {
-                // ignore
+            if (config.status === "running" && data.status !== "running") {
+                location.reload();
             }
-        }, 3000);
-    }
+            if (config.status !== "running" && data.status === "running") {
+                location.reload();
+            }
+        } catch (e) {
+            // ignore
+        }
+    }, 3000);
 
     // --- Init ---
 
-    if (config.status === "running") {
-        startLogStream();
-        if (elapsedEl) {
-            updateElapsed();
-            setInterval(updateElapsed, 1000);
-        }
+    if (config.status === "running" && elapsedEl) {
+        updateElapsed();
+        setInterval(updateElapsed, 1000);
     }
-
-    startStatusPoll();
 })();

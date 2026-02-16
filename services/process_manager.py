@@ -19,10 +19,13 @@ def _resolve_python_binary(projects_dir, project):
     """Get the python binary path for a project's environment."""
     if project.get("env_type") == "conda":
         return _resolve_conda_python(project)
-    # venv
-    venv_python = os.path.join(projects_dir, project["name"], "venv", "bin", "python")
-    if os.path.isfile(venv_python):
-        return venv_python
+    # venv — check python, python3, and versioned binary
+    venv_bin = os.path.join(projects_dir, project["name"], "venv", "bin")
+    for name in ("python", "python3", f"python{project.get('python_version', '')}"):
+        candidate = os.path.join(venv_bin, name)
+        if os.path.isfile(candidate):
+            return candidate
+    log.warning("No python binary found in %s", venv_bin)
     return None
 
 
@@ -100,12 +103,6 @@ def _monitor_process(projects_dir, name):
             with _lock:
                 info = _running.get(name)
                 if info:
-                    # Close log file
-                    if info.get("log_file"):
-                        try:
-                            info["log_file"].close()
-                        except Exception:
-                            pass
                     # Kill tensorboard
                     tb = info.get("tb_process")
                     if tb and tb.poll() is None:
@@ -147,7 +144,11 @@ def start_training(projects_dir, name):
 
     python_bin = _resolve_python_binary(projects_dir, project)
     if not python_bin:
-        return {"error": "Could not find Python binary for this project"}
+        if project.get("env_type") == "conda":
+            hint = f"conda env beekeeper-{name}"
+        else:
+            hint = os.path.join(projects_dir, name, "venv", "bin")
+        return {"error": f"Could not find Python binary (checked {hint})"}
 
     src_dir = os.path.join(projects_dir, name, "src")
     train_file = project.get("train_file", "train.py")
@@ -156,22 +157,25 @@ def start_training(projects_dir, name):
     if not os.path.isfile(train_path):
         return {"error": f"Training file not found: {train_file}"}
 
-    # Open log file
+    # Open log file using OS-level fd so it's fully independent from Python
     log_path = os.path.join(projects_dir, name, "train.log")
-    log_file = open(log_path, "w")
+    log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
 
     # Start training process
     try:
         proc = subprocess.Popen(
             [python_bin, "-u", train_file],
             cwd=src_dir,
-            stdout=log_file,
+            stdout=log_fd,
             stderr=subprocess.STDOUT,
-            preexec_fn=os.setsid,
+            start_new_session=True,
         )
     except Exception as e:
-        log_file.close()
+        os.close(log_fd)
         return {"error": f"Failed to start training: {e}"}
+
+    # Close our copy of the fd — the child process has its own
+    os.close(log_fd)
 
     # Start tensorboard
     tb_process = None
@@ -187,7 +191,7 @@ def start_training(projects_dir, name):
                      "--bind_all"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
-                    preexec_fn=os.setsid,
+                    start_new_session=True,
                 )
             except Exception as e:
                 log.warning("Failed to start tensorboard for %s: %s", name, e)
@@ -196,7 +200,6 @@ def start_training(projects_dir, name):
     with _lock:
         _running[name] = {
             "process": proc,
-            "log_file": log_file,
             "log_path": log_path,
             "tb_process": tb_process,
             "tb_port": tb_port,
@@ -223,10 +226,11 @@ def stop_training(projects_dir, name):
             return {"error": "Training is not running"}
         proc = info["process"]
 
-    # SIGTERM the process group
+    # SIGTERM the process group (the child is session leader)
     try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-    except ProcessLookupError:
+        pgid = os.getpgid(proc.pid)
+        os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, OSError):
         pass
 
     # Wait up to 5 seconds for graceful shutdown
@@ -234,19 +238,15 @@ def stop_training(projects_dir, name):
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            pgid = os.getpgid(proc.pid)
+            os.killpg(pgid, signal.SIGKILL)
             proc.wait(timeout=3)
-        except Exception:
+        except (ProcessLookupError, OSError):
             pass
 
     with _lock:
         info = _running.pop(name, None)
         if info:
-            if info.get("log_file"):
-                try:
-                    info["log_file"].close()
-                except Exception:
-                    pass
             tb = info.get("tb_process")
             if tb and tb.poll() is None:
                 try:
