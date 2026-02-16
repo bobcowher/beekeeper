@@ -157,9 +157,13 @@ def start_training(projects_dir, name):
     if not os.path.isfile(train_path):
         return {"error": f"Training file not found: {train_file}"}
 
-    # Open log file using OS-level fd so it's fully independent from Python
+    # Open log file — truncate previous run's log on new start
     log_path = os.path.join(projects_dir, name, "train.log")
     log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+
+    # Build environment: inherit system env + project-specific vars
+    proc_env = os.environ.copy()
+    proc_env.update(project.get("env_vars") or {})
 
     # Start training process
     try:
@@ -168,6 +172,7 @@ def start_training(projects_dir, name):
             cwd=src_dir,
             stdout=log_fd,
             stderr=subprocess.STDOUT,
+            env=proc_env,
             start_new_session=True,
         )
     except Exception as e:

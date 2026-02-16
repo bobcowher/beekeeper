@@ -11,6 +11,16 @@
     </span>
 </div>
 
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div class="card flash-card">
+    {% for category, message in messages %}
+    <p class="flash flash-{{ category }}">{{ message }}</p>
+    {% endfor %}
+</div>
+{% endif %}
+{% endwith %}
+
 {% if project.get('setup_error') %}
 <div class="card flash-card">
     <p class="flash flash-error">{{ project.setup_error }}</p>
@@ -18,7 +28,10 @@
 {% endif %}
 
 <section class="card">
-    <h2>Project Info</h2>
+    <div class="card-header">
+        <h2>Project Info</h2>
+        <a href="{{ url_for('project.edit', name=project.name) }}" class="btn btn-secondary">Edit</a>
+    </div>
     <dl class="info-grid">
         <dt>Git URL</dt><dd>{{ project.git_url }}</dd>
         <dt>Branch</dt><dd>{{ project.branch }}</dd>
@@ -28,6 +41,14 @@
         <dt>Req. File</dt><dd>{{ project.requirements_file }}</dd>
         <dt>Env Type</dt><dd>{{ project.get('env_type', 'venv') }}</dd>
     </dl>
+    {% if project.get('env_vars') %}
+    <h3 class="env-vars-heading">Environment Variables</h3>
+    <dl class="info-grid">
+        {% for key, val in project.env_vars.items() %}
+        <dt>{{ key }}</dt><dd>{{ val }}</dd>
+        {% endfor %}
+    </dl>
+    {% endif %}
 </section>
 
 {% if project.get('setup_status') == 'ready' %}
@@ -52,9 +73,10 @@
     </div>
 </section>
 
+{% set logs_open = training.status == 'running' or project.get('train_status') in ('crashed', 'stopped') %}
 <section class="card collapsible" id="logs-section">
-    <h2 class="collapsible-header" data-target="logs-body">Logs <span class="collapse-icon">&#9654;</span></h2>
-    <div class="collapsible-body" id="logs-body" style="display:none">
+    <h2 class="collapsible-header" data-target="logs-body">Logs <span class="collapse-icon">{{ '&#9660;' if logs_open else '&#9654;' }}</span></h2>
+    <div class="collapsible-body" id="logs-body" style="{{ '' if logs_open else 'display:none' }}">
         <div class="log-controls">
             <button class="btn btn-secondary" id="btn-clear-log">Clear Display</button>
             <a href="{{ url_for('training.logs_download', name=project.name) }}" class="btn btn-secondary">Download Log</a>
@@ -74,6 +96,12 @@
         {% else %}
         <p class="muted">Tensorboard will appear here when training is running.</p>
         {% endif %}
+        <div class="tb-controls">
+            <form action="{{ url_for('project.clear_tb_logs', name=project.name) }}" method="POST"
+                  onsubmit="return confirm('Clear all Tensorboard logs? This cannot be undone.')">
+                <button type="submit" class="btn btn-danger btn-sm">Clear Tensorboard Logs</button>
+            </form>
+        </div>
     </div>
 </section>
 {% else %}
@@ -103,6 +131,7 @@
     window.TRAINING_CONFIG = {
         name: "{{ project.name }}",
         status: "{{ training.status }}",
+        trainStatus: "{{ project.get('train_status', 'idle') }}",
         startedAt: {{ training.started_at or 'null' }},
         tbPort: {{ training.tb_port or 'null' }}
     };

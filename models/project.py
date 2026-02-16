@@ -1,7 +1,7 @@
 import json
 import os
 import tempfile
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, field, asdict
 
 
 @dataclass
@@ -18,6 +18,7 @@ class Project:
     setup_error: str = ""
     train_status: str = "idle"
     train_pid: int = 0
+    env_vars: dict = field(default_factory=dict)
 
     def to_dict(self):
         return asdict(self)

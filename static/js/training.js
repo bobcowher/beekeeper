@@ -26,10 +26,9 @@
             body.style.display = isHidden ? "block" : "none";
             icon.textContent = isHidden ? "\u25BC" : "\u25B6";
 
-            // Lazy-load behaviors on first expand
             if (isHidden) {
-                if (targetId === "logs-body" && !eventSource && config.status === "running") {
-                    startLogStream();
+                if (targetId === "logs-body") {
+                    loadLogs();
                 }
                 if (targetId === "tb-body") {
                     const iframe = document.getElementById("tensorboard-frame");
@@ -38,7 +37,6 @@
                     }
                 }
             } else {
-                // Stop SSE when collapsing logs
                 if (targetId === "logs-body" && eventSource) {
                     eventSource.close();
                     eventSource = null;
@@ -102,6 +100,44 @@
         });
     }
 
+    // --- Log loading ---
+
+    function loadLogs() {
+        if (!logTerminal) return;
+
+        if (config.status === "running") {
+            // Live stream via SSE
+            startLogStream();
+        } else {
+            // Load the saved log file contents
+            loadLogFile();
+        }
+    }
+
+    async function loadLogFile() {
+        if (!logTerminal) return;
+        try {
+            const resp = await fetch(`/projects/${name}/logs/stream`);
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                const text = decoder.decode(value, { stream: true });
+                // Parse SSE data lines
+                for (const line of text.split("\n")) {
+                    if (line.startsWith("data: ")) {
+                        logTerminal.textContent += line.slice(6) + "\n";
+                    }
+                }
+                logTerminal.scrollTop = logTerminal.scrollHeight;
+            }
+        } catch (e) {
+            // ignore — file may not exist
+        }
+    }
+
     // --- Log streaming via SSE ---
 
     function startLogStream() {
@@ -123,7 +159,6 @@
         eventSource.onerror = () => {
             eventSource.close();
             eventSource = null;
-            // Retry after a delay if logs section is still open
             setTimeout(() => {
                 const logsBody = document.getElementById("logs-body");
                 if (logsBody && logsBody.style.display !== "none" && config.status === "running") {
@@ -172,5 +207,11 @@
     if (config.status === "running" && elapsedEl) {
         updateElapsed();
         setInterval(updateElapsed, 1000);
+    }
+
+    // Auto-load logs if the section is already open (crashed/stopped state)
+    const logsBody = document.getElementById("logs-body");
+    if (logsBody && logsBody.style.display !== "none") {
+        loadLogs();
     }
 })();

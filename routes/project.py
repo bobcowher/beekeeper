@@ -74,6 +74,75 @@ def detail(name):
     return render_template("project.html", project=project, training=training)
 
 
+@project_bp.route("/<name>/edit")
+def edit(name):
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    config_path = os.path.join(projects_dir, name, "project.json")
+    if not os.path.isfile(config_path):
+        abort(404)
+
+    with open(config_path) as f:
+        project = json.load(f)
+
+    return render_template("edit_project.html", project=project)
+
+
+@project_bp.route("/<name>/edit", methods=["POST"])
+def update(name):
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    config_path = os.path.join(projects_dir, name, "project.json")
+    if not os.path.isfile(config_path):
+        abort(404)
+
+    with open(config_path) as f:
+        project_data = json.load(f)
+
+    # Update editable fields
+    project_data["branch"] = request.form.get("branch", project_data["branch"]).strip()
+    project_data["train_file"] = request.form.get("train_file", project_data["train_file"]).strip()
+    project_data["tensorboard_log_dir"] = request.form.get("tensorboard_log_dir", project_data["tensorboard_log_dir"]).strip()
+    project_data["requirements_file"] = request.form.get("requirements_file", project_data["requirements_file"]).strip()
+
+    # Parse environment variables from the form
+    env_keys = request.form.getlist("env_key")
+    env_vals = request.form.getlist("env_val")
+    env_vars = {}
+    for k, v in zip(env_keys, env_vals):
+        k = k.strip()
+        if k:
+            env_vars[k] = v
+    project_data["env_vars"] = env_vars
+
+    from models.project import Project
+    project = Project(**project_data)
+    project.save(projects_dir)
+
+    flash("Project settings updated.", "success")
+    return redirect(url_for("project.detail", name=name))
+
+
+@project_bp.route("/<name>/clear-tb-logs", methods=["POST"])
+def clear_tb_logs(name):
+    import shutil
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    config_path = os.path.join(projects_dir, name, "project.json")
+    if not os.path.isfile(config_path):
+        abort(404)
+
+    with open(config_path) as f:
+        project = json.load(f)
+
+    tb_logdir = os.path.join(projects_dir, name, "src", project.get("tensorboard_log_dir", "runs"))
+    if os.path.isdir(tb_logdir):
+        shutil.rmtree(tb_logdir)
+        os.makedirs(tb_logdir, exist_ok=True)
+        flash("Tensorboard logs cleared.", "success")
+    else:
+        flash("Tensorboard log directory not found.", "error")
+
+    return redirect(url_for("project.detail", name=name))
+
+
 @project_bp.route("/<name>/delete", methods=["POST"])
 def delete(name):
     projects_dir = current_app.config["PROJECTS_DIR"]
