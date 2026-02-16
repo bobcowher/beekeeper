@@ -120,7 +120,7 @@
     async function loadLogFile() {
         if (!logTerminal) return;
         try {
-            const resp = await fetch(`/projects/${name}/logs/stream`);
+            const resp = await fetch(`/projects/${name}/logs/stream?tail=500`);
             const reader = resp.body.getReader();
             const decoder = new TextDecoder();
 
@@ -147,7 +147,7 @@
         if (eventSource) return;
         if (!logTerminal) return;
 
-        eventSource = new EventSource(`/projects/${name}/logs/stream`);
+        eventSource = new EventSource(`/projects/${name}/logs/stream?tail=500`);
 
         eventSource.onmessage = (e) => {
             logTerminal.textContent += e.data + "\n";
