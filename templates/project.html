@@ -30,20 +30,54 @@
     </dl>
 </section>
 
+{% if project.get('setup_status') == 'ready' %}
 <section class="card">
     <h2>Controls</h2>
-    <p class="muted">Run/Stop controls coming soon.</p>
+    <div class="training-controls" id="training-controls" data-name="{{ project.name }}">
+        {% if training.status == 'running' %}
+        <div class="training-info">
+            <span class="status-badge status-running">Running</span>
+            <span class="muted">PID: {{ training.pid }}</span>
+            <span class="muted" id="elapsed-time"></span>
+        </div>
+        <button class="btn btn-danger" id="btn-stop">Stop Training</button>
+        {% else %}
+        <div class="training-info">
+            <span class="status-badge status-{{ project.get('train_status', 'idle') }}">
+                {{ project.get('train_status', 'idle') }}
+            </span>
+        </div>
+        <button class="btn btn-success" id="btn-start">Start Training</button>
+        {% endif %}
+    </div>
 </section>
 
 <section class="card">
     <h2>Logs</h2>
-    <p class="muted">Live log streaming coming soon.</p>
+    <div class="log-controls">
+        <button class="btn btn-secondary" id="btn-clear-log">Clear Display</button>
+        <a href="{{ url_for('training.logs_download', name=project.name) }}" class="btn btn-secondary">Download Log</a>
+    </div>
+    <pre class="log-terminal" id="log-terminal"></pre>
 </section>
 
 <section class="card">
     <h2>Tensorboard</h2>
-    <p class="muted">Tensorboard integration coming soon.</p>
+    {% if training.tb_port %}
+    <div class="tensorboard-container">
+        <iframe src="http://{{ request.host.split(':')[0] }}:{{ training.tb_port }}"
+                id="tensorboard-frame"></iframe>
+    </div>
+    {% else %}
+    <p class="muted">Tensorboard will appear here when training is running.</p>
+    {% endif %}
 </section>
+{% else %}
+<section class="card">
+    <h2>Controls</h2>
+    <p class="muted">Project setup must complete before training can start.</p>
+</section>
+{% endif %}
 
 <section class="card danger-zone">
     <h2>Danger Zone</h2>
@@ -60,5 +94,15 @@
     // Auto-refresh while setup is in progress
     setTimeout(() => location.reload(), 3000);
 </script>
+{% elif project.get('setup_status') == 'ready' %}
+<script>
+    window.TRAINING_CONFIG = {
+        name: "{{ project.name }}",
+        status: "{{ training.status }}",
+        startedAt: {{ training.started_at or 'null' }},
+        tbPort: {{ training.tb_port or 'null' }}
+    };
+</script>
+<script src="{{ url_for('static', filename='js/training.js') }}"></script>
 {% endif %}
 {% endblock %}

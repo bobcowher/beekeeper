@@ -15,10 +15,12 @@ def create_app():
     from routes.dashboard import dashboard_bp
     from routes.project import project_bp
     from routes.stats import stats_bp
+    from routes.training import training_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(project_bp)
     app.register_blueprint(stats_bp)
+    app.register_blueprint(training_bp)
 
     return app
 

@@ -16,6 +16,8 @@ class Project:
     env_type: str = "venv"
     setup_status: str = "pending"
     setup_error: str = ""
+    train_status: str = "idle"
+    train_pid: int = 0
 
     def to_dict(self):
         return asdict(self)
