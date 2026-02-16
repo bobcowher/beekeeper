@@ -151,6 +151,22 @@ def start_training(projects_dir, name):
         return {"error": f"Could not find Python binary (checked {hint})"}
 
     src_dir = os.path.join(projects_dir, name, "src")
+
+    # Pull latest code before running
+    branch = project.get("branch", "main")
+    try:
+        result = subprocess.run(
+            ["git", "pull", "origin", branch],
+            cwd=src_dir,
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            return {"error": f"Git pull failed: {result.stderr.strip()[-500:]}"}
+    except subprocess.TimeoutExpired:
+        return {"error": "Git pull timed out (60s)"}
+    except Exception as e:
+        return {"error": f"Git pull failed: {e}"}
+
     train_file = project.get("train_file", "train.py")
     train_path = os.path.join(src_dir, train_file)
 
