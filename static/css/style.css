@@ -535,6 +535,11 @@ label {
     border: 1px solid var(--border);
     border-radius: 4px;
     background: #fff;
+    transition: height 0.2s ease;
+}
+
+.tensorboard-container.tb-expanded iframe {
+    height: calc(100vh - 120px);
 }
 
 /* Small button variant */
@@ -571,6 +576,12 @@ label {
     margin-bottom: 8px;
 }
 
+.tb-toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
 /* Tensorboard controls */
 .tb-controls {
     margin-top: 12px;
@@ -581,6 +592,112 @@ label {
 /* Flash success */
 .flash-success {
     color: var(--success);
+}
+
+/* File browser */
+.fb-breadcrumbs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 12px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+}
+
+.fb-crumb {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.fb-crumb:hover {
+    text-decoration: underline;
+}
+
+.fb-crumb-sep {
+    color: var(--text-secondary);
+}
+
+.fb-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.fb-table thead th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.fb-row td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--bg-input);
+}
+
+.fb-row:hover {
+    background: var(--bg-secondary);
+}
+
+.fb-col-name {
+    font-family: var(--font-mono);
+    font-size: 13px;
+}
+
+.fb-col-size {
+    width: 100px;
+    text-align: right;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.fb-col-actions {
+    width: 80px;
+    text-align: right;
+}
+
+.fb-link {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.fb-link:hover {
+    text-decoration: underline;
+}
+
+.fb-file {
+    color: var(--text-primary);
+}
+
+.fb-footer {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.fb-curl-details {
+    margin-top: 12px;
+}
+
+.fb-curl-details summary {
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.fb-curl {
+    background: #0d0d0d;
+    color: #c8c8c8;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 10px;
+    border-radius: 4px;
+    margin-top: 6px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
 }
 
 /* Utility */

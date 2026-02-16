@@ -36,6 +36,9 @@
                         iframe.src = iframe.dataset.src;
                     }
                 }
+                if (targetId === "files-body" && window.loadFiles) {
+                    window.loadFiles();
+                }
             } else {
                 if (targetId === "logs-body" && eventSource) {
                     eventSource.close();
@@ -213,5 +216,17 @@
     const logsBody = document.getElementById("logs-body");
     if (logsBody && logsBody.style.display !== "none") {
         loadLogs();
+    }
+
+    // --- Tensorboard expand/collapse ---
+    const btnTbExpand = document.getElementById("btn-tb-expand");
+    const tbContainer = document.getElementById("tb-container");
+    if (btnTbExpand && tbContainer) {
+        let expanded = false;
+        btnTbExpand.addEventListener("click", () => {
+            expanded = !expanded;
+            tbContainer.classList.toggle("tb-expanded", expanded);
+            btnTbExpand.textContent = expanded ? "Collapse" : "Expand";
+        });
     }
 })();
