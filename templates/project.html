@@ -43,7 +43,7 @@
     </dl>
     {% if project.get('env_vars') %}
     <h3 class="env-vars-heading">Environment Variables</h3>
-    <dl class="info-grid">
+    <dl class="info-grid info-grid-wide">
         {% for key, val in project.env_vars.items() %}
         <dt>{{ key }}</dt><dd>{{ val }}</dd>
         {% endfor %}
@@ -88,19 +88,23 @@
 <section class="card collapsible" id="tb-section">
     <h2 class="collapsible-header" data-target="tb-body">Tensorboard <span class="collapse-icon">&#9654;</span></h2>
     <div class="collapsible-body" id="tb-body" style="display:none">
-        {% if training.tb_port %}
-        <div class="tb-toolbar">
-            <a href="http://{{ request.host.split(':')[0] }}:{{ training.tb_port }}"
-               target="_blank" class="btn btn-secondary btn-sm">Open in New Tab</a>
-            <button class="btn btn-secondary btn-sm" id="btn-tb-expand">Expand</button>
+        <div id="tb-dynamic">
+            {% if training.tb_port %}
+            <div class="tb-toolbar">
+                <a href="http://{{ request.host.split(':')[0] }}:{{ training.tb_port }}"
+                   target="_blank" class="btn btn-secondary btn-sm">Open in New Tab</a>
+                <button class="btn btn-secondary btn-sm" id="btn-tb-expand">Expand</button>
+                <button class="btn btn-danger btn-sm" id="btn-tb-stop">Stop Tensorboard</button>
+            </div>
+            <div class="tensorboard-container" id="tb-container">
+                <iframe data-src="http://{{ request.host.split(':')[0] }}:{{ training.tb_port }}"
+                        id="tensorboard-frame"></iframe>
+            </div>
+            {% else %}
+            <button class="btn btn-success btn-sm" id="btn-tb-launch">Launch Tensorboard</button>
+            <p class="tb-launching muted" id="tb-launching" style="display:none">Launching Tensorboard...</p>
+            {% endif %}
         </div>
-        <div class="tensorboard-container" id="tb-container">
-            <iframe data-src="http://{{ request.host.split(':')[0] }}:{{ training.tb_port }}"
-                    id="tensorboard-frame"></iframe>
-        </div>
-        {% else %}
-        <p class="muted">Tensorboard will appear here when training is running.</p>
-        {% endif %}
         <div class="tb-controls">
             <form action="{{ url_for('project.clear_tb_logs', name=project.name) }}" method="POST"
                   onsubmit="return confirm('Clear all Tensorboard logs? This cannot be undone.')">
@@ -152,7 +156,8 @@
         status: "{{ training.status }}",
         trainStatus: "{{ project.get('train_status', 'idle') }}",
         startedAt: {{ training.started_at or 'null' }},
-        tbPort: {{ training.tb_port or 'null' }}
+        tbPort: {{ training.tb_port or 'null' }},
+        host: "{{ request.host.split(':')[0] }}"
     };
 </script>
 <script src="{{ url_for('static', filename='js/training.js') }}"></script>

@@ -31,10 +31,7 @@
                     loadLogs();
                 }
                 if (targetId === "tb-body") {
-                    const iframe = document.getElementById("tensorboard-frame");
-                    if (iframe && iframe.dataset.src && !iframe.src) {
-                        iframe.src = iframe.dataset.src;
-                    }
+                    activateTb();
                 }
                 if (targetId === "files-body" && window.loadFiles) {
                     window.loadFiles();
@@ -186,6 +183,118 @@
         elapsedEl.textContent = parts.join(" ");
     }
 
+    // --- Tensorboard on-demand ---
+
+    function renderTensorboard(port) {
+        const container = document.getElementById("tb-dynamic");
+        if (!container) return;
+
+        const tbUrl = `http://${config.host}:${port}`;
+        container.innerHTML =
+            '<div class="tb-toolbar">' +
+                `<a href="${tbUrl}" target="_blank" class="btn btn-secondary btn-sm">Open in New Tab</a>` +
+                '<button class="btn btn-secondary btn-sm" id="btn-tb-expand">Expand</button>' +
+                '<button class="btn btn-danger btn-sm" id="btn-tb-stop">Stop Tensorboard</button>' +
+            '</div>' +
+            '<div class="tensorboard-container" id="tb-container">' +
+                `<iframe src="${tbUrl}" id="tensorboard-frame"></iframe>` +
+            '</div>';
+
+        bindTbExpand();
+        bindTbStop();
+    }
+
+    function renderTbLauncher() {
+        const container = document.getElementById("tb-dynamic");
+        if (!container) return;
+
+        container.innerHTML =
+            '<button class="btn btn-success btn-sm" id="btn-tb-launch">Launch Tensorboard</button>' +
+            '<p class="tb-launching muted" id="tb-launching" style="display:none">Launching Tensorboard...</p>';
+
+        bindTbLaunch();
+    }
+
+    async function launchTb() {
+        const launchBtn = document.getElementById("btn-tb-launch");
+        const launchMsg = document.getElementById("tb-launching");
+        if (launchBtn) launchBtn.style.display = "none";
+        if (launchMsg) launchMsg.style.display = "block";
+
+        try {
+            const resp = await fetch(`/projects/${name}/tensorboard/start`, { method: "POST" });
+            const data = await resp.json();
+            if (resp.ok && data.tb_port) {
+                config.tbPort = data.tb_port;
+                renderTensorboard(data.tb_port);
+            } else {
+                alert(data.error || "Failed to launch Tensorboard");
+                if (launchBtn) launchBtn.style.display = "";
+                if (launchMsg) launchMsg.style.display = "none";
+            }
+        } catch (e) {
+            alert("Network error");
+            if (launchBtn) launchBtn.style.display = "";
+            if (launchMsg) launchMsg.style.display = "none";
+        }
+    }
+
+    async function stopTb() {
+        try {
+            await fetch(`/projects/${name}/tensorboard/stop`, { method: "POST" });
+        } catch (e) {
+            // ignore
+        }
+        config.tbPort = null;
+        renderTbLauncher();
+    }
+
+    function bindTbExpand() {
+        const btn = document.getElementById("btn-tb-expand");
+        const container = document.getElementById("tb-container");
+        if (btn && container) {
+            let expanded = false;
+            btn.addEventListener("click", () => {
+                expanded = !expanded;
+                container.classList.toggle("tb-expanded", expanded);
+                btn.textContent = expanded ? "Collapse" : "Expand";
+            });
+        }
+    }
+
+    function bindTbStop() {
+        const btn = document.getElementById("btn-tb-stop");
+        if (btn) {
+            btn.addEventListener("click", () => {
+                stopTb();
+            });
+        }
+    }
+
+    function bindTbLaunch() {
+        const btn = document.getElementById("btn-tb-launch");
+        if (btn) {
+            btn.addEventListener("click", () => {
+                launchTb();
+            });
+        }
+    }
+
+    function activateTb() {
+        // If TB iframe exists but not loaded, load it
+        const iframe = document.getElementById("tensorboard-frame");
+        if (iframe && iframe.dataset.src && !iframe.src) {
+            iframe.src = iframe.dataset.src;
+        }
+        // If no TB running and launcher is visible, auto-launch
+        if (!config.tbPort) {
+            const launchBtn = document.getElementById("btn-tb-launch");
+            if (launchBtn) {
+                launchTb();
+            }
+        }
+    }
+
     // --- Status polling ---
 
     setInterval(async () => {
@@ -218,15 +327,8 @@
         loadLogs();
     }
 
-    // --- Tensorboard expand/collapse ---
-    const btnTbExpand = document.getElementById("btn-tb-expand");
-    const tbContainer = document.getElementById("tb-container");
-    if (btnTbExpand && tbContainer) {
-        let expanded = false;
-        btnTbExpand.addEventListener("click", () => {
-            expanded = !expanded;
-            tbContainer.classList.toggle("tb-expanded", expanded);
-            btnTbExpand.textContent = expanded ? "Collapse" : "Expand";
-        });
-    }
+    // Bind initial TB controls
+    bindTbExpand();
+    bindTbStop();
+    bindTbLaunch();
 })();

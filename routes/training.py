@@ -2,7 +2,10 @@ import os
 import time
 from flask import Blueprint, current_app, jsonify, request, Response, send_file
 
-from services.process_manager import start_training, stop_training, get_training_status
+from services.process_manager import (
+    start_training, stop_training, get_training_status,
+    start_tensorboard, stop_tensorboard,
+)
 
 training_bp = Blueprint("training", __name__, url_prefix="/projects")
 
@@ -32,6 +35,21 @@ def stop(name):
 @training_bp.route("/<name>/status")
 def status(name):
     return jsonify(get_training_status(name))
+
+
+@training_bp.route("/<name>/tensorboard/start", methods=["POST"])
+def tb_start(name):
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    result = start_tensorboard(projects_dir, name)
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@training_bp.route("/<name>/tensorboard/stop", methods=["POST"])
+def tb_stop(name):
+    result = stop_tensorboard(name)
+    return jsonify(result)
 
 
 def _tail_offset(filepath, lines):

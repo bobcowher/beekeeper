@@ -8,7 +8,7 @@ from flask import (
 
 from services.project_service import create_project, delete_project
 from services.python_versions import find_available, has_conda
-from services.process_manager import get_training_status
+from services.process_manager import get_training_status, stop_tensorboard
 
 project_bp = Blueprint("project", __name__, url_prefix="/projects")
 
@@ -150,5 +150,6 @@ def delete(name):
     if not os.path.isfile(config_path):
         abort(404)
 
+    stop_tensorboard(name)
     delete_project(projects_dir, name)
     return redirect(url_for("dashboard.index"))

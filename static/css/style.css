@@ -207,6 +207,12 @@ body {
 .info-grid dd {
     font-family: var(--font-mono);
     font-size: 13px;
+    overflow-wrap: break-word;
+    min-width: 0;
+}
+
+.info-grid-wide {
+    grid-template-columns: auto 1fr;
 }
 
 /* Buttons */
@@ -698,6 +704,18 @@ label {
     margin-top: 6px;
     white-space: pre-wrap;
     word-wrap: break-word;
+}
+
+/* TB launching animation */
+.tb-launching {
+    animation: tb-pulse 1.5s ease-in-out infinite;
+    color: var(--accent) !important;
+    margin-top: 8px;
+}
+
+@keyframes tb-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
 }
 
 /* Utility */

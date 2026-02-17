@@ -12,7 +12,9 @@ from models.project import Project
 log = logging.getLogger(__name__)
 
 _running = {}
+_tb_running = {}  # standalone TB processes: {name: {"tb_process": Popen, "tb_port": int, "last_access": float}}
 _lock = threading.Lock()
+_TB_IDLE_TIMEOUT = 1800  # 30 min
 
 
 def _resolve_python_binary(projects_dir, project):
@@ -89,6 +91,39 @@ def _update_project_json(projects_dir, name, **fields):
     project.save(projects_dir)
 
 
+def _kill_tb_process(tb_proc):
+    """Kill a tensorboard process: SIGTERM -> 5s wait -> SIGKILL."""
+    if tb_proc and tb_proc.poll() is None:
+        try:
+            tb_proc.terminate()
+            tb_proc.wait(timeout=5)
+        except Exception:
+            try:
+                tb_proc.kill()
+            except Exception:
+                pass
+
+
+def _tb_idle_reaper():
+    """Daemon thread that kills standalone TB processes idle for >30 min."""
+    while True:
+        time.sleep(60)
+        now = time.time()
+        to_kill = []
+        with _lock:
+            for name, info in list(_tb_running.items()):
+                if now - info.get("last_access", now) > _TB_IDLE_TIMEOUT:
+                    to_kill.append((name, info["tb_process"]))
+                    del _tb_running[name]
+        for name, proc in to_kill:
+            log.info("Killing idle standalone TB for %s", name)
+            _kill_tb_process(proc)
+
+
+# Start the idle reaper thread
+threading.Thread(target=_tb_idle_reaper, daemon=True).start()
+
+
 def _monitor_process(projects_dir, name):
     """Background thread that waits for the training process to exit."""
     while True:
@@ -103,17 +138,16 @@ def _monitor_process(projects_dir, name):
             with _lock:
                 info = _running.get(name)
                 if info:
-                    # Kill tensorboard
+                    # Migrate tensorboard to standalone tracking
                     tb = info.get("tb_process")
-                    if tb and tb.poll() is None:
-                        try:
-                            tb.terminate()
-                            tb.wait(timeout=5)
-                        except Exception:
-                            try:
-                                tb.kill()
-                            except Exception:
-                                pass
+                    tb_port = info.get("tb_port")
+                    if tb and tb.poll() is None and tb_port:
+                        _tb_running[name] = {
+                            "tb_process": tb,
+                            "tb_port": tb_port,
+                            "last_access": time.time(),
+                        }
+                        log.info("Migrated TB for %s to standalone (port %d)", name, tb_port)
                     del _running[name]
 
             status = "stopped" if ret == 0 else "crashed"
@@ -198,6 +232,12 @@ def start_training(projects_dir, name):
     # Close our copy of the fd — the child process has its own
     os.close(log_fd)
 
+    # Kill any standalone TB before starting a new one with training
+    with _lock:
+        old_tb = _tb_running.pop(name, None)
+    if old_tb:
+        _kill_tb_process(old_tb["tb_process"])
+
     # Start tensorboard
     tb_process = None
     tb_port = None
@@ -268,16 +308,16 @@ def stop_training(projects_dir, name):
     with _lock:
         info = _running.pop(name, None)
         if info:
+            # Migrate tensorboard to standalone tracking
             tb = info.get("tb_process")
-            if tb and tb.poll() is None:
-                try:
-                    os.killpg(os.getpgid(tb.pid), signal.SIGTERM)
-                    tb.wait(timeout=5)
-                except Exception:
-                    try:
-                        tb.kill()
-                    except Exception:
-                        pass
+            tb_port = info.get("tb_port")
+            if tb and tb.poll() is None and tb_port:
+                _tb_running[name] = {
+                    "tb_process": tb,
+                    "tb_port": tb_port,
+                    "last_access": time.time(),
+                }
+                log.info("Migrated TB for %s to standalone (port %d)", name, tb_port)
 
     _update_project_json(projects_dir, name,
                          train_status="stopped", train_pid=0)
@@ -298,10 +338,88 @@ def get_training_status(name):
                 "tb_port": info.get("tb_port"),
                 "elapsed": time.time() - info.get("started_at", time.time()),
             }
+    # Check standalone TB
+    with _lock:
+        tb_info = _tb_running.get(name)
+        if tb_info:
+            tb_info["last_access"] = time.time()
+            tb_port = tb_info.get("tb_port")
+        else:
+            tb_port = None
     return {
         "status": "idle",
         "pid": None,
         "started_at": None,
-        "tb_port": None,
+        "tb_port": tb_port,
         "elapsed": None,
     }
+
+
+def start_tensorboard(projects_dir, name):
+    """Start tensorboard on-demand for a project. Returns existing port if already running."""
+    # Check if TB is already running (from training or standalone)
+    with _lock:
+        info = _running.get(name)
+        if info and info.get("tb_port"):
+            tb = info.get("tb_process")
+            if tb and tb.poll() is None:
+                return {"tb_port": info["tb_port"]}
+        tb_info = _tb_running.get(name)
+        if tb_info:
+            tb = tb_info.get("tb_process")
+            if tb and tb.poll() is None:
+                tb_info["last_access"] = time.time()
+                return {"tb_port": tb_info["tb_port"]}
+            else:
+                del _tb_running[name]
+
+    config_path = os.path.join(projects_dir, name, "project.json")
+    if not os.path.isfile(config_path):
+        return {"error": "Project not found"}
+
+    with open(config_path) as f:
+        project = json.load(f)
+
+    tb_bin = _resolve_tensorboard_binary(projects_dir, project)
+    if not tb_bin:
+        return {"error": "Tensorboard not found in project environment"}
+
+    src_dir = os.path.join(projects_dir, name, "src")
+    tb_logdir = os.path.join(src_dir, project.get("tensorboard_log_dir", "runs"))
+    if not os.path.isdir(tb_logdir):
+        return {"error": f"Tensorboard log directory not found: {project.get('tensorboard_log_dir', 'runs')}"}
+
+    tb_port = _find_free_port()
+    if not tb_port:
+        return {"error": "No free port available for Tensorboard"}
+
+    try:
+        tb_process = subprocess.Popen(
+            [tb_bin, "--logdir", tb_logdir, "--port", str(tb_port), "--bind_all"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as e:
+        return {"error": f"Failed to start Tensorboard: {e}"}
+
+    with _lock:
+        _tb_running[name] = {
+            "tb_process": tb_process,
+            "tb_port": tb_port,
+            "last_access": time.time(),
+        }
+
+    log.info("Started standalone TB for %s on port %d", name, tb_port)
+    return {"tb_port": tb_port}
+
+
+def stop_tensorboard(name):
+    """Stop standalone tensorboard for a project."""
+    with _lock:
+        tb_info = _tb_running.pop(name, None)
+    if tb_info:
+        _kill_tb_process(tb_info["tb_process"])
+        log.info("Stopped standalone TB for %s", name)
+        return {"status": "stopped"}
+    return {"status": "not_running"}
