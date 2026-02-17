@@ -64,6 +64,11 @@ ExecStart=$VENV_DIR/bin/gunicorn \\
 Restart=on-failure
 RestartSec=5
 Environment=BEEKEEPER_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+Environment=PATH=$VENV_DIR/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PYTHONPATH=
+Environment=PYTHONHOME=
+Environment=CONDA_PREFIX=
+Environment=VIRTUAL_ENV=$VENV_DIR
 
 [Install]
 WantedBy=multi-user.target
