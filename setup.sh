@@ -58,7 +58,7 @@ WorkingDirectory=$BEEKEEPER_HOME
 ExecStart=$VENV_DIR/bin/gunicorn \\
     --bind 0.0.0.0:5000 \\
     --workers 1 \\
-    --threads 4 \\
+    --threads 16 \\
     --timeout 120 \\
     "app:create_app()"
 Restart=on-failure
