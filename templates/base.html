@@ -9,7 +9,8 @@
 </head>
 <body>
     <div class="layout">
-        <nav class="sidebar">
+        <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle menu">&#9776;</button>
+        <nav class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <a href="/" class="logo">BEEKEEPER</a>
             </div>
@@ -17,11 +18,26 @@
                 <li><a href="/" class="{% if request.path == '/' %}active{% endif %}">Dashboard</a></li>
             </ul>
         </nav>
-        <main class="content">
+        <main class="content" id="content">
             {% block content %}{% endblock %}
         </main>
     </div>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+    (function() {
+        var toggle = document.getElementById('sidebar-toggle');
+        var sidebar = document.getElementById('sidebar');
+        var content = document.getElementById('content');
+        toggle.addEventListener('click', function() {
+            sidebar.classList.toggle('open');
+        });
+        content.addEventListener('click', function() {
+            if (sidebar.classList.contains('open')) {
+                sidebar.classList.remove('open');
+            }
+        });
+    })();
+    </script>
     {% block scripts %}{% endblock %}
 </body>
 </html>
