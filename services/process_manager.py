@@ -201,6 +201,22 @@ def start_training(projects_dir, name):
     except Exception as e:
         return {"error": f"Git pull failed: {e}"}
 
+    # Install/update dependencies so newly added packages are always present
+    req_file = project.get("requirements_file", "requirements.txt")
+    req_path = os.path.join(src_dir, req_file)
+    if os.path.isfile(req_path):
+        try:
+            result = subprocess.run(
+                [python_bin, "-m", "pip", "install", "-r", req_path, "--quiet"],
+                capture_output=True, text=True, timeout=300,
+            )
+            if result.returncode != 0:
+                return {"error": f"Pip install failed: {result.stderr.strip()[-500:]}"}
+        except subprocess.TimeoutExpired:
+            return {"error": "Pip install timed out (300s)"}
+        except Exception as e:
+            return {"error": f"Pip install failed: {e}"}
+
     train_file = project.get("train_file", "train.py")
     train_path = os.path.join(src_dir, train_file)
 

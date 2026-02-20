@@ -22,8 +22,9 @@ def _safe_path(projects_dir, name, subpath):
         target = os.path.realpath(os.path.join(src_dir, subpath))
     else:
         target = src_dir
-    # Prevent path traversal
-    if not target.startswith(src_dir):
+    # Prevent path traversal — use path-separator boundary to avoid
+    # false positives like src_dir="…/src" matching "…/src-evil"
+    if not (target == src_dir or target.startswith(src_dir + os.sep)):
         return None, None
     return src_dir, target
 
