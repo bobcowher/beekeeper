@@ -22,29 +22,70 @@
     <h2>Project Settings</h2>
 
     <div class="form-group">
-        <label for="branch">Git Branch</label>
+        <label for="branch">
+            Git Branch
+            <span class="tooltip-icon" title="Git branch to pull from before each training run.">?</span>
+        </label>
         <input type="text" id="branch" name="branch" value="{{ project.branch }}">
     </div>
 
     <div class="form-group">
-        <label for="train_file">Training Script</label>
+        <label for="train_file">
+            Training Script
+            <span class="tooltip-icon" title="Python script to execute when training starts. Path is relative to the repository root.">?</span>
+        </label>
         <input type="text" id="train_file" name="train_file" value="{{ project.train_file }}">
     </div>
 
     <div class="form-row">
         <div class="form-group">
-            <label for="tensorboard_log_dir">Tensorboard Log Dir</label>
+            <label for="tensorboard_log_dir">
+                Tensorboard Log Dir
+                <span class="tooltip-icon" title="Directory where your training script writes Tensorboard event files. Relative to the repository root.">?</span>
+            </label>
             <input type="text" id="tensorboard_log_dir" name="tensorboard_log_dir" value="{{ project.tensorboard_log_dir }}">
         </div>
 
         <div class="form-group">
-            <label for="requirements_file">Requirements File</label>
+            <label for="requirements_file">
+                Requirements File
+                <span class="tooltip-icon" title="Pip requirements file installed during project setup and before each training run.">?</span>
+            </label>
             <input type="text" id="requirements_file" name="requirements_file" value="{{ project.requirements_file }}">
         </div>
     </div>
 
+    <div class="form-group">
+        <label for="setup_script">
+            Setup Script <span class="optional-tag">optional</span>
+            <span class="tooltip-icon" title="Shell script run after environment creation during setup, and again before each training run (before pip install). Executed from the repository root. Not run if the file is absent. Suggested filename: setup.sh">?</span>
+        </label>
+        <input type="text" id="setup_script" name="setup_script"
+               value="{{ project.get('setup_script') or '' }}" placeholder="setup.sh">
+    </div>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label for="data_dir_local">
+                Data Dir (local path) <span class="optional-tag">optional</span>
+                <span class="tooltip-icon" title="Path within the repository to use as the data directory. A symlink will be created here pointing to the remote data path below. Defaults to 'data'.">?</span>
+            </label>
+            <input type="text" id="data_dir_local" name="data_dir_local"
+                   value="{{ project.get('data_dir_local') or 'data' }}">
+        </div>
+
+        <div class="form-group">
+            <label for="data_dir_remote">
+                Data Dir (system path) <span class="optional-tag">optional</span>
+                <span class="tooltip-icon" title="Absolute path on this server to a persistent data volume (e.g. /mnt/data or /data/datasets). Leave blank if not needed. The local path above will be symlinked here.">?</span>
+            </label>
+            <input type="text" id="data_dir_remote" name="data_dir_remote"
+                   value="{{ project.get('data_dir_remote') or '' }}" placeholder="/mnt/data">
+        </div>
+    </div>
+
     <h2>Environment Variables</h2>
-    <p class="muted" style="margin-bottom: 12px">These are passed to the training process. Values are stored in project.json.</p>
+    <p class="muted" style="margin-bottom: 12px">These are passed to the training process as environment variables. Values are stored in project.json.</p>
 
     <div id="env-vars-list">
         {% for key, val in (project.get('env_vars') or {}).items() %}

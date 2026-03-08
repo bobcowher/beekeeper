@@ -20,25 +20,37 @@
 
 <form action="{{ url_for('project.create') }}" method="POST" class="card">
     <div class="form-group">
-        <label for="name">Project Name (no spaces)</label>
+        <label for="name">
+            Project Name (no spaces)
+            <span class="tooltip-icon" title="Unique identifier for this project. Letters, numbers, hyphens, and underscores only.">?</span>
+        </label>
         <input type="text" id="name" name="name" required
                pattern="[a-zA-Z0-9_-]+" placeholder="my-training-run">
     </div>
 
     <div class="form-group">
-        <label for="git_url">Git URL</label>
+        <label for="git_url">
+            Git URL
+            <span class="tooltip-icon" title="URL of the Git repository to clone. Must be publicly accessible (no auth support yet).">?</span>
+        </label>
         <input type="text" id="git_url" name="git_url" required
                placeholder="https://github.com/user/repo.git">
     </div>
 
     <div class="form-row">
         <div class="form-group">
-            <label for="branch">Default Branch</label>
+            <label for="branch">
+                Default Branch
+                <span class="tooltip-icon" title="Git branch to clone. Beekeeper will pull this branch before each training run.">?</span>
+            </label>
             <input type="text" id="branch" name="branch" value="main">
         </div>
 
         <div class="form-group">
-            <label for="python_version">Python Version</label>
+            <label for="python_version">
+                Python Version
+                <span class="tooltip-icon" title="Python version used to create the project environment.">?</span>
+            </label>
             <select id="python_version" name="python_version">
                 {% for pv in python_versions %}
                 <option value="{{ pv.version }}"
@@ -53,7 +65,10 @@
 
     {% if conda_available %}
     <div class="form-group">
-        <label>Environment Type</label>
+        <label>
+            Environment Type
+            <span class="tooltip-icon" title="venv: lightweight Python virtual environment. conda: Anaconda/Miniconda environment with broader package support.">?</span>
+        </label>
         <div class="env-toggle">
             <label class="toggle-option">
                 <input type="radio" name="env_type" value="venv" checked>
@@ -68,19 +83,54 @@
     {% endif %}
 
     <div class="form-group">
-        <label for="train_file">Training Script</label>
+        <label for="train_file">
+            Training Script
+            <span class="tooltip-icon" title="Python script to execute when training starts. Path is relative to the repository root.">?</span>
+        </label>
         <input type="text" id="train_file" name="train_file" value="train.py">
     </div>
 
     <div class="form-row">
         <div class="form-group">
-            <label for="tensorboard_log_dir">Tensorboard Log Dir</label>
+            <label for="tensorboard_log_dir">
+                Tensorboard Log Dir
+                <span class="tooltip-icon" title="Directory where your training script writes Tensorboard event files. Relative to the repository root.">?</span>
+            </label>
             <input type="text" id="tensorboard_log_dir" name="tensorboard_log_dir" value="runs">
         </div>
 
         <div class="form-group">
-            <label for="requirements_file">Requirements File</label>
+            <label for="requirements_file">
+                Requirements File
+                <span class="tooltip-icon" title="Pip requirements file installed during project setup and before each training run.">?</span>
+            </label>
             <input type="text" id="requirements_file" name="requirements_file" value="requirements.txt">
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label for="setup_script">
+            Setup Script <span class="optional-tag">optional</span>
+            <span class="tooltip-icon" title="Shell script run after environment creation during setup, and again before each training run (before pip install). Executed from the repository root. Not run if the file is absent. Suggested filename: setup.sh">?</span>
+        </label>
+        <input type="text" id="setup_script" name="setup_script" placeholder="setup.sh">
+    </div>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label for="data_dir_local">
+                Data Dir (local path) <span class="optional-tag">optional</span>
+                <span class="tooltip-icon" title="Path within the repository to use as the data directory. A symlink will be created here pointing to the remote data path below. Defaults to 'data'.">?</span>
+            </label>
+            <input type="text" id="data_dir_local" name="data_dir_local" value="data">
+        </div>
+
+        <div class="form-group">
+            <label for="data_dir_remote">
+                Data Dir (system path) <span class="optional-tag">optional</span>
+                <span class="tooltip-icon" title="Absolute path on this server to a persistent data volume (e.g. /mnt/data or /data/datasets). Leave blank if not needed. The local path above will be symlinked here.">?</span>
+            </label>
+            <input type="text" id="data_dir_remote" name="data_dir_remote" placeholder="/mnt/data">
         </div>
     </div>
 

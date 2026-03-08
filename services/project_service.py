@@ -44,6 +44,9 @@ def create_project(projects_dir, data):
         tensorboard_log_dir=data.get("tensorboard_log_dir", "runs"),
         requirements_file=data.get("requirements_file", "requirements.txt"),
         env_type=data.get("env_type", "venv"),
+        setup_script=data.get("setup_script", ""),
+        data_dir_local=data.get("data_dir_local", "data"),
+        data_dir_remote=data.get("data_dir_remote", ""),
     )
     project.save(projects_dir)
 
@@ -90,6 +93,33 @@ def _setup_project(projects_dir, project):
 
     if pip_bin is None:
         return  # _save_status("error", ...) already called
+
+    # --- Setup script ---
+    if project.setup_script:
+        script_path = os.path.join(src_dir, project.setup_script)
+        if os.path.isfile(script_path):
+            _save_status("running_setup_script")
+            try:
+                subprocess.run(
+                    ["bash", script_path],
+                    cwd=src_dir,
+                    check=True, capture_output=True, text=True, timeout=300,
+                )
+            except subprocess.CalledProcessError as e:
+                _save_status("error", f"Setup script failed: {e.stderr.strip()[-500:]}")
+                return
+            except subprocess.TimeoutExpired:
+                _save_status("error", "Setup script timed out (5 min)")
+                return
+
+    # --- Data dir symlink ---
+    if project.data_dir_remote:
+        local_path = os.path.join(src_dir, project.data_dir_local)
+        if not os.path.exists(local_path) and os.path.isdir(project.data_dir_remote):
+            try:
+                os.symlink(project.data_dir_remote, local_path)
+            except Exception as e:
+                log.warning("Failed to create data dir symlink: %s", e)
 
     # --- Pip install ---
     req_path = os.path.join(src_dir, project.requirements_file)

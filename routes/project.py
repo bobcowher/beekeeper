@@ -53,6 +53,9 @@ def create():
         "tensorboard_log_dir": request.form.get("tensorboard_log_dir", "runs").strip() or "runs",
         "requirements_file": request.form.get("requirements_file", "requirements.txt").strip() or "requirements.txt",
         "env_type": request.form.get("env_type", "venv"),
+        "setup_script": request.form.get("setup_script", "").strip(),
+        "data_dir_local": request.form.get("data_dir_local", "data").strip() or "data",
+        "data_dir_remote": request.form.get("data_dir_remote", "").strip(),
     }
 
     create_project(projects_dir, data)
@@ -102,6 +105,9 @@ def update(name):
     project_data["train_file"] = request.form.get("train_file", project_data["train_file"]).strip()
     project_data["tensorboard_log_dir"] = request.form.get("tensorboard_log_dir", project_data["tensorboard_log_dir"]).strip()
     project_data["requirements_file"] = request.form.get("requirements_file", project_data["requirements_file"]).strip()
+    project_data["setup_script"] = request.form.get("setup_script", project_data.get("setup_script", "")).strip()
+    project_data["data_dir_local"] = request.form.get("data_dir_local", project_data.get("data_dir_local", "data")).strip() or "data"
+    project_data["data_dir_remote"] = request.form.get("data_dir_remote", project_data.get("data_dir_remote", "")).strip()
 
     # Parse environment variables from the form
     env_keys = request.form.getlist("env_key")

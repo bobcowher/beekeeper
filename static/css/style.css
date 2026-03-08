@@ -796,6 +796,44 @@ label {
     }
 }
 
+/* Tooltip icon */
+.tooltip-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: bold;
+    cursor: help;
+    margin-left: 5px;
+    vertical-align: middle;
+    position: relative;
+    top: -1px;
+}
+
+.tooltip-icon:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* Optional field tag */
+.optional-tag {
+    font-size: 11px;
+    font-weight: normal;
+    color: var(--text-secondary);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+
 /* Utility */
 .muted {
     color: var(--text-secondary);

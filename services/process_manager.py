@@ -201,6 +201,35 @@ def start_training(projects_dir, name):
     except Exception as e:
         return {"error": f"Git pull failed: {e}"}
 
+    # Run setup script if configured and present
+    setup_script = project.get("setup_script", "")
+    if setup_script:
+        script_path = os.path.join(src_dir, setup_script)
+        if os.path.isfile(script_path):
+            try:
+                result = subprocess.run(
+                    ["bash", script_path],
+                    cwd=src_dir,
+                    capture_output=True, text=True, timeout=300,
+                )
+                if result.returncode != 0:
+                    return {"error": f"Setup script failed: {result.stderr.strip()[-500:]}"}
+            except subprocess.TimeoutExpired:
+                return {"error": "Setup script timed out (300s)"}
+            except Exception as e:
+                return {"error": f"Setup script failed: {e}"}
+
+    # Ensure data dir symlink exists
+    data_dir_remote = project.get("data_dir_remote", "")
+    if data_dir_remote:
+        data_dir_local = project.get("data_dir_local", "data")
+        local_path = os.path.join(src_dir, data_dir_local)
+        if not os.path.exists(local_path) and os.path.isdir(data_dir_remote):
+            try:
+                os.symlink(data_dir_remote, local_path)
+            except Exception as e:
+                log.warning("Failed to create data dir symlink: %s", e)
+
     # Install/update dependencies so newly added packages are always present
     req_file = project.get("requirements_file", "requirements.txt")
     req_path = os.path.join(src_dir, req_file)
