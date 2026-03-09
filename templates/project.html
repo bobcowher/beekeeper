@@ -79,7 +79,7 @@
 
 {% set logs_open = training.status == 'running' or project.get('train_status') in ('crashed', 'stopped') %}
 <section class="card collapsible" id="logs-section">
-    <h2 class="collapsible-header" data-target="logs-body">Logs <span class="collapse-icon">{{ '&#9660;' if logs_open else '&#9654;' }}</span></h2>
+    <h2 class="collapsible-header" data-target="logs-body">Logs <span class="collapse-icon">{{ '▼' if logs_open else '▶' }}</span></h2>
     <div class="collapsible-body" id="logs-body" style="{{ '' if logs_open else 'display:none' }}">
         <div class="log-controls">
             <button class="btn btn-secondary" id="btn-clear-log">Clear Display</button>
@@ -90,7 +90,7 @@
 </section>
 
 <section class="card collapsible" id="tb-section">
-    <h2 class="collapsible-header" data-target="tb-body">Tensorboard <span class="collapse-icon">&#9654;</span></h2>
+    <h2 class="collapsible-header" data-target="tb-body">Tensorboard <span class="collapse-icon">▶</span></h2>
     <div class="collapsible-body" id="tb-body" style="display:none">
         <div id="tb-dynamic">
             {% if training.tb_port %}
@@ -126,7 +126,7 @@
 
 {% if project.get('setup_status') == 'ready' %}
 <section class="card collapsible" id="files-section">
-    <h2 class="collapsible-header" data-target="files-body">Files <span class="collapse-icon">&#9654;</span></h2>
+    <h2 class="collapsible-header" data-target="files-body">Files <span class="collapse-icon">▶</span></h2>
     <div class="collapsible-body" id="files-body" data-project="{{ project.name }}" style="display:none">
         <nav class="fb-breadcrumbs" id="files-breadcrumbs"></nav>
         <div id="files-listing"><p class="muted">Click to browse project files.</p></div>
@@ -138,12 +138,14 @@
 </section>
 {% endif %}
 
-<section class="card danger-zone">
-    <h2>Danger Zone</h2>
-    <form action="{{ url_for('project.delete', name=project.name) }}" method="POST"
-          onsubmit="return confirm('Delete project {{ project.name }}? This cannot be undone.')">
-        <button type="submit" class="btn btn-danger">Delete Project</button>
-    </form>
+<section class="card danger-zone collapsible">
+    <h2 class="collapsible-header" data-target="danger-body">Danger Zone <span class="collapse-icon">▶</span></h2>
+    <div class="collapsible-body" id="danger-body" style="display:none">
+        <form action="{{ url_for('project.delete', name=project.name) }}" method="POST"
+              onsubmit="return confirm('Delete project {{ project.name }}? This cannot be undone.')">
+            <button type="submit" class="btn btn-danger">Delete Project</button>
+        </form>
+    </div>
 </section>
 {% endblock %}
 

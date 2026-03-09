@@ -1,5 +1,22 @@
-// Beekeeper — stats polling and rendering
+// Beekeeper — shared functionality
 
+// Collapsible sections
+(function () {
+    document.querySelectorAll(".collapsible-header").forEach(header => {
+        header.addEventListener("click", () => {
+            const targetId = header.dataset.target;
+            const body = document.getElementById(targetId);
+            const icon = header.querySelector(".collapse-icon");
+            if (!body) return;
+
+            const isHidden = body.style.display === "none";
+            body.style.display = isHidden ? "block" : "none";
+            icon.textContent = isHidden ? "\u25BC" : "\u25B6";
+        });
+    });
+})();
+
+// Stats polling and rendering
 (function () {
     const statsEl = document.getElementById("stats-content");
     if (!statsEl) return;
