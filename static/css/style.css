@@ -15,6 +15,7 @@
     --border: #3e3e3e;
     --danger: #c94040;
     --success: #4ec94e;
+    --running: #4a9eff;
     --font-mono: 'Consolas', 'Courier New', monospace;
     --font-sans: 'Segoe UI', system-ui, sans-serif;
 }
@@ -493,8 +494,8 @@ label {
 }
 
 .status-running {
-    background: rgba(78, 201, 78, 0.15);
-    color: var(--success);
+    background: rgba(74, 158, 255, 0.15);
+    color: var(--running);
 }
 
 .status-idle {

@@ -25,7 +25,11 @@
         <a href="/projects/{{ p.name }}" class="project-item">
             <span class="project-name">{{ p.name }}</span>
             <span class="project-meta">
+                {% if p.get('setup_status', 'pending') == 'ready' %}
+                <span class="status-badge status-{{ p.get('train_status', 'idle') }}">{{ p.get('train_status', 'idle') }}</span>
+                {% else %}
                 <span class="status-badge status-{{ p.get('setup_status', 'pending') }}">{{ p.get('setup_status', 'pending') | replace('_', ' ') }}</span>
+                {% endif %}
                 <span class="project-branch">{{ p.branch }}</span>
             </span>
         </a>
