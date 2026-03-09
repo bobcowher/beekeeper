@@ -13,35 +13,36 @@
 
     let eventSource = null;
 
-    // --- Collapsible sections ---
+    // --- Collapsible section actions (toggle handled by app.js) ---
 
     document.querySelectorAll(".collapsible-header").forEach(header => {
         header.addEventListener("click", () => {
             const targetId = header.dataset.target;
             const body = document.getElementById(targetId);
-            const icon = header.querySelector(".collapse-icon");
             if (!body) return;
 
-            const isHidden = body.style.display === "none";
-            body.style.display = isHidden ? "block" : "none";
-            icon.textContent = isHidden ? "\u25BC" : "\u25B6";
+            // Check state BEFORE app.js toggles it
+            const wasHidden = body.style.display === "none";
 
-            if (isHidden) {
-                if (targetId === "logs-body") {
-                    loadLogs();
+            // Use setTimeout to run after app.js toggle completes
+            setTimeout(() => {
+                if (wasHidden) {
+                    if (targetId === "logs-body") {
+                        loadLogs();
+                    }
+                    if (targetId === "tb-body") {
+                        activateTb();
+                    }
+                    if (targetId === "files-body" && window.loadFiles) {
+                        window.loadFiles();
+                    }
+                } else {
+                    if (targetId === "logs-body" && eventSource) {
+                        eventSource.close();
+                        eventSource = null;
+                    }
                 }
-                if (targetId === "tb-body") {
-                    activateTb();
-                }
-                if (targetId === "files-body" && window.loadFiles) {
-                    window.loadFiles();
-                }
-            } else {
-                if (targetId === "logs-body" && eventSource) {
-                    eventSource.close();
-                    eventSource = null;
-                }
-            }
+            }, 0);
         });
     });
 

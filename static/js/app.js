@@ -1,7 +1,7 @@
 // Beekeeper — shared functionality
 
 // Collapsible sections
-(function () {
+document.addEventListener("DOMContentLoaded", function () {
     document.querySelectorAll(".collapsible-header").forEach(header => {
         header.addEventListener("click", () => {
             const targetId = header.dataset.target;
@@ -14,7 +14,7 @@
             icon.textContent = isHidden ? "\u25BC" : "\u25B6";
         });
     });
-})();
+});
 
 // Stats polling and rendering
 (function () {
