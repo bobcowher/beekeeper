@@ -2,3 +2,4 @@ venv/
 projects/
 __pycache__/
 *.pyc
+deploy.sh
