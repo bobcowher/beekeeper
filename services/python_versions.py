@@ -34,11 +34,19 @@ def has_conda():
     return _find_conda_bin() is not None
 
 
+_available_cache = None
+
+
 def find_available():
     """Return list of dicts with version info for system and conda Pythons.
 
     Each entry: {"version": "3.12", "source": "system"|"conda", "path": ...}
+    Result is cached after the first call — Python versions don't change at runtime.
     """
+    global _available_cache
+    if _available_cache is not None:
+        return _available_cache
+
     found = []
     seen = set()
 
@@ -88,6 +96,7 @@ def find_available():
         except Exception:
             pass
 
+    _available_cache = found
     return found
 
 
