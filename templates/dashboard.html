@@ -25,10 +25,14 @@
         <a href="/projects/{{ p.name }}" class="project-item">
             <span class="project-name">{{ p.name }}</span>
             <span class="project-meta">
-                {% if p.get('setup_status', 'pending') == 'ready' %}
-                <span class="status-badge status-{{ p.get('train_status', 'idle') }}">{{ p.get('train_status', 'idle') }}</span>
+                {% set setup = p.get('setup_status', 'pending') %}
+                {% set train = p.get('train_status', 'idle') %}
+                {% if setup == 'ready' and train in ['running', 'crashed'] %}
+                <span class="project-status status-badge status-{{ train }}">{{ train }}</span>
+                {% elif setup == 'ready' %}
+                <span class="project-status status-badge status-ready">ready</span>
                 {% else %}
-                <span class="status-badge status-{{ p.get('setup_status', 'pending') }}">{{ p.get('setup_status', 'pending') | replace('_', ' ') }}</span>
+                <span class="project-status status-badge status-{{ setup }}">{{ setup | replace('_', ' ') }}</span>
                 {% endif %}
                 <span class="project-branch">{{ p.branch }}</span>
             </span>
