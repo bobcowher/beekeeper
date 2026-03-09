@@ -44,6 +44,18 @@ def create():
         flash("Git URL is required.", "error")
         return redirect(url_for("project.new"))
 
+    data_dir_enabled = request.form.get("data_dir_enabled") == "1"
+    data_dir_local = request.form.get("data_dir_local", "data").strip() or "data"
+    data_dir_remote = request.form.get("data_dir_remote", "").strip()
+
+    if data_dir_enabled:
+        if not data_dir_remote:
+            flash("System data path is required when data directory is enabled.", "error")
+            return redirect(url_for("project.new"))
+        if not os.path.isdir(data_dir_remote):
+            flash(f"System data path '{data_dir_remote}' does not exist or is not a directory.", "error")
+            return redirect(url_for("project.new"))
+
     data = {
         "name": name,
         "git_url": git_url,
@@ -54,8 +66,9 @@ def create():
         "requirements_file": request.form.get("requirements_file", "requirements.txt").strip() or "requirements.txt",
         "env_type": request.form.get("env_type", "venv"),
         "setup_script": request.form.get("setup_script", "").strip(),
-        "data_dir_local": request.form.get("data_dir_local", "data").strip() or "data",
-        "data_dir_remote": request.form.get("data_dir_remote", "").strip(),
+        "data_dir_enabled": data_dir_enabled,
+        "data_dir_local": data_dir_local,
+        "data_dir_remote": data_dir_remote,
     }
 
     create_project(projects_dir, data)
@@ -106,8 +119,37 @@ def update(name):
     project_data["tensorboard_log_dir"] = request.form.get("tensorboard_log_dir", project_data["tensorboard_log_dir"]).strip()
     project_data["requirements_file"] = request.form.get("requirements_file", project_data["requirements_file"]).strip()
     project_data["setup_script"] = request.form.get("setup_script", project_data.get("setup_script", "")).strip()
-    project_data["data_dir_local"] = request.form.get("data_dir_local", project_data.get("data_dir_local", "data")).strip() or "data"
-    project_data["data_dir_remote"] = request.form.get("data_dir_remote", project_data.get("data_dir_remote", "")).strip()
+    data_dir_enabled = request.form.get("data_dir_enabled") == "1"
+    data_dir_local = request.form.get("data_dir_local", project_data.get("data_dir_local", "data")).strip() or "data"
+    data_dir_remote = request.form.get("data_dir_remote", project_data.get("data_dir_remote", "")).strip()
+
+    if data_dir_enabled:
+        if not data_dir_remote:
+            flash("System data path is required when data directory is enabled.", "error")
+            return redirect(url_for("project.edit", name=name))
+        if not os.path.isdir(data_dir_remote):
+            flash(f"System data path '{data_dir_remote}' does not exist or is not a directory.", "error")
+            return redirect(url_for("project.edit", name=name))
+        src_dir = os.path.join(projects_dir, name, "src")
+        if os.path.isdir(src_dir):
+            local_path = os.path.join(src_dir, data_dir_local)
+            if os.path.islink(local_path):
+                if os.readlink(local_path) != data_dir_remote:
+                    os.unlink(local_path)
+                    os.symlink(data_dir_remote, local_path)
+            elif os.path.exists(local_path):
+                flash(
+                    f"'{data_dir_local}' already exists in the repository and is not a symlink. "
+                    f"Remove it first, then save again.",
+                    "error",
+                )
+                return redirect(url_for("project.edit", name=name))
+            else:
+                os.symlink(data_dir_remote, local_path)
+
+    project_data["data_dir_enabled"] = data_dir_enabled
+    project_data["data_dir_local"] = data_dir_local
+    project_data["data_dir_remote"] = data_dir_remote
 
     # Parse environment variables from the form
     env_keys = request.form.getlist("env_key")

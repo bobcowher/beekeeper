@@ -15,6 +15,7 @@ class Project:
     requirements_file: str = "requirements.txt"
     env_type: str = "venv"
     setup_script: str = ""
+    data_dir_enabled: bool = False
     data_dir_local: str = "data"
     data_dir_remote: str = ""
     setup_status: str = "pending"

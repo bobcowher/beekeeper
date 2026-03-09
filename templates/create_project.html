@@ -116,21 +116,31 @@
         <input type="text" id="setup_script" name="setup_script" placeholder="setup.sh">
     </div>
 
-    <div class="form-row">
-        <div class="form-group">
-            <label for="data_dir_local">
-                Data Dir (local path) <span class="optional-tag">optional</span>
-                <span class="tooltip-icon" title="Path within the repository to use as the data directory. A symlink will be created here pointing to the remote data path below. Defaults to 'data'.">?</span>
-            </label>
-            <input type="text" id="data_dir_local" name="data_dir_local" value="data">
-        </div>
+    <div class="form-group">
+        <label class="checkbox-label">
+            <input type="checkbox" name="data_dir_enabled" value="1" id="data_dir_enabled">
+            <span>Enable Static Data Directory</span>
+            <span class="tooltip-icon" title="Creates a symlink inside the repository pointing to a persistent data volume on this server. Useful for large datasets that live outside the repo. The symlink is created before the setup script runs.">?</span>
+        </label>
+    </div>
 
-        <div class="form-group">
-            <label for="data_dir_remote">
-                Data Dir (system path) <span class="optional-tag">optional</span>
-                <span class="tooltip-icon" title="Absolute path on this server to a persistent data volume (e.g. /mnt/data or /data/datasets). Leave blank if not needed. The local path above will be symlinked here.">?</span>
-            </label>
-            <input type="text" id="data_dir_remote" name="data_dir_remote" placeholder="/mnt/data">
+    <div id="data-dir-fields" style="display:none">
+        <div class="form-row">
+            <div class="form-group">
+                <label for="data_dir_local">
+                    Local path (in repo)
+                    <span class="tooltip-icon" title="Path within the repository where the symlink will be created. Relative to the repo root.">?</span>
+                </label>
+                <input type="text" id="data_dir_local" name="data_dir_local" value="data">
+            </div>
+
+            <div class="form-group">
+                <label for="data_dir_remote">
+                    System path (on server)
+                    <span class="tooltip-icon" title="Absolute path on this server to a persistent data directory, e.g. /mnt/data or /data/datasets. Must already exist.">?</span>
+                </label>
+                <input type="text" id="data_dir_remote" name="data_dir_remote" placeholder="/mnt/data">
+            </div>
         </div>
     </div>
 
@@ -155,5 +165,18 @@
             }
         });
     }
+
+    // Show/hide data dir fields
+    const dataDirCheckbox = document.getElementById("data_dir_enabled");
+    const dataDirFields = document.getElementById("data-dir-fields");
+    function toggleDataDir() {
+        const enabled = dataDirCheckbox.checked;
+        dataDirFields.style.display = enabled ? "" : "none";
+        dataDirFields.querySelectorAll("input").forEach(el => {
+            if (el.id === "data_dir_remote") el.required = enabled;
+        });
+    }
+    dataDirCheckbox.addEventListener("change", toggleDataDir);
+    toggleDataDir();
 </script>
 {% endblock %}

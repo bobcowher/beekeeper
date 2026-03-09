@@ -94,6 +94,26 @@ def _setup_project(projects_dir, project):
     if pip_bin is None:
         return  # _save_status("error", ...) already called
 
+    # --- Data dir symlink (before setup script so setup.sh can use it) ---
+    if project.data_dir_enabled and project.data_dir_remote:
+        local_path = os.path.join(src_dir, project.data_dir_local)
+        if os.path.islink(local_path):
+            if os.readlink(local_path) != project.data_dir_remote:
+                os.unlink(local_path)
+                os.symlink(project.data_dir_remote, local_path)
+        elif os.path.exists(local_path):
+            _save_status(
+                "error",
+                f"'{project.data_dir_local}' already exists in the repository and is not a symlink. "
+                f"Remove it from the repo, then re-setup the project.",
+            )
+            return
+        elif os.path.isdir(project.data_dir_remote):
+            os.symlink(project.data_dir_remote, local_path)
+        else:
+            _save_status("error", f"Data directory '{project.data_dir_remote}' does not exist on this server.")
+            return
+
     # --- Setup script ---
     if project.setup_script:
         script_path = os.path.join(src_dir, project.setup_script)
@@ -111,15 +131,6 @@ def _setup_project(projects_dir, project):
             except subprocess.TimeoutExpired:
                 _save_status("error", "Setup script timed out (5 min)")
                 return
-
-    # --- Data dir symlink ---
-    if project.data_dir_remote:
-        local_path = os.path.join(src_dir, project.data_dir_local)
-        if not os.path.exists(local_path) and os.path.isdir(project.data_dir_remote):
-            try:
-                os.symlink(project.data_dir_remote, local_path)
-            except Exception as e:
-                log.warning("Failed to create data dir symlink: %s", e)
 
     # --- Pip install ---
     req_path = os.path.join(src_dir, project.requirements_file)

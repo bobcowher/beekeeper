@@ -201,6 +201,25 @@ def start_training(projects_dir, name):
     except Exception as e:
         return {"error": f"Git pull failed: {e}"}
 
+    # Ensure data dir symlink exists (before setup script so setup.sh can use it)
+    if project.get("data_dir_enabled") and project.get("data_dir_remote"):
+        data_dir_remote = project["data_dir_remote"]
+        data_dir_local = project.get("data_dir_local", "data")
+        local_path = os.path.join(src_dir, data_dir_local)
+        if os.path.islink(local_path):
+            if os.readlink(local_path) != data_dir_remote:
+                os.unlink(local_path)
+                os.symlink(data_dir_remote, local_path)
+        elif os.path.exists(local_path):
+            return {
+                "error": f"'{data_dir_local}' already exists in the repository and is not a symlink. "
+                         f"Remove it from the repo or disable the data directory in project settings."
+            }
+        elif os.path.isdir(data_dir_remote):
+            os.symlink(data_dir_remote, local_path)
+        else:
+            return {"error": f"Data directory '{data_dir_remote}' does not exist on this server."}
+
     # Run setup script if configured and present
     setup_script = project.get("setup_script", "")
     if setup_script:
@@ -218,17 +237,6 @@ def start_training(projects_dir, name):
                 return {"error": "Setup script timed out (300s)"}
             except Exception as e:
                 return {"error": f"Setup script failed: {e}"}
-
-    # Ensure data dir symlink exists
-    data_dir_remote = project.get("data_dir_remote", "")
-    if data_dir_remote:
-        data_dir_local = project.get("data_dir_local", "data")
-        local_path = os.path.join(src_dir, data_dir_local)
-        if not os.path.exists(local_path) and os.path.isdir(data_dir_remote):
-            try:
-                os.symlink(data_dir_remote, local_path)
-            except Exception as e:
-                log.warning("Failed to create data dir symlink: %s", e)
 
     # Install/update dependencies so newly added packages are always present
     req_file = project.get("requirements_file", "requirements.txt")
