@@ -58,7 +58,21 @@ def create_project(projects_dir, data):
     return project
 
 
-def _setup_project(projects_dir, project):
+def retry_setup(projects_dir, name):
+    """Re-run setup for a project in error state, skipping already-completed steps."""
+    config_path = os.path.join(projects_dir, name, "project.json")
+    project = Project.load(config_path)
+    project.setup_status = "pending"
+    project.setup_error = ""
+    project.save(projects_dir)
+
+    thread = threading.Thread(
+        target=_setup_project, args=(projects_dir, project, True), daemon=True
+    )
+    thread.start()
+
+
+def _setup_project(projects_dir, project, is_retry=False):
     """Clone repo, create env, install deps. Updates project.json status as it goes."""
     project_dir = os.path.join(projects_dir, project.name)
     workspace_dir = os.path.join(project_dir, "workspace")
@@ -68,28 +82,42 @@ def _setup_project(projects_dir, project):
         project.setup_error = error
         project.save(projects_dir)
 
-    # --- Git clone ---
-    _save_status("cloning")
-    try:
-        subprocess.run(
-            ["git", "clone", "-b", project.branch, project.git_url, workspace_dir],
-            check=True, capture_output=True, text=True, timeout=300,
-        )
-    except subprocess.CalledProcessError as e:
-        _save_status("error", f"Git clone failed: {e.stderr.strip()}")
-        return
-    except subprocess.TimeoutExpired:
-        _save_status("error", "Git clone timed out (5 min)")
-        return
+    # --- Git clone (skip if workspace already exists from a previous attempt) ---
+    if os.path.isdir(workspace_dir):
+        log.info("Retry: workspace already exists for %s, skipping clone", project.name)
+    else:
+        _save_status("cloning")
+        try:
+            subprocess.run(
+                ["git", "clone", "-b", project.branch, project.git_url, workspace_dir],
+                check=True, capture_output=True, text=True, timeout=300,
+            )
+        except subprocess.CalledProcessError as e:
+            _save_status("error", f"Git clone failed: {e.stderr.strip()}")
+            return
+        except subprocess.TimeoutExpired:
+            _save_status("error", "Git clone timed out (5 min)")
+            return
 
-    # --- Create environment ---
-    _save_status("creating_env")
-
+    # --- Create environment (skip if already exists) ---
     if project.env_type == "conda":
-        pip_bin = _create_conda_env(project, _save_status)
+        env_name = _conda_env_name(project.name)
+        conda_bin = _find_conda_bin()
+        env_path = _resolve_conda_env_path(conda_bin, env_name) if conda_bin else None
+        if env_path:
+            log.info("Retry: conda env already exists for %s, skipping", project.name)
+            pip_bin = os.path.join(env_path, "bin", "pip")
+        else:
+            _save_status("creating_env")
+            pip_bin = _create_conda_env(project, _save_status)
     else:
         env_dir = os.path.join(project_dir, "venv")
-        pip_bin = _create_venv(project, env_dir, _save_status)
+        if os.path.isdir(env_dir):
+            log.info("Retry: venv already exists for %s, skipping", project.name)
+            pip_bin = os.path.join(env_dir, "bin", "pip")
+        else:
+            _save_status("creating_env")
+            pip_bin = _create_venv(project, env_dir, _save_status)
 
     if pip_bin is None:
         return  # _save_status("error", ...) already called

@@ -6,7 +6,7 @@ from flask import (
     request, redirect, url_for, abort, flash,
 )
 
-from services.project_service import create_project, delete_project
+from services.project_service import create_project, delete_project, retry_setup
 from services.python_versions import find_available, has_conda
 from services.process_manager import get_training_status, stop_tensorboard
 
@@ -166,6 +166,17 @@ def update(name):
     project.save(projects_dir)
 
     flash("Project settings updated.", "success")
+    return redirect(url_for("project.detail", name=name))
+
+
+@project_bp.route("/<name>/retry-setup", methods=["POST"])
+def retry(name):
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    config_path = os.path.join(projects_dir, name, "project.json")
+    if not os.path.isfile(config_path):
+        abort(404)
+
+    retry_setup(projects_dir, name)
     return redirect(url_for("project.detail", name=name))
 
 
