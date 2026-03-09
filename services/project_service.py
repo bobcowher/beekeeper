@@ -61,7 +61,7 @@ def create_project(projects_dir, data):
 def _setup_project(projects_dir, project):
     """Clone repo, create env, install deps. Updates project.json status as it goes."""
     project_dir = os.path.join(projects_dir, project.name)
-    src_dir = os.path.join(project_dir, "src")
+    workspace_dir = os.path.join(project_dir, "workspace")
 
     def _save_status(status, error=None):
         project.setup_status = status
@@ -72,7 +72,7 @@ def _setup_project(projects_dir, project):
     _save_status("cloning")
     try:
         subprocess.run(
-            ["git", "clone", "-b", project.branch, project.git_url, src_dir],
+            ["git", "clone", "-b", project.branch, project.git_url, workspace_dir],
             check=True, capture_output=True, text=True, timeout=300,
         )
     except subprocess.CalledProcessError as e:
@@ -96,7 +96,7 @@ def _setup_project(projects_dir, project):
 
     # --- Data dir symlink (before setup script so setup.sh can use it) ---
     if project.data_dir_enabled and project.data_dir_remote:
-        local_path = os.path.join(src_dir, project.data_dir_local)
+        local_path = os.path.join(workspace_dir, project.data_dir_local)
         if os.path.islink(local_path):
             if os.readlink(local_path) != project.data_dir_remote:
                 os.unlink(local_path)
@@ -116,13 +116,13 @@ def _setup_project(projects_dir, project):
 
     # --- Setup script ---
     if project.setup_script:
-        script_path = os.path.join(src_dir, project.setup_script)
+        script_path = os.path.join(workspace_dir, project.setup_script)
         if os.path.isfile(script_path):
             _save_status("running_setup_script")
             try:
                 subprocess.run(
                     ["bash", script_path],
-                    cwd=src_dir,
+                    cwd=workspace_dir,
                     check=True, capture_output=True, text=True, timeout=300,
                 )
             except subprocess.CalledProcessError as e:
@@ -133,7 +133,7 @@ def _setup_project(projects_dir, project):
                 return
 
     # --- Pip install ---
-    req_path = os.path.join(src_dir, project.requirements_file)
+    req_path = os.path.join(workspace_dir, project.requirements_file)
     if os.path.isfile(req_path):
         _save_status("installing_deps")
         try:

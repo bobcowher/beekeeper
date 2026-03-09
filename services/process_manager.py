@@ -184,14 +184,14 @@ def start_training(projects_dir, name):
             hint = os.path.join(projects_dir, name, "venv", "bin")
         return {"error": f"Could not find Python binary (checked {hint})"}
 
-    src_dir = os.path.join(projects_dir, name, "src")
+    workspace_dir = os.path.join(projects_dir, name, "workspace")
 
     # Pull latest code before running
     branch = project.get("branch", "main")
     try:
         result = subprocess.run(
             ["git", "pull", "origin", branch],
-            cwd=src_dir,
+            cwd=workspace_dir,
             capture_output=True, text=True, timeout=60,
         )
         if result.returncode != 0:
@@ -205,7 +205,7 @@ def start_training(projects_dir, name):
     if project.get("data_dir_enabled") and project.get("data_dir_remote"):
         data_dir_remote = project["data_dir_remote"]
         data_dir_local = project.get("data_dir_local", "data")
-        local_path = os.path.join(src_dir, data_dir_local)
+        local_path = os.path.join(workspace_dir, data_dir_local)
         if os.path.islink(local_path):
             if os.readlink(local_path) != data_dir_remote:
                 os.unlink(local_path)
@@ -223,12 +223,12 @@ def start_training(projects_dir, name):
     # Run setup script if configured and present
     setup_script = project.get("setup_script", "")
     if setup_script:
-        script_path = os.path.join(src_dir, setup_script)
+        script_path = os.path.join(workspace_dir, setup_script)
         if os.path.isfile(script_path):
             try:
                 result = subprocess.run(
                     ["bash", script_path],
-                    cwd=src_dir,
+                    cwd=workspace_dir,
                     capture_output=True, text=True, timeout=300,
                 )
                 if result.returncode != 0:
@@ -240,7 +240,7 @@ def start_training(projects_dir, name):
 
     # Install/update dependencies so newly added packages are always present
     req_file = project.get("requirements_file", "requirements.txt")
-    req_path = os.path.join(src_dir, req_file)
+    req_path = os.path.join(workspace_dir, req_file)
     if os.path.isfile(req_path):
         try:
             result = subprocess.run(
@@ -255,7 +255,7 @@ def start_training(projects_dir, name):
             return {"error": f"Pip install failed: {e}"}
 
     train_file = project.get("train_file", "train.py")
-    train_path = os.path.join(src_dir, train_file)
+    train_path = os.path.join(workspace_dir, train_file)
 
     if not os.path.isfile(train_path):
         return {"error": f"Training file not found: {train_file}"}
@@ -272,7 +272,7 @@ def start_training(projects_dir, name):
     try:
         proc = subprocess.Popen(
             [python_bin, "-u", train_file],
-            cwd=src_dir,
+            cwd=workspace_dir,
             stdout=log_fd,
             stderr=subprocess.STDOUT,
             env=proc_env,
@@ -298,7 +298,7 @@ def start_training(projects_dir, name):
     if tb_bin:
         tb_port = _find_free_port()
         if tb_port:
-            tb_logdir = os.path.join(src_dir, project.get("tensorboard_log_dir", "runs"))
+            tb_logdir = os.path.join(workspace_dir, project.get("tensorboard_log_dir", "runs"))
             try:
                 tb_process = subprocess.Popen(
                     [tb_bin, "--logdir", tb_logdir, "--port", str(tb_port),
@@ -437,8 +437,8 @@ def start_tensorboard(projects_dir, name):
     if not tb_bin:
         return {"error": "Tensorboard not found in project environment"}
 
-    src_dir = os.path.join(projects_dir, name, "src")
-    tb_logdir = os.path.join(src_dir, project.get("tensorboard_log_dir", "runs"))
+    workspace_dir = os.path.join(projects_dir, name, "workspace")
+    tb_logdir = os.path.join(workspace_dir, project.get("tensorboard_log_dir", "runs"))
     if not os.path.isdir(tb_logdir):
         return {"error": f"Tensorboard log directory not found: {project.get('tensorboard_log_dir', 'runs')}"}
 

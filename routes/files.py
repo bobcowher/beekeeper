@@ -16,24 +16,24 @@ def _fmt_size(size):
 
 
 def _safe_path(projects_dir, name, subpath):
-    """Resolve and validate a path inside projects/<name>/src/."""
-    src_dir = os.path.realpath(os.path.join(projects_dir, name, "src"))
+    """Resolve and validate a path inside projects/<name>/workspace/."""
+    workspace_dir = os.path.realpath(os.path.join(projects_dir, name, "workspace"))
     if subpath:
-        target = os.path.realpath(os.path.join(src_dir, subpath))
+        target = os.path.realpath(os.path.join(workspace_dir, subpath))
     else:
-        target = src_dir
+        target = workspace_dir
     # Prevent path traversal — use path-separator boundary to avoid
-    # false positives like src_dir="…/src" matching "…/src-evil"
-    if not (target == src_dir or target.startswith(src_dir + os.sep)):
+    # false positives like workspace_dir="…/src" matching "…/src-evil"
+    if not (target == workspace_dir or target.startswith(workspace_dir + os.sep)):
         return None, None
-    return src_dir, target
+    return workspace_dir, target
 
 
 @files_bp.route("/<name>/files/")
 @files_bp.route("/<name>/files/<path:subpath>")
 def browse(name, subpath=""):
     projects_dir = current_app.config["PROJECTS_DIR"]
-    src_dir, target = _safe_path(projects_dir, name, subpath)
+    workspace_dir, target = _safe_path(projects_dir, name, subpath)
     if target is None:
         abort(403)
 
@@ -87,7 +87,7 @@ def browse(name, subpath=""):
     # Build curl examples for the response
     host = request.host
     curl_file = f"curl -O http://{host}{base_url}/<filepath>"
-    curl_zip = f"curl -o {subpath or 'src'}.zip 'http://{host}{base_url}/{subpath}?zip=1'"
+    curl_zip = f"curl -o {subpath or 'workspace'}.zip 'http://{host}{base_url}/{subpath}?zip=1'"
 
     return jsonify({
         "project": name,

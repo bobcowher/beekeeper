@@ -130,9 +130,9 @@ def update(name):
         if not os.path.isdir(data_dir_remote):
             flash(f"System data path '{data_dir_remote}' does not exist or is not a directory.", "error")
             return redirect(url_for("project.edit", name=name))
-        src_dir = os.path.join(projects_dir, name, "src")
-        if os.path.isdir(src_dir):
-            local_path = os.path.join(src_dir, data_dir_local)
+        workspace_dir = os.path.join(projects_dir, name, "workspace")
+        if os.path.isdir(workspace_dir):
+            local_path = os.path.join(workspace_dir, data_dir_local)
             if os.path.islink(local_path):
                 if os.readlink(local_path) != data_dir_remote:
                     os.unlink(local_path)
@@ -180,7 +180,7 @@ def clear_tb_logs(name):
     with open(config_path) as f:
         project = json.load(f)
 
-    tb_logdir = os.path.join(projects_dir, name, "src", project.get("tensorboard_log_dir", "runs"))
+    tb_logdir = os.path.join(projects_dir, name, "workspace", project.get("tensorboard_log_dir", "runs"))
     if os.path.isdir(tb_logdir):
         shutil.rmtree(tb_logdir)
         os.makedirs(tb_logdir, exist_ok=True)

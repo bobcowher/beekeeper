@@ -93,7 +93,7 @@ def test_stats_returns_json(client, mocker):
 
 def test_files_root_lists_directory(client, ready_project, app):
     import os
-    src = os.path.join(app.config["PROJECTS_DIR"], "myproject", "src")
+    src = os.path.join(app.config["PROJECTS_DIR"], "myproject", "workspace")
     os.makedirs(src)
     open(os.path.join(src, "train.py"), "w").close()
 
@@ -106,14 +106,14 @@ def test_files_root_lists_directory(client, ready_project, app):
 
 
 def test_files_missing_src_returns_404(client, ready_project):
-    """src/ directory does not exist — should 404."""
+    """workspace/ directory does not exist — should 404."""
     resp = client.get("/projects/myproject/files/")
     assert resp.status_code == 404
 
 
 def test_files_hides_pycache_and_dotfiles(client, ready_project, app):
     import os
-    src = os.path.join(app.config["PROJECTS_DIR"], "myproject", "src")
+    src = os.path.join(app.config["PROJECTS_DIR"], "myproject", "workspace")
     os.makedirs(os.path.join(src, "__pycache__"))
     os.makedirs(os.path.join(src, ".git"))
     open(os.path.join(src, "train.py"), "w").close()

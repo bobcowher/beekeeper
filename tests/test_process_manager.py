@@ -15,7 +15,7 @@ def _make_project(tmp_path, **overrides):
     projects_dir.mkdir(exist_ok=True)
     proj_dir = projects_dir / "myproject"
     proj_dir.mkdir()
-    src_dir = proj_dir / "src"
+    src_dir = proj_dir / "workspace"
     src_dir.mkdir()
     (src_dir / "train.py").write_text("print('training')")
     (src_dir / "requirements.txt").write_text("numpy\n")
@@ -79,7 +79,7 @@ def test_pip_install_skipped_when_no_requirements_file(tmp_path):
     """If requirements.txt doesn't exist, pip install is silently skipped."""
     projects_dir = _make_project(tmp_path)
     # Remove the requirements file
-    os.remove(os.path.join(projects_dir, "myproject", "src", "requirements.txt"))
+    os.remove(os.path.join(projects_dir, "myproject", "workspace", "requirements.txt"))
 
     with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
          patch("services.process_manager.subprocess.run", return_value=_ok_run()) as mock_run, \
