@@ -42,7 +42,7 @@
     }
 
     function renderBreadcrumbs(path) {
-        let html = `<a href="#" class="fb-crumb" data-path="">src</a>`;
+        let html = `<a href="#" class="fb-crumb" data-path="">workspace</a>`;
         if (path) {
             const parts = path.split("/");
             let cumulative = "";

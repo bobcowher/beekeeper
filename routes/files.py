@@ -16,8 +16,13 @@ def _fmt_size(size):
 
 
 def _safe_path(projects_dir, name, subpath):
-    """Resolve and validate a path inside projects/<name>/workspace/."""
-    workspace_dir = os.path.realpath(os.path.join(projects_dir, name, "workspace"))
+    """Resolve and validate a path inside projects/<name>/workspace/ (or src/ for legacy projects)."""
+    project_dir = os.path.join(projects_dir, name)
+    # Support legacy projects that still use src/ instead of workspace/
+    if os.path.isdir(os.path.join(project_dir, "workspace")):
+        workspace_dir = os.path.realpath(os.path.join(project_dir, "workspace"))
+    else:
+        workspace_dir = os.path.realpath(os.path.join(project_dir, "src"))
     if subpath:
         target = os.path.realpath(os.path.join(workspace_dir, subpath))
     else:

@@ -45,6 +45,7 @@ def create_project(projects_dir, data):
         requirements_file=data.get("requirements_file", "requirements.txt"),
         env_type=data.get("env_type", "venv"),
         setup_script=data.get("setup_script", ""),
+        data_dir_enabled=data.get("data_dir_enabled", False),
         data_dir_local=data.get("data_dir_local", "data"),
         data_dir_remote=data.get("data_dir_remote", ""),
     )
