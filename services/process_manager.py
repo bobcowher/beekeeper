@@ -1,3 +1,4 @@
+import datetime
 import os
 import json
 import signal
@@ -135,9 +136,13 @@ def _monitor_process(projects_dir, name):
 
         ret = proc.poll()
         if ret is not None:
+            log_path = None
+            started_at = None
             with _lock:
                 info = _running.get(name)
                 if info:
+                    log_path = info.get("log_path")
+                    started_at = info.get("started_at")
                     # Migrate tensorboard to standalone tracking
                     tb = info.get("tb_process")
                     tb_port = info.get("tb_port")
@@ -150,6 +155,9 @@ def _monitor_process(projects_dir, name):
                         log.info("Migrated TB for %s to standalone (port %d)", name, tb_port)
                     del _running[name]
 
+            if log_path and started_at:
+                _append_run_footer(log_path, ret, started_at)
+
             status = "stopped" if ret == 0 else "crashed"
             _update_project_json(projects_dir, name,
                                  train_status=status, train_pid=0)
@@ -158,6 +166,98 @@ def _monitor_process(projects_dir, name):
             return
 
         time.sleep(1)
+
+
+def _collect_run_metadata(workspace_dir, python_bin, branch):
+    """Collect environment metadata for the run header."""
+    meta = {
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "hostname": socket.gethostname(),
+        "branch": branch,
+        "commit_sha": "unknown",
+        "commit_msg": "",
+        "python_version": "unknown",
+        "gpu_info": [],
+    }
+
+    try:
+        r = subprocess.run(["git", "rev-parse", "HEAD"], cwd=workspace_dir,
+                           capture_output=True, text=True, timeout=10)
+        if r.returncode == 0:
+            meta["commit_sha"] = r.stdout.strip()
+    except Exception:
+        pass
+
+    try:
+        r = subprocess.run(["git", "log", "-1", "--format=%s"], cwd=workspace_dir,
+                           capture_output=True, text=True, timeout=10)
+        if r.returncode == 0:
+            meta["commit_msg"] = r.stdout.strip()
+    except Exception:
+        pass
+
+    try:
+        r = subprocess.run([python_bin, "--version"], capture_output=True, text=True, timeout=10)
+        if r.returncode == 0:
+            meta["python_version"] = (r.stdout or r.stderr).strip()
+    except Exception:
+        pass
+
+    try:
+        r = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if r.returncode == 0:
+            for line in r.stdout.strip().splitlines():
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) == 2:
+                    meta["gpu_info"].append(f"{parts[0]} ({int(parts[1]):,} MiB)")
+                else:
+                    meta["gpu_info"].append(line.strip())
+    except Exception:
+        pass
+
+    return meta
+
+
+def _write_run_header(log_fd, meta, project):
+    """Write a banner to the log file at the start of a run."""
+    sep = "=" * 60
+    lines = [
+        sep,
+        "  BEEKEEPER RUN START",
+        f"  {meta['timestamp']}  |  host: {meta['hostname']}",
+        f"  project : {project['name']}",
+        f"  branch  : {meta['branch']}",
+        f"  commit  : {meta['commit_sha'][:12]}  {meta['commit_msg']}",
+        f"  python  : {meta['python_version']}",
+        f"  script  : {project.get('train_file', 'train.py')}",
+    ]
+    for i, g in enumerate(meta["gpu_info"]):
+        label = "  gpu     :" if i == 0 else "           "
+        lines.append(f"{label} {g}")
+    lines += [sep, ""]
+    os.write(log_fd, ("\n".join(lines) + "\n").encode())
+
+
+def _append_run_footer(log_path, ret, started_at):
+    """Append an exit banner to the log file at the end of a run."""
+    elapsed = time.time() - started_at
+    h, rem = divmod(int(elapsed), 3600)
+    m, s = divmod(rem, 60)
+    elapsed_str = f"{h:02d}:{m:02d}:{s:02d}"
+    status = "COMPLETED" if ret == 0 else f"CRASHED (exit {ret})"
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    sep = "=" * 60
+    lines = ["", sep, "  BEEKEEPER RUN END",
+             f"  {timestamp}  |  elapsed: {elapsed_str}",
+             f"  status  : {status}", sep, ""]
+    try:
+        with open(log_path, "a") as f:
+            f.write("\n".join(lines) + "\n")
+    except Exception:
+        pass
 
 
 def start_training(projects_dir, name):
@@ -200,6 +300,8 @@ def start_training(projects_dir, name):
         return {"error": "Git pull timed out (60s)"}
     except Exception as e:
         return {"error": f"Git pull failed: {e}"}
+
+    run_meta = _collect_run_metadata(workspace_dir, python_bin, branch)
 
     # Ensure data dir symlink exists (before setup script so setup.sh can use it)
     if project.get("data_dir_enabled") and project.get("data_dir_remote"):
@@ -263,6 +365,7 @@ def start_training(projects_dir, name):
     # Open log file — truncate previous run's log on new start
     log_path = os.path.join(projects_dir, name, "train.log")
     log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+    _write_run_header(log_fd, run_meta, project)
 
     # Build environment: inherit system env + project-specific vars
     proc_env = os.environ.copy()
