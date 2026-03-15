@@ -12,6 +12,12 @@ Files in the workspace can now be previewed directly in the browser without down
 
 Non-viewable file types continue to download as before.
 
+**Dashboard Sort and Pin**
+The project list now has sort controls and per-project pinning.
+
+- **Sort** — toggle between **Last Run** (default, most recently started training floats up) and **A–Z**. Preference is saved per browser via `localStorage`. Projects that have never been run sort to the bottom of Last Run order.
+- **Pin** — click the 📌 icon on any project to pin it. Pinned projects always appear at the top of the list above the sort section, regardless of sort order. Pinning state persists in `project.json`.
+
 ---
 
 ## [1.0.1] - 2026-03-09
