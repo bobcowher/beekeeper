@@ -23,6 +23,8 @@ class Project:
     train_status: str = "idle"
     train_pid: int = 0
     env_vars: dict = field(default_factory=dict)
+    pinned: bool = False
+    last_run_at: float = 0.0
 
     def to_dict(self):
         return asdict(self)

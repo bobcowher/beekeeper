@@ -20,6 +20,7 @@ def _workspace_dir(tmp_path, name="myproject"):
 def test_safe_path_root_returns_src_dir(tmp_path):
     """Empty subpath should return workspace_dir itself."""
     projects_dir = str(tmp_path / "projects")
+    os.makedirs(os.path.join(projects_dir, "myproject", "workspace"))
     workspace_dir, target = _safe_path(projects_dir, "myproject", "")
     assert target == _workspace_dir(tmp_path)
 
@@ -27,6 +28,7 @@ def test_safe_path_root_returns_src_dir(tmp_path):
 def test_safe_path_valid_subpath(tmp_path):
     """A normal relative path inside workspace/ should be allowed."""
     projects_dir = str(tmp_path / "projects")
+    os.makedirs(os.path.join(projects_dir, "myproject", "workspace"))
     workspace_dir, target = _safe_path(projects_dir, "myproject", "models/resnet.py")
     assert target is not None
     assert target.endswith(os.path.join("workspace", "models", "resnet.py"))

@@ -67,6 +67,7 @@ def test_to_dict_contains_all_fields(tmp_path):
         "tensorboard_log_dir", "requirements_file", "env_type",
         "setup_script", "data_dir_enabled", "data_dir_local", "data_dir_remote",
         "setup_status", "setup_error", "train_status", "train_pid", "env_vars",
+        "pinned", "last_run_at",
     }
     assert expected_keys == set(d.keys())
 

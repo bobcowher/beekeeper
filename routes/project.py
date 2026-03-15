@@ -3,9 +3,10 @@ import re
 import json
 from flask import (
     Blueprint, render_template, current_app,
-    request, redirect, url_for, abort, flash,
+    request, redirect, url_for, abort, flash, jsonify,
 )
 
+from models.project import Project
 from services.project_service import create_project, delete_project, retry_setup
 from services.python_versions import find_available, has_conda
 from services.process_manager import get_training_status, stop_tensorboard
@@ -200,6 +201,18 @@ def clear_tb_logs(name):
         flash("Tensorboard log directory not found.", "error")
 
     return redirect(url_for("project.detail", name=name))
+
+
+@project_bp.route("/<name>/pin", methods=["POST"])
+def toggle_pin(name):
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    config_path = os.path.join(projects_dir, name, "project.json")
+    if not os.path.isfile(config_path):
+        abort(404)
+    p = Project.load(config_path)
+    p.pinned = not p.pinned
+    p.save(projects_dir)
+    return jsonify({"pinned": p.pinned})
 
 
 @project_bp.route("/<name>/delete", methods=["POST"])

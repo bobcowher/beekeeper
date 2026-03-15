@@ -17,30 +17,48 @@
 <section class="card">
     <div class="card-header">
         <h2>Projects</h2>
-        <a href="{{ url_for('project.new') }}" class="btn btn-primary">+ New Project</a>
+        <div class="dashboard-controls">
+            <div class="sort-toggle">
+                <button class="sort-btn" data-sort="recent">Last Run</button>
+                <button class="sort-btn" data-sort="alpha">A–Z</button>
+            </div>
+            <a href="{{ url_for('project.new') }}" class="btn btn-primary">+ New Project</a>
+        </div>
     </div>
     {% if projects %}
-    <div class="project-list">
+    <div class="project-list" id="project-list">
         {% for p in projects %}
-        <a href="/projects/{{ p.name }}" class="project-item">
-            <span class="project-name">{{ p.name }}</span>
-            <span class="project-meta">
-                {% set setup = p.get('setup_status', 'pending') %}
-                {% set train = p.get('train_status', 'idle') %}
-                {% if setup == 'ready' and train in ['running', 'crashed'] %}
-                <span class="project-status status-badge status-{{ train }}">{{ train }}</span>
-                {% elif setup == 'ready' %}
-                <span class="project-status status-badge status-ready">ready</span>
-                {% else %}
-                <span class="project-status status-badge status-{{ setup }}">{{ setup | replace('_', ' ') }}</span>
-                {% endif %}
-                <span class="project-branch">{{ p.branch }}</span>
-            </span>
-        </a>
+        <div class="project-row"
+             data-name="{{ p.name }}"
+             data-pinned="{{ 'true' if p.get('pinned') else 'false' }}"
+             data-last-run="{{ p.get('last_run_at', 0) }}">
+            <a href="/projects/{{ p.name }}" class="project-item">
+                <span class="project-name">{{ p.name }}</span>
+                <span class="project-meta">
+                    {% set setup = p.get('setup_status', 'pending') %}
+                    {% set train = p.get('train_status', 'idle') %}
+                    {% if setup == 'ready' and train in ['running', 'crashed'] %}
+                    <span class="project-status status-badge status-{{ train }}">{{ train }}</span>
+                    {% elif setup == 'ready' %}
+                    <span class="project-status status-badge status-ready">ready</span>
+                    {% else %}
+                    <span class="project-status status-badge status-{{ setup }}">{{ setup | replace('_', ' ') }}</span>
+                    {% endif %}
+                    <span class="project-branch">{{ p.branch }}</span>
+                </span>
+            </a>
+            <button class="pin-btn {% if p.get('pinned') %}pinned{% endif %}"
+                    data-project="{{ p.name }}"
+                    title="{{ 'Unpin' if p.get('pinned') else 'Pin to top' }}">&#128204;</button>
+        </div>
         {% endfor %}
     </div>
     {% else %}
     <p class="muted">No projects yet. Create one to get started.</p>
     {% endif %}
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 {% endblock %}

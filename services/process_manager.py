@@ -424,7 +424,8 @@ def start_training(projects_dir, name):
         }
 
     _update_project_json(projects_dir, name,
-                         train_status="running", train_pid=proc.pid)
+                         train_status="running", train_pid=proc.pid,
+                         last_run_at=time.time())
 
     # Start monitor thread
     thread = threading.Thread(
