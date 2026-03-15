@@ -5,6 +5,14 @@ from flask import Blueprint, current_app, jsonify, request, send_file, abort
 
 files_bp = Blueprint("files", __name__, url_prefix="/projects")
 
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"}
+TEXT_EXTS = {
+    ".py", ".txt", ".log", ".json", ".yaml", ".yml", ".md", ".sh", ".csv",
+    ".tsv", ".ini", ".cfg", ".toml", ".js", ".css", ".html", ".xml",
+    ".rb", ".rs", ".go", ".java", ".c", ".cpp", ".h", ".ts",
+}
+MAX_TEXT_VIEW = 1 * 1024 * 1024  # 1 MB
+
 
 def _fmt_size(size):
     """Human-readable file size."""
@@ -32,6 +40,29 @@ def _safe_path(projects_dir, name, subpath):
     if not (target == workspace_dir or target.startswith(workspace_dir + os.sep)):
         return None, None
     return workspace_dir, target
+
+
+@files_bp.route("/<name>/files/view/<path:subpath>")
+def view_file(name, subpath=""):
+    """Serve a file inline (for the in-browser viewer)."""
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    _, target = _safe_path(projects_dir, name, subpath)
+    if target is None:
+        abort(403)
+    if not os.path.isfile(target):
+        abort(404)
+
+    ext = os.path.splitext(target)[1].lower()
+
+    if ext in IMAGE_EXTS:
+        return send_file(target)  # mimetype auto-detected, served inline
+
+    if ext in TEXT_EXTS:
+        if os.path.getsize(target) > MAX_TEXT_VIEW:
+            abort(413)
+        return send_file(target, mimetype="text/plain")
+
+    abort(415)
 
 
 @files_bp.route("/<name>/files/")

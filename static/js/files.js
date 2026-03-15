@@ -6,6 +6,7 @@
 
     const name = container.dataset.project;
     const baseUrl = `/projects/${name}/files`;
+    const viewUrl = `/projects/${name}/files/view`;
     const listing = document.getElementById("files-listing");
     const breadcrumbs = document.getElementById("files-breadcrumbs");
     const curlBox = document.getElementById("files-curl");
@@ -62,6 +63,21 @@
         });
     }
 
+    const IMAGE_EXTS = new Set(["png","jpg","jpeg","gif","webp","svg","bmp","ico"]);
+    const TEXT_EXTS  = new Set(["py","txt","log","json","yaml","yml","md","sh","csv",
+                                 "tsv","ini","cfg","toml","js","css","html","xml",
+                                 "rb","rs","go","java","c","cpp","h","ts"]);
+
+    function fileExt(filename) {
+        const dot = filename.lastIndexOf(".");
+        return dot >= 0 ? filename.slice(dot + 1).toLowerCase() : "";
+    }
+
+    function isViewable(filename) {
+        const ext = fileExt(filename);
+        return IMAGE_EXTS.has(ext) || TEXT_EXTS.has(ext);
+    }
+
     function renderListing(entries, dirPath) {
         if (!entries.length) {
             listing.innerHTML = '<p class="muted">Empty directory.</p>';
@@ -87,11 +103,16 @@
                     <a href="${baseUrl}/${entry.path}?zip=1" class="btn btn-secondary btn-sm" title="Download as zip">zip</a>
                 </td>`;
             } else {
+                const viewable = isViewable(entry.name);
                 html += `<td class="fb-col-name">
-                    <span class="fb-file">${icon} ${entry.name}</span>
+                    ${viewable
+                        ? `<a href="#" class="fb-link fb-view" data-path="${entry.path}" data-name="${entry.name}">${icon} ${entry.name}</a>`
+                        : `<span class="fb-file">${icon} ${entry.name}</span>`
+                    }
                 </td>`;
                 html += `<td class="fb-col-size muted">${entry.size_h}</td>`;
                 html += `<td class="fb-col-actions">
+                    ${viewable ? `<button class="btn btn-secondary btn-sm fb-view" data-path="${entry.path}" data-name="${entry.name}">view</button> ` : ""}
                     <a href="${baseUrl}/${entry.path}" class="btn btn-secondary btn-sm">download</a>
                 </td>`;
             }
@@ -115,6 +136,13 @@
                 navigate(el.dataset.path);
             });
         });
+
+        listing.querySelectorAll(".fb-view").forEach(el => {
+            el.addEventListener("click", (e) => {
+                e.preventDefault();
+                openViewer(el.dataset.path, el.dataset.name);
+            });
+        });
     }
 
     function renderCurl(examples) {
@@ -132,5 +160,90 @@
             `curl -o output.zip 'http://${host}${baseUrl}${pathPart || "/"}?zip=1'`,
         ];
         curlBox.textContent = lines.join("\n");
+    }
+
+    // ── File Viewer ──────────────────────────────────────────────────────────
+
+    let modal, modalTitle, modalContent, refreshTimer;
+
+    function ensureModal() {
+        if (modal) return;
+        const el = document.createElement("div");
+        el.id = "fv-modal";
+        el.className = "fv-overlay";
+        el.innerHTML = `
+            <div class="fv-dialog">
+                <div class="fv-header">
+                    <span id="fv-title"></span>
+                    <button id="fv-close" class="fv-close" title="Close">&times;</button>
+                </div>
+                <div id="fv-content" class="fv-content"></div>
+            </div>`;
+        document.body.appendChild(el);
+
+        modal = el;
+        modalTitle = document.getElementById("fv-title");
+        modalContent = document.getElementById("fv-content");
+
+        document.getElementById("fv-close").addEventListener("click", closeViewer);
+        modal.addEventListener("click", (e) => { if (e.target === modal) closeViewer(); });
+        document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeViewer(); });
+    }
+
+    function openViewer(filePath, filename) {
+        ensureModal();
+        clearInterval(refreshTimer);
+        modalTitle.textContent = filename;
+        modalContent.innerHTML = '<p class="muted">Loading...</p>';
+        modal.classList.add("open");
+
+        const ext = fileExt(filename);
+        if (IMAGE_EXTS.has(ext)) {
+            showImage(filePath);
+        } else {
+            showText(filePath);
+        }
+    }
+
+    function closeViewer() {
+        if (!modal) return;
+        modal.classList.remove("open");
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+    }
+
+    function showImage(filePath) {
+        const url = `${viewUrl}/${filePath}`;
+        const img = document.createElement("img");
+        img.className = "fv-image";
+        img.src = url + "?t=" + Date.now();
+        modalContent.innerHTML = "";
+        modalContent.appendChild(img);
+
+        // Auto-refresh: swap src only after the new image loads (no flicker)
+        refreshTimer = setInterval(() => {
+            const next = new Image();
+            next.onload = () => { img.src = next.src; };
+            next.src = url + "?t=" + Date.now();
+        }, 2000);
+    }
+
+    async function showText(filePath) {
+        const url = `${viewUrl}/${filePath}`;
+        try {
+            const resp = await fetch(url);
+            if (!resp.ok) {
+                modalContent.innerHTML = `<p class="fv-error">Could not load file (${resp.status}).</p>`;
+                return;
+            }
+            const text = await resp.text();
+            const pre = document.createElement("pre");
+            pre.className = "fv-text";
+            pre.textContent = text;
+            modalContent.innerHTML = "";
+            modalContent.appendChild(pre);
+        } catch (e) {
+            modalContent.innerHTML = '<p class="fv-error">Error loading file.</p>';
+        }
     }
 })();

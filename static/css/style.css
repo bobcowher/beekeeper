@@ -858,6 +858,85 @@ label {
     vertical-align: middle;
 }
 
+/* File Viewer Modal */
+.fv-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.78);
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+}
+
+.fv-overlay.open {
+    display: flex;
+}
+
+.fv-dialog {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    max-width: 92vw;
+    max-height: 92vh;
+    min-width: 360px;
+}
+
+.fv-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--text-secondary);
+    gap: 12px;
+}
+
+.fv-close {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+    flex-shrink: 0;
+}
+
+.fv-close:hover {
+    color: var(--text);
+}
+
+.fv-content {
+    overflow: auto;
+    padding: 14px;
+    flex: 1;
+}
+
+.fv-image {
+    display: block;
+    max-width: 100%;
+    max-height: calc(92vh - 60px);
+    object-fit: contain;
+}
+
+.fv-text {
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre;
+    color: var(--text);
+    margin: 0;
+}
+
+.fv-error {
+    color: var(--danger);
+    font-size: 13px;
+}
+
 /* Utility */
 .muted {
     color: var(--text-secondary);
