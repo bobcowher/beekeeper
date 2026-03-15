@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.0.2-prerelease] - 2026-03-14
+
+### New Features
+
+**Inline File Viewer**
+Files in the workspace can now be previewed directly in the browser without downloading. Click any viewable filename or the **view** button in the Files section to open a modal viewer.
+
+- **Images** (png, jpg, jpeg, gif, webp, svg, bmp, ico) — rendered inline and **auto-refreshed every 2 seconds**, so debug images update live as training writes them. Uses a preload-swap approach to avoid flicker.
+- **Text files** (py, log, json, yaml, md, sh, csv, toml, js, ts, html, xml, and more) — displayed in a monospace viewer. Files over 1 MB fall back to download.
+
+Non-viewable file types continue to download as before.
+
+---
+
 ## [1.0.1] - 2026-03-09
 
 ### New Features
