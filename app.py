@@ -17,12 +17,14 @@ def create_app():
     from routes.stats import stats_bp
     from routes.training import training_bp
     from routes.files import files_bp
+    from routes.api_v1 import api_v1_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(project_bp)
     app.register_blueprint(stats_bp)
     app.register_blueprint(training_bp)
     app.register_blueprint(files_bp)
+    app.register_blueprint(api_v1_bp)
 
     return app
 
