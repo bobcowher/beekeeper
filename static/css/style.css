@@ -48,6 +48,7 @@ body {
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
+    position: relative;
 }
 
 .sidebar-header {
@@ -67,6 +68,7 @@ body {
 .sidebar-nav {
     list-style: none;
     padding: 8px 0;
+    flex: 1;
 }
 
 .sidebar-nav a {
@@ -87,6 +89,49 @@ body {
     color: var(--accent);
     background: var(--bg-secondary);
     border-left: 2px solid var(--accent);
+}
+
+.sidebar-footer {
+    padding: 1rem;
+    border-top: 1px solid var(--border);
+    background: var(--bg-primary);
+}
+
+.user-info {
+    margin-bottom: 0.5rem;
+}
+
+.user-name {
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: 0.9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.user-email {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.btn-logout {
+    width: 100%;
+    padding: 0.5rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: 2px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: background 0.15s;
+}
+
+.btn-logout:hover {
+    background: var(--bg-input);
 }
 
 /* Content */

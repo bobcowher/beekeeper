@@ -1,11 +1,12 @@
 ### Intro
-Beekeeper is a lightweight web app designed to allow you to do AI training on a remote server as part of your home lab. At its core, it’s designed to handle -
+Beekeeper is a lightweight web app designed to allow you to do AI training on a remote server as part of your home lab. At its core, it's designed to handle:
 
-1. Cloning a repository.
-2. Setting up the python environment(based on your requirements.txt)
+1. Cloning a repository
+2. Setting up the python environment (based on your requirements.txt)
 3. Remote log streaming
-4. Tensorboard Display
+4. Tensorboard display
 5. File downloads
+6. Optional user authentication and API keys
 
 
 ### Setup
@@ -16,12 +17,21 @@ bash setup.sh
 *Note - This product has been tested on Ubuntu only, so far. 
 
 
-### Critical missing features…mostly security stuff.
+### Authentication
 
-1. Authentication - Beekeeper has no authentication, and it does allow access to files you’ve cloned or generated in your training run. For now, I would strongly recommend running Beekeeper only in a home lab scenario, where the server is sitting safely on your local network, and avoiding any sensitive data.
-2. GitHub auth - Beekeeper has no method of authenticating with your remote repo. It only works on repos you’ve made public.
-3. Https - For https, you’ll need to put Beekeeper behind a proxy and, again, it’s not ready to do anything secure anyway.
-4. Multi-server support - Eventually, I’d like to have a central Hive server managing multiple workers, and farming jobs out. Today is not that day. This is a single server product.
+Beekeeper includes **optional authentication** (disabled by default for backward compatibility):
+- Email/password authentication with bcrypt hashing
+- Admin panel for user management
+- API key system for programmatic access
+- Session-based web authentication
+
+See [AUTH_README.md](AUTH_README.md) for complete authentication documentation.
+
+### Current Limitations
+
+1. **GitHub auth** - Beekeeper has no method of authenticating with your remote repo. It only works on repos you've made public.
+2. **HTTPS** - For HTTPS, you'll need to put Beekeeper behind a reverse proxy (nginx, Caddy, etc).
+3. **Multi-server support** - This is a single-server product. Multi-server coordination is not currently supported.
 
 For more information, visit the site below - 
 

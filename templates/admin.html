@@ -1,0 +1,437 @@
+{% extends "base.html" %}
+
+{% block title %}Admin - Beekeeper{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Administration</h1>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div class="flash-messages">
+            {% for category, message in messages %}
+                <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+<div class="admin-container">
+    <!-- Settings Section -->
+    <section class="admin-section">
+        <h2>Authentication Settings</h2>
+        <form method="POST" action="{{ url_for('admin.update_settings') }}" class="settings-form">
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" name="auth_enabled" value="true" {% if config.auth_enabled %}checked{% endif %}>
+                    Enable Authentication
+                </label>
+                <p class="help-text">When disabled, all users can access Beekeeper without login</p>
+            </div>
+
+            <div class="form-group">
+                <label for="session_lifetime_days">Session Lifetime (days)</label>
+                <input type="number" id="session_lifetime_days" name="session_lifetime_days"
+                       value="{{ config.session_lifetime_days }}" min="1" max="365">
+                <p class="help-text">How long users stay logged in</p>
+            </div>
+
+            <div class="form-group">
+                <label for="password_min_length">Minimum Password Length</label>
+                <input type="number" id="password_min_length" name="password_min_length"
+                       value="{{ config.password_min_length }}" min="6" max="128">
+                <p class="help-text">Minimum characters required for passwords</p>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Save Settings</button>
+        </form>
+    </section>
+
+    <!-- Users Section -->
+    <section class="admin-section">
+        <h2>Users</h2>
+
+        <div class="collapsible-section">
+            <button class="collapsible-toggle" data-target="create-user">
+                <span class="toggle-icon">▶</span> Create New User
+            </button>
+            <div class="collapsible-content" id="create-user">
+                <form method="POST" action="{{ url_for('admin.create_user') }}" class="create-user-form">
+                    <div class="form-group">
+                        <label for="new_name">Name</label>
+                        <input type="text" id="new_name" name="name" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="new_email">Email</label>
+                        <input type="email" id="new_email" name="email" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="new_password">Password</label>
+                        <input type="password" id="new_password" name="password" required minlength="{{ config.password_min_length }}">
+                    </div>
+
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" name="is_admin" value="true">
+                            Administrator
+                        </label>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">Create User</button>
+                </form>
+            </div>
+        </div>
+
+        <table class="users-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Created</th>
+                    <th>Last Login</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user_item in users %}
+                <tr>
+                    <td>{{ user_item.name }}</td>
+                    <td>{{ user_item.email }}</td>
+                    <td>
+                        {% if user_item.is_admin %}
+                            <span class="badge badge-admin">Admin</span>
+                        {% else %}
+                            <span class="badge badge-user">User</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ user_item.created_at.strftime('%Y-%m-%d') }}</td>
+                    <td>
+                        {% if user_item.last_login_at %}
+                            {{ user_item.last_login_at.strftime('%Y-%m-%d %H:%M') }}
+                        {% else %}
+                            Never
+                        {% endif %}
+                    </td>
+                    <td class="actions">
+                        {% if user_item.id != current_user.id %}
+                        <form method="POST" action="{{ url_for('admin.toggle_admin', user_id=user_item.id) }}" style="display: inline;">
+                            <button type="submit" class="btn btn-small">
+                                {% if user_item.is_admin %}Remove Admin{% else %}Make Admin{% endif %}
+                            </button>
+                        </form>
+                        <form method="POST" action="{{ url_for('admin.delete_user', user_id=user_item.id) }}"
+                              onsubmit="return confirm('Are you sure you want to delete this user?');" style="display: inline;">
+                            <button type="submit" class="btn btn-small btn-danger">Delete</button>
+                        </form>
+                        {% else %}
+                            <span class="text-muted">You</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    <!-- API Keys Section -->
+    <section class="admin-section">
+        <h2>API Keys</h2>
+        <p class="help-text">API keys allow programmatic access to Beekeeper when authentication is enabled.</p>
+
+        <form method="POST" action="{{ url_for('admin.create_api_key') }}" class="create-key-form">
+            <div class="form-group-inline">
+                <input type="text" name="name" placeholder="Key name (e.g., 'CI/CD Pipeline')" required>
+                <button type="submit" class="btn btn-primary">Generate API Key</button>
+            </div>
+        </form>
+
+        {% if api_keys %}
+        <table class="api-keys-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Key (prefix)</th>
+                    <th>Created</th>
+                    <th>Last Used</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for key in api_keys %}
+                <tr>
+                    <td>{{ key.name }}</td>
+                    <td><code>{{ key.key_prefix }}</code></td>
+                    <td>{{ key.created_at }}</td>
+                    <td>{{ key.last_used_at or 'Never' }}</td>
+                    <td>
+                        <form method="POST" action="{{ url_for('admin.delete_api_key', key_hash=key.key_hash) }}"
+                              onsubmit="return confirm('Are you sure you want to revoke this API key?');">
+                            <button type="submit" class="btn btn-small btn-danger">Revoke</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted">No API keys created yet.</p>
+        {% endif %}
+    </section>
+</div>
+
+<style>
+.admin-container {
+    max-width: 1200px;
+}
+
+.admin-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    border-radius: 4px;
+}
+
+.admin-section h2 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    color: var(--text-primary);
+}
+
+.settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.form-group label {
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.form-group input[type="text"],
+.form-group input[type="email"],
+.form-group input[type="password"],
+.form-group input[type="number"] {
+    padding: 0.5rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: 2px;
+    max-width: 400px;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.form-group-inline {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.form-group-inline input {
+    flex: 1;
+    padding: 0.5rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: 2px;
+}
+
+.help-text {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+.btn {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 2px;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+
+.btn-primary {
+    background: var(--accent);
+    color: var(--bg-primary);
+    font-weight: 600;
+}
+
+.btn-primary:hover {
+    opacity: 0.9;
+}
+
+.btn-small {
+    padding: 0.25rem 0.75rem;
+    font-size: 0.85rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+}
+
+.btn-small:hover {
+    background: var(--bg-secondary);
+}
+
+.btn-danger {
+    background: var(--danger);
+    color: white;
+    border: none;
+}
+
+.btn-logout {
+    width: 100%;
+    padding: 0.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: 2px;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+.btn-logout:hover {
+    background: var(--bg-secondary);
+}
+
+.users-table,
+.api-keys-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1rem;
+}
+
+.users-table th,
+.api-keys-table th {
+    text-align: left;
+    padding: 0.75rem;
+    border-bottom: 2px solid var(--border);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.users-table td,
+.api-keys-table td {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-primary);
+}
+
+.users-table td.actions {
+    white-space: nowrap;
+}
+
+.badge {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    border-radius: 2px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.badge-admin {
+    background: rgba(232, 185, 49, 0.2);
+    color: var(--accent);
+}
+
+.badge-user {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-secondary);
+}
+
+.text-muted {
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.flash-messages {
+    margin-bottom: 1.5rem;
+}
+
+.flash {
+    padding: 0.75rem 1rem;
+    border-radius: 2px;
+    margin-bottom: 0.5rem;
+}
+
+.flash.success {
+    background: rgba(78, 201, 78, 0.1);
+    border: 1px solid var(--success);
+    color: var(--success);
+}
+
+.flash.error {
+    background: rgba(201, 64, 64, 0.1);
+    border: 1px solid var(--danger);
+    color: var(--danger);
+}
+
+.flash.warning {
+    background: rgba(232, 185, 49, 0.1);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+}
+
+.sidebar-footer {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 1rem;
+    border-top: 1px solid var(--border);
+    background: var(--bg-primary);
+}
+
+.user-info {
+    margin-bottom: 0.5rem;
+}
+
+.user-name {
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.user-email {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+
+.create-user-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    margin-top: 1rem;
+}
+
+code {
+    font-family: 'Courier New', monospace;
+    background: var(--bg-primary);
+    padding: 0.2rem 0.4rem;
+    border-radius: 2px;
+    font-size: 0.85rem;
+}
+</style>
+
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+{% endblock %}

@@ -3,3 +3,5 @@ projects/
 __pycache__/
 *.pyc
 deploy.sh
+config.properties
+data/beekeeper.db

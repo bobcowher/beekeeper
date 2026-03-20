@@ -13,6 +13,7 @@ from flask import Blueprint, current_app, jsonify, request, Response
 from models.project import Project
 from services.process_manager import start_training, stop_training, get_training_status
 from services.stats_service import get_all_stats
+from services.auth_service import api_key_required
 
 # Reuse helpers from existing routes
 from routes.training import _tail_offset
@@ -61,6 +62,7 @@ def load_project(name):
 # ---------------------------------------------------------------------------
 
 @api_v1_bp.route("/projects")
+@api_key_required
 def list_projects():
     """List all projects with basic info and training status."""
     projects_dir = current_app.config["PROJECTS_DIR"]
@@ -91,6 +93,7 @@ def list_projects():
 
 
 @api_v1_bp.route("/projects/<name>")
+@api_key_required
 def get_project(name):
     """Get detailed project info including training status."""
     project, error = load_project(name)
@@ -112,6 +115,7 @@ def get_project(name):
 # ---------------------------------------------------------------------------
 
 @api_v1_bp.route("/projects/<name>/training/start", methods=["POST"])
+@api_key_required
 def training_start(name):
     """Start training for a project."""
     project, error = load_project(name)
@@ -152,6 +156,7 @@ def training_start(name):
 
 
 @api_v1_bp.route("/projects/<name>/training/stop", methods=["POST"])
+@api_key_required
 def training_stop(name):
     """Stop training for a project."""
     project, error = load_project(name)
@@ -181,6 +186,7 @@ def training_stop(name):
 
 
 @api_v1_bp.route("/projects/<name>/training/status")
+@api_key_required
 def training_status(name):
     """Get training status for a project."""
     project, error = load_project(name)
@@ -196,6 +202,7 @@ def training_status(name):
 # ---------------------------------------------------------------------------
 
 @api_v1_bp.route("/projects/<name>/logs")
+@api_key_required
 def get_logs(name):
     """Get log content. Use ?tail=N for last N lines."""
     project, error = load_project(name)
@@ -232,6 +239,7 @@ def get_logs(name):
 
 
 @api_v1_bp.route("/projects/<name>/logs/stream")
+@api_key_required
 def stream_logs(name):
     """SSE stream of log content."""
     project, error = load_project(name)
@@ -296,6 +304,7 @@ def stream_logs(name):
 
 @api_v1_bp.route("/projects/<name>/files")
 @api_v1_bp.route("/projects/<name>/files/<path:subpath>")
+@api_key_required
 def browse_files(name, subpath=""):
     """List files in workspace root or subdir, or download a file."""
     project, error = load_project(name)
@@ -377,6 +386,7 @@ def browse_files(name, subpath=""):
 # ---------------------------------------------------------------------------
 
 @api_v1_bp.route("/stats")
+@api_key_required
 def system_stats():
     """Get system stats (CPU, RAM, GPU)."""
     stats = get_all_stats()

@@ -16,7 +16,21 @@
             </div>
             <ul class="sidebar-nav">
                 <li><a href="/" class="{% if request.path == '/' %}active{% endif %}">Dashboard</a></li>
+                {% if user and user.is_admin %}
+                <li><a href="/admin" class="{% if request.path.startswith('/admin') %}active{% endif %}">Admin</a></li>
+                {% endif %}
             </ul>
+            {% if user %}
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <div class="user-name">{{ user.name }}</div>
+                    <div class="user-email">{{ user.email }}</div>
+                </div>
+                <form method="POST" action="{{ url_for('auth.logout') }}" style="margin-top: 0.5rem;">
+                    <button type="submit" class="btn-logout">Logout</button>
+                </form>
+            </div>
+            {% endif %}
         </nav>
         <main class="content" id="content">
             {% block content %}{% endblock %}
