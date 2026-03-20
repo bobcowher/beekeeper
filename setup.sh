@@ -84,6 +84,41 @@ sudo systemctl enable "$SERVICE_NAME"
 sudo systemctl restart "$SERVICE_NAME"
 
 echo ""
+echo "--- Optional: Passwordless service management ---"
+echo "This allows restarting the service without a password prompt."
+echo "Useful for development (e.g., quick restarts after code changes)."
+echo ""
+read -p "Enable passwordless sudo for beekeeper service? (y/N): " -n 1 -r
+echo ""
+
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    SUDOERS_FILE="/etc/sudoers.d/$SERVICE_NAME"
+    TEMP_SUDOERS=$(mktemp)
+    SYSTEMCTL_PATH="$(command -v systemctl)"
+
+    cat > "$TEMP_SUDOERS" <<EOF
+# Allow $CURRENT_USER to manage beekeeper service without password
+$CURRENT_USER ALL=(ALL) NOPASSWD: $SYSTEMCTL_PATH start $SERVICE_NAME, \\
+                                  $SYSTEMCTL_PATH stop $SERVICE_NAME, \\
+                                  $SYSTEMCTL_PATH restart $SERVICE_NAME, \\
+                                  $SYSTEMCTL_PATH status $SERVICE_NAME
+EOF
+
+    # Validate syntax before installing
+    if sudo visudo -cf "$TEMP_SUDOERS"; then
+        sudo cp "$TEMP_SUDOERS" "$SUDOERS_FILE"
+        sudo chmod 440 "$SUDOERS_FILE"
+        rm "$TEMP_SUDOERS"
+        echo "✓ Passwordless sudo configured for: start, stop, restart, status"
+    else
+        echo "✗ Sudoers syntax validation failed. Skipping."
+        rm "$TEMP_SUDOERS"
+    fi
+else
+    echo "Skipped. You'll need to use 'sudo systemctl restart $SERVICE_NAME'."
+fi
+
+echo ""
 echo "=== Setup complete ==="
 echo "Service status:  sudo systemctl status $SERVICE_NAME"
 echo "View logs:       journalctl -u $SERVICE_NAME -f"
