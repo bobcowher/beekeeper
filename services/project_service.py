@@ -91,91 +91,91 @@ def _setup_project(projects_dir, project, is_retry=False):
             log.info("Retry: workspace already exists for %s, skipping clone", project.name)
         else:
             _save_status("cloning")
-        try:
-            subprocess.run(
-                ["git", "clone", "-b", project.branch, project.git_url, workspace_dir],
-                check=True, capture_output=True, text=True, timeout=300,
-            )
-        except subprocess.CalledProcessError as e:
-            _save_status("error", f"Git clone failed: {e.stderr.strip()}")
-            return
-        except subprocess.TimeoutExpired:
-            _save_status("error", "Git clone timed out (5 min)")
-            return
-
-    # --- Create environment (skip if already exists) ---
-    if project.env_type == "conda":
-        env_name = _conda_env_name(project.name)
-        conda_bin = _find_conda_bin()
-        env_path = _resolve_conda_env_path(conda_bin, env_name) if conda_bin else None
-        if env_path:
-            log.info("Retry: conda env already exists for %s, skipping", project.name)
-            pip_bin = os.path.join(env_path, "bin", "pip")
-        else:
-            _save_status("creating_env")
-            pip_bin = _create_conda_env(project, _save_status)
-    else:
-        env_dir = os.path.join(project_dir, "venv")
-        if os.path.isdir(env_dir):
-            log.info("Retry: venv already exists for %s, skipping", project.name)
-            pip_bin = os.path.join(env_dir, "bin", "pip")
-        else:
-            _save_status("creating_env")
-            pip_bin = _create_venv(project, env_dir, _save_status)
-
-    if pip_bin is None:
-        return  # _save_status("error", ...) already called
-
-    # --- Data dir symlink (before setup script so setup.sh can use it) ---
-    if project.data_dir_enabled and project.data_dir_remote:
-        local_path = os.path.join(workspace_dir, project.data_dir_local)
-        if os.path.islink(local_path):
-            if os.readlink(local_path) != project.data_dir_remote:
-                os.unlink(local_path)
-                os.symlink(project.data_dir_remote, local_path)
-        elif os.path.exists(local_path):
-            _save_status(
-                "error",
-                f"'{project.data_dir_local}' already exists in the repository and is not a symlink. "
-                f"Remove it from the repo, then re-setup the project.",
-            )
-            return
-        elif os.path.isdir(project.data_dir_remote):
-            os.symlink(project.data_dir_remote, local_path)
-        else:
-            _save_status("error", f"Data directory '{project.data_dir_remote}' does not exist on this server.")
-            return
-
-    # --- Setup script ---
-    if project.setup_script:
-        script_path = os.path.join(workspace_dir, project.setup_script)
-        if os.path.isfile(script_path):
-            _save_status("running_setup_script")
             try:
                 subprocess.run(
-                    ["bash", script_path],
-                    cwd=workspace_dir,
+                    ["git", "clone", "-b", project.branch, project.git_url, workspace_dir],
                     check=True, capture_output=True, text=True, timeout=300,
                 )
             except subprocess.CalledProcessError as e:
-                _save_status("error", f"Setup script failed: {e.stderr.strip()[-500:]}")
+                _save_status("error", f"Git clone failed: {e.stderr.strip()}")
                 return
             except subprocess.TimeoutExpired:
-                _save_status("error", "Setup script timed out (5 min)")
+                _save_status("error", "Git clone timed out (5 min)")
                 return
 
-    # --- Pip install ---
-    req_path = os.path.join(workspace_dir, project.requirements_file)
-    if os.path.isfile(req_path):
-        _save_status("installing_deps")
-        try:
-            subprocess.run(
-                [pip_bin, "install", "-r", req_path],
-                check=True, capture_output=True, text=True, timeout=600,
-            )
-        except subprocess.CalledProcessError as e:
-            _save_status("error", f"Pip install failed: {e.stderr.strip()[-500:]}")
-            return
+        # --- Create environment (skip if already exists) ---
+        if project.env_type == "conda":
+            env_name = _conda_env_name(project.name)
+            conda_bin = _find_conda_bin()
+            env_path = _resolve_conda_env_path(conda_bin, env_name) if conda_bin else None
+            if env_path:
+                log.info("Retry: conda env already exists for %s, skipping", project.name)
+                pip_bin = os.path.join(env_path, "bin", "pip")
+            else:
+                _save_status("creating_env")
+                pip_bin = _create_conda_env(project, _save_status)
+        else:
+            env_dir = os.path.join(project_dir, "venv")
+            if os.path.isdir(env_dir):
+                log.info("Retry: venv already exists for %s, skipping", project.name)
+                pip_bin = os.path.join(env_dir, "bin", "pip")
+            else:
+                _save_status("creating_env")
+                pip_bin = _create_venv(project, env_dir, _save_status)
+
+        if pip_bin is None:
+            return  # _save_status("error", ...) already called
+
+        # --- Data dir symlink (before setup script so setup.sh can use it) ---
+        if project.data_dir_enabled and project.data_dir_remote:
+            local_path = os.path.join(workspace_dir, project.data_dir_local)
+            if os.path.islink(local_path):
+                if os.readlink(local_path) != project.data_dir_remote:
+                    os.unlink(local_path)
+                    os.symlink(project.data_dir_remote, local_path)
+            elif os.path.exists(local_path):
+                _save_status(
+                    "error",
+                    f"'{project.data_dir_local}' already exists in the repository and is not a symlink. "
+                    f"Remove it from the repo, then re-setup the project.",
+                )
+                return
+            elif os.path.isdir(project.data_dir_remote):
+                os.symlink(project.data_dir_remote, local_path)
+            else:
+                _save_status("error", f"Data directory '{project.data_dir_remote}' does not exist on this server.")
+                return
+
+        # --- Setup script ---
+        if project.setup_script:
+            script_path = os.path.join(workspace_dir, project.setup_script)
+            if os.path.isfile(script_path):
+                _save_status("running_setup_script")
+                try:
+                    subprocess.run(
+                        ["bash", script_path],
+                        cwd=workspace_dir,
+                        check=True, capture_output=True, text=True, timeout=300,
+                    )
+                except subprocess.CalledProcessError as e:
+                    _save_status("error", f"Setup script failed: {e.stderr.strip()[-500:]}")
+                    return
+                except subprocess.TimeoutExpired:
+                    _save_status("error", "Setup script timed out (5 min)")
+                    return
+
+        # --- Pip install ---
+        req_path = os.path.join(workspace_dir, project.requirements_file)
+        if os.path.isfile(req_path):
+            _save_status("installing_deps")
+            try:
+                subprocess.run(
+                    [pip_bin, "install", "-r", req_path],
+                    check=True, capture_output=True, text=True, timeout=600,
+                )
+            except subprocess.CalledProcessError as e:
+                _save_status("error", f"Pip install failed: {e.stderr.strip()[-500:]}")
+                return
 
         _save_status("ready")
         log.info("Setup completed successfully for project: %s", project.name)
