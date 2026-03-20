@@ -75,19 +75,22 @@ def retry_setup(projects_dir, name):
 
 def _setup_project(projects_dir, project, is_retry=False):
     """Clone repo, create env, install deps. Updates project.json status as it goes."""
-    project_dir = os.path.join(projects_dir, project.name)
-    workspace_dir = os.path.join(project_dir, "workspace")
+    log.info("Setup thread started for project: %s", project.name)
 
-    def _save_status(status, error=None):
-        project.setup_status = status
-        project.setup_error = error
-        project.save(projects_dir)
+    try:
+        project_dir = os.path.join(projects_dir, project.name)
+        workspace_dir = os.path.join(project_dir, "workspace")
 
-    # --- Git clone (skip if workspace already exists from a previous attempt) ---
-    if os.path.isdir(workspace_dir):
-        log.info("Retry: workspace already exists for %s, skipping clone", project.name)
-    else:
-        _save_status("cloning")
+        def _save_status(status, error=None):
+            project.setup_status = status
+            project.setup_error = error
+            project.save(projects_dir)
+
+        # --- Git clone (skip if workspace already exists from a previous attempt) ---
+        if os.path.isdir(workspace_dir):
+            log.info("Retry: workspace already exists for %s, skipping clone", project.name)
+        else:
+            _save_status("cloning")
         try:
             subprocess.run(
                 ["git", "clone", "-b", project.branch, project.git_url, workspace_dir],
@@ -174,7 +177,17 @@ def _setup_project(projects_dir, project, is_retry=False):
             _save_status("error", f"Pip install failed: {e.stderr.strip()[-500:]}")
             return
 
-    _save_status("ready")
+        _save_status("ready")
+        log.info("Setup completed successfully for project: %s", project.name)
+
+    except Exception as e:
+        log.exception("Setup thread crashed for %s", project.name)
+        try:
+            project.setup_status = "error"
+            project.setup_error = f"Setup crashed: {str(e)[:500]}"
+            project.save(projects_dir)
+        except Exception:
+            log.exception("Failed to save error status for %s", project.name)
 
 
 def _create_venv(project, env_dir, _save_status):
