@@ -130,10 +130,28 @@
     <div class="collapsible-body" id="files-body" data-project="{{ project.name }}" style="display:none">
         <nav class="fb-breadcrumbs" id="files-breadcrumbs"></nav>
         <div id="files-listing"><p class="muted">Click to browse project files.</p></div>
-        <details class="fb-curl-details">
-            <summary class="muted">curl commands</summary>
-            <pre class="fb-curl" id="files-curl"></pre>
-        </details>
+    </div>
+</section>
+
+<section class="card collapsible" id="api-section">
+    <h2 class="collapsible-header" data-target="api-body">API <span class="collapse-icon">▶</span></h2>
+    <div class="collapsible-body" id="api-body" style="display:none">
+        <pre class="api-examples" id="api-examples">{% set host = request.host %}# Training
+curl -X POST http://{{ host }}/api/v1/projects/{{ project.name }}/training/start
+curl -X POST http://{{ host }}/api/v1/projects/{{ project.name }}/training/stop
+curl http://{{ host }}/api/v1/projects/{{ project.name }}/training/status
+
+# Logs
+curl "http://{{ host }}/api/v1/projects/{{ project.name }}/logs?tail=50"
+curl -N http://{{ host }}/api/v1/projects/{{ project.name }}/logs/stream
+
+# Files
+curl http://{{ host }}/api/v1/projects/{{ project.name }}/files
+curl -O http://{{ host }}/api/v1/projects/{{ project.name }}/files/<filepath>
+curl -o workspace.zip "http://{{ host }}/api/v1/projects/{{ project.name }}/files?zip=1"
+
+# System Stats
+curl http://{{ host }}/api/v1/stats</pre>
     </div>
 </section>
 {% endif %}

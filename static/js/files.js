@@ -9,7 +9,6 @@
     const viewUrl = `/projects/${name}/files/view`;
     const listing = document.getElementById("files-listing");
     const breadcrumbs = document.getElementById("files-breadcrumbs");
-    const curlBox = document.getElementById("files-curl");
 
     let currentPath = "";
     let loaded = false;
@@ -36,7 +35,6 @@
             const data = await resp.json();
             renderBreadcrumbs(data.path);
             renderListing(data.entries, data.path);
-            renderCurl(data.curl_examples);
         } catch (e) {
             listing.innerHTML = '<p class="muted">Error loading files.</p>';
         }
@@ -100,7 +98,12 @@
                 </td>`;
                 html += `<td class="fb-col-size muted">&mdash;</td>`;
                 html += `<td class="fb-col-actions">
-                    <a href="${baseUrl}/${entry.path}?zip=1" class="btn btn-secondary btn-sm" title="Download as zip">zip</a>
+                    <div class="fb-menu">
+                        <button class="fb-menu-trigger" title="Actions">⋮</button>
+                        <div class="fb-menu-dropdown">
+                            <a href="${baseUrl}/${entry.path}?zip=1" class="fb-menu-item">Download as zip</a>
+                        </div>
+                    </div>
                 </td>`;
             } else {
                 const viewable = isViewable(entry.name);
@@ -112,8 +115,13 @@
                 </td>`;
                 html += `<td class="fb-col-size muted">${entry.size_h}</td>`;
                 html += `<td class="fb-col-actions">
-                    ${viewable ? `<button class="btn btn-secondary btn-sm fb-view" data-path="${entry.path}" data-name="${entry.name}">view</button> ` : ""}
-                    <a href="${baseUrl}/${entry.path}" class="btn btn-secondary btn-sm">download</a>
+                    <div class="fb-menu">
+                        <button class="fb-menu-trigger" title="Actions">⋮</button>
+                        <div class="fb-menu-dropdown">
+                            ${viewable ? `<button class="fb-menu-item fb-view" data-path="${entry.path}" data-name="${entry.name}">View</button>` : ""}
+                            <a href="${baseUrl}/${entry.path}" class="fb-menu-item">Download</a>
+                        </div>
+                    </div>
                 </td>`;
             }
 
@@ -130,6 +138,7 @@
 
         listing.innerHTML = html;
 
+        // Directory navigation
         listing.querySelectorAll(".fb-dir").forEach(el => {
             el.addEventListener("click", (e) => {
                 e.preventDefault();
@@ -137,29 +146,39 @@
             });
         });
 
+        // File viewer
         listing.querySelectorAll(".fb-view").forEach(el => {
             el.addEventListener("click", (e) => {
                 e.preventDefault();
                 openViewer(el.dataset.path, el.dataset.name);
             });
         });
-    }
 
-    function renderCurl(examples) {
-        if (!curlBox) return;
-        const host = location.host;
-        const pathPart = currentPath ? `/${currentPath}` : "";
-        const lines = [
-            `# List files`,
-            `curl http://${host}${baseUrl}${pathPart ? pathPart : "/"}`,
-            ``,
-            `# Download a file`,
-            `curl -O http://${host}${baseUrl}/<filepath>`,
-            ``,
-            `# Download directory as zip`,
-            `curl -o output.zip 'http://${host}${baseUrl}${pathPart || "/"}?zip=1'`,
-        ];
-        curlBox.textContent = lines.join("\n");
+        // Three-dot menu toggles
+        listing.querySelectorAll(".fb-menu-trigger").forEach(trigger => {
+            trigger.addEventListener("click", (e) => {
+                e.stopPropagation();
+                const menu = trigger.nextElementSibling;
+                const isOpen = menu.classList.contains("open");
+
+                // Close all menus
+                document.querySelectorAll(".fb-menu-dropdown.open").forEach(m => {
+                    m.classList.remove("open");
+                });
+
+                // Toggle this menu
+                if (!isOpen) {
+                    menu.classList.add("open");
+                }
+            });
+        });
+
+        // Close menus when clicking outside
+        document.addEventListener("click", () => {
+            document.querySelectorAll(".fb-menu-dropdown.open").forEach(m => {
+                m.classList.remove("open");
+            });
+        });
     }
 
     // ── File Viewer ──────────────────────────────────────────────────────────
