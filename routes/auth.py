@@ -29,10 +29,30 @@ def login():
         flash('Invalid email or password', 'error')
         return redirect(url_for('auth.login'))
 
+    # Check if account is locked
+    if user.is_locked():
+        minutes_left = int((user.locked_until - datetime.now()).total_seconds() / 60) + 1
+        flash(f'Account locked due to too many failed login attempts. Try again in {minutes_left} minute(s).', 'error')
+        return redirect(url_for('auth.login'))
+
     password_hash = db.get_password_hash(user.id)
     if not verify_password(password, password_hash):
-        flash('Invalid email or password', 'error')
+        # Record failed login attempt
+        db.record_failed_login(user.id)
+
+        # Re-fetch user to get updated failed attempts count
+        user = db.get_user_by_email(email)
+        attempts_left = 5 - user.failed_login_attempts
+
+        if attempts_left > 0:
+            flash(f'Invalid email or password. {attempts_left} attempt(s) remaining before account lockout.', 'error')
+        else:
+            flash('Account locked due to too many failed login attempts. Locked for 15 minutes.', 'error')
+
         return redirect(url_for('auth.login'))
+
+    # Successful login - reset failed attempts
+    db.reset_failed_logins(user.id)
 
     # Update last login
     db.update_user(user.id, last_login_at=datetime.now())

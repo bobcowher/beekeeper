@@ -61,6 +61,7 @@ The `admin.sh` wrapper automatically activates the virtual environment.
 - `reset-password` - Reset a user's password
 - `promote` - Promote user to administrator
 - `demote` - Demote admin to regular user
+- `unlock-account` - Unlock account locked due to failed login attempts
 - `delete-user` - Delete a user account
 - `list-api-keys` - List API keys for a user
 - `revoke-api-key` - Revoke an API key by name
@@ -183,6 +184,8 @@ Click "Logout" in the sidebar footer (when logged in).
 - Passwords hashed with bcrypt
 - Configurable minimum length (default: 8 characters)
 - Never stored in plain text
+- Account lockout after 5 failed login attempts (15 minute lockout)
+- Progressive warnings show remaining attempts before lockout
 
 ### Session Security
 - HTTPOnly cookies (not accessible via JavaScript)
@@ -230,14 +233,20 @@ User data is stored in `data/beekeeper.db` (SQLite):
 
 ### Locked Out?
 
-If you forget your password and are locked out, use the CLI admin tool:
-
+**Forgot password:**
 ```bash
 cd /path/to/beekeeper
 ./admin.sh reset-password your-email@example.com
 ```
 
-The tool will prompt you for a new password. You can also use it to create users, manage admin privileges, and more. Run `./admin.sh --help` for all available commands.
+**Account locked after failed login attempts:**
+```bash
+./admin.sh unlock-account your-email@example.com
+```
+
+Accounts are automatically locked for 15 minutes after 5 failed login attempts. Use the unlock command to immediately remove the lock and reset the failed attempt counter.
+
+For more commands, run `./admin.sh --help`.
 
 ### API Returns 401
 

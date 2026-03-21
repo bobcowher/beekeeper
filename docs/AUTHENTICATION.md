@@ -81,6 +81,9 @@ The `admin.sh` wrapper automatically activates the virtual environment and runs 
 # Promote user to admin
 ./admin.sh promote user@example.com
 
+# Unlock a locked account
+./admin.sh unlock-account user@example.com
+
 # Delete a user
 ./admin.sh delete-user user@example.com
 ```
@@ -222,6 +225,8 @@ result = response.json()
 - Passwords hashed with bcrypt (industry standard)
 - Configurable minimum length
 - Never stored in plain text
+- Account lockout after failed login attempts (5 failures = 15 minute lockout)
+- Progressive warnings show remaining attempts
 
 ### Session Security
 - HTTPOnly cookies (not accessible via JavaScript)
@@ -263,14 +268,18 @@ password.min_length=8          # Password requirements
 
 ### Locked Out?
 
-If you forget your password, use the CLI admin tool:
-
+**Forgot password:**
 ```bash
 cd /path/to/beekeeper
 ./admin.sh reset-password your-email@example.com
 ```
 
-The tool will prompt you for a new password. No need to stop the service or disable authentication.
+**Account locked (too many failed attempts):**
+```bash
+./admin.sh unlock-account your-email@example.com
+```
+
+Accounts are automatically locked for 15 minutes after 5 failed login attempts. The unlock command immediately resets the failed attempt counter and removes the lock.
 
 ### API Returns 401 Unauthorized
 

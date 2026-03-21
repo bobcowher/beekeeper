@@ -41,13 +41,14 @@ def list_users(args):
         print("No users found.")
         return
 
-    print(f"\n{'ID':<5} {'Email':<30} {'Name':<20} {'Admin':<8} {'Last Login':<20}")
-    print("-" * 90)
+    print(f"\n{'ID':<5} {'Email':<30} {'Name':<20} {'Admin':<8} {'Locked':<8} {'Last Login':<20}")
+    print("-" * 100)
 
     for user in users:
         last_login = user.last_login_at.strftime('%Y-%m-%d %H:%M') if user.last_login_at else 'Never'
         admin_status = 'Yes' if user.is_admin else 'No'
-        print(f"{user.id:<5} {user.email:<30} {user.name:<20} {admin_status:<8} {last_login:<20}")
+        locked_status = 'Yes' if user.is_locked() else 'No'
+        print(f"{user.id:<5} {user.email:<30} {user.name:<20} {admin_status:<8} {locked_status:<8} {last_login:<20}")
 
     print(f"\nTotal: {len(users)} user(s)")
 
@@ -190,6 +191,24 @@ def delete_user(args):
     print(f"✓ User {user.name} deleted")
 
 
+def unlock_account(args):
+    """Unlock a locked user account."""
+    db, _ = init_services()
+
+    user = db.get_user_by_email(args.email)
+    if not user:
+        print(f"Error: User with email '{args.email}' not found", file=sys.stderr)
+        sys.exit(1)
+
+    if not user.is_locked() and user.failed_login_attempts == 0:
+        print(f"Account for {user.name} is not locked")
+        return
+
+    db.reset_failed_logins(user.id)
+    print(f"✓ Account unlocked for {user.name} ({user.email})")
+    print(f"  Failed login attempts reset to 0")
+
+
 def list_api_keys(args):
     """List API keys for a user."""
     db, _ = init_services()
@@ -317,6 +336,7 @@ Examples:
   %(prog)s list-users
   %(prog)s create-user --email admin@example.com --name "Admin User" --admin
   %(prog)s reset-password admin@example.com
+  %(prog)s unlock-account admin@example.com
   %(prog)s promote admin@example.com
   %(prog)s list-api-keys admin@example.com
   %(prog)s enable-auth
@@ -360,6 +380,11 @@ Examples:
     parser_delete.add_argument('email', help='User email address')
     parser_delete.add_argument('-y', '--yes', action='store_true', help='Skip confirmation')
     parser_delete.set_defaults(func=delete_user)
+
+    # unlock-account
+    parser_unlock = subparsers.add_parser('unlock-account', help='Unlock a locked user account')
+    parser_unlock.add_argument('email', help='User email address')
+    parser_unlock.set_defaults(func=unlock_account)
 
     # list-api-keys
     parser_list_keys = subparsers.add_parser('list-api-keys', help='List API keys for a user')

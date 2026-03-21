@@ -28,6 +28,9 @@ class DatabaseService:
             conn.executescript(schema)
             conn.commit()
 
+        # Run migrations for existing databases
+        self._run_migrations()
+
     @contextmanager
     def _get_connection(self):
         """Get database connection with row factory."""
@@ -37,6 +40,21 @@ class DatabaseService:
             yield conn
         finally:
             conn.close()
+
+    def _run_migrations(self):
+        """Run database migrations for existing databases."""
+        with self._get_connection() as conn:
+            # Check if lockout columns exist
+            cursor = conn.execute("PRAGMA table_info(users)")
+            columns = [row['name'] for row in cursor.fetchall()]
+
+            # Add lockout columns if missing
+            if 'failed_login_attempts' not in columns:
+                conn.execute('ALTER TABLE users ADD COLUMN failed_login_attempts INTEGER DEFAULT 0')
+            if 'locked_until' not in columns:
+                conn.execute('ALTER TABLE users ADD COLUMN locked_until TIMESTAMP')
+
+            conn.commit()
 
     # User operations
     def get_user_by_email(self, email: str) -> Optional[User]:
@@ -51,7 +69,9 @@ class DatabaseService:
                 name=row['name'],
                 is_admin=bool(row['is_admin']),
                 created_at=datetime.fromisoformat(row['created_at']),
-                last_login_at=datetime.fromisoformat(row['last_login_at']) if row['last_login_at'] else None
+                last_login_at=datetime.fromisoformat(row['last_login_at']) if row['last_login_at'] else None,
+                failed_login_attempts=row.get('failed_login_attempts', 0),
+                locked_until=datetime.fromisoformat(row['locked_until']) if row.get('locked_until') else None
             )
 
     def get_user_by_id(self, user_id: int) -> Optional[User]:
@@ -66,7 +86,9 @@ class DatabaseService:
                 name=row['name'],
                 is_admin=bool(row['is_admin']),
                 created_at=datetime.fromisoformat(row['created_at']),
-                last_login_at=datetime.fromisoformat(row['last_login_at']) if row['last_login_at'] else None
+                last_login_at=datetime.fromisoformat(row['last_login_at']) if row['last_login_at'] else None,
+                failed_login_attempts=row.get('failed_login_attempts', 0),
+                locked_until=datetime.fromisoformat(row['locked_until']) if row.get('locked_until') else None
             )
 
     def create_user(self, email: str, name: str, password_hash: str, is_admin: bool = False) -> User:
@@ -81,7 +103,8 @@ class DatabaseService:
 
     def update_user(self, user_id: int, **fields):
         """Update user fields."""
-        allowed_fields = ['name', 'email', 'password_hash', 'is_admin', 'last_login_at']
+        allowed_fields = ['name', 'email', 'password_hash', 'is_admin', 'last_login_at',
+                         'failed_login_attempts', 'locked_until']
         updates = []
         values = []
 
@@ -132,7 +155,9 @@ class DatabaseService:
                     name=row['name'],
                     is_admin=bool(row['is_admin']),
                     created_at=datetime.fromisoformat(row['created_at']),
-                    last_login_at=datetime.fromisoformat(row['last_login_at']) if row['last_login_at'] else None
+                    last_login_at=datetime.fromisoformat(row['last_login_at']) if row['last_login_at'] else None,
+                    failed_login_attempts=row.get('failed_login_attempts', 0),
+                    locked_until=datetime.fromisoformat(row['locked_until']) if row.get('locked_until') else None
                 )
                 for row in rows
             ]
@@ -142,6 +167,37 @@ class DatabaseService:
         with self._get_connection() as conn:
             row = conn.execute('SELECT password_hash FROM users WHERE id = ?', (user_id,)).fetchone()
             return row['password_hash'] if row else None
+
+    def record_failed_login(self, user_id: int, max_attempts: int = 5, lockout_minutes: int = 15):
+        """Record a failed login attempt and lock account if threshold reached."""
+        from datetime import timedelta
+
+        with self._get_connection() as conn:
+            # Increment failed attempts
+            conn.execute(
+                'UPDATE users SET failed_login_attempts = failed_login_attempts + 1 WHERE id = ?',
+                (user_id,)
+            )
+
+            # Check if we should lock the account
+            row = conn.execute('SELECT failed_login_attempts FROM users WHERE id = ?', (user_id,)).fetchone()
+            if row and row['failed_login_attempts'] >= max_attempts:
+                locked_until = datetime.now() + timedelta(minutes=lockout_minutes)
+                conn.execute(
+                    'UPDATE users SET locked_until = ? WHERE id = ?',
+                    (locked_until.isoformat(), user_id)
+                )
+
+            conn.commit()
+
+    def reset_failed_logins(self, user_id: int):
+        """Reset failed login attempts and unlock account."""
+        with self._get_connection() as conn:
+            conn.execute(
+                'UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?',
+                (user_id,)
+            )
+            conn.commit()
 
     # Session operations
     def create_session(self, user_id: int, expires_at: datetime) -> str:
