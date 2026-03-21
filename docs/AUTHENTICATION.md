@@ -55,6 +55,64 @@ Changed your mind? No problem:
 
 All user accounts and API keys remain in the database - just re-enable to reactivate them.
 
+## CLI Admin Tool
+
+For server-side administration, Beekeeper includes a command-line tool that doesn't require web access:
+
+```bash
+./admin.sh --help
+```
+
+The `admin.sh` wrapper automatically activates the virtual environment and runs the admin tool.
+
+### Common Commands
+
+**User Management:**
+```bash
+# List all users
+./admin.sh list-users
+
+# Create a new admin user
+./admin.sh create-user --email admin@example.com --name "Admin User" --admin
+
+# Reset a user's password
+./admin.sh reset-password user@example.com
+
+# Promote user to admin
+./admin.sh promote user@example.com
+
+# Delete a user
+./admin.sh delete-user user@example.com
+```
+
+**API Key Management:**
+```bash
+# List user's API keys
+./admin.sh list-api-keys user@example.com
+
+# Revoke an API key
+./admin.sh revoke-api-key user@example.com "Key Name"
+```
+
+**System Settings:**
+```bash
+# Show current configuration
+./admin.sh config
+
+# Enable/disable authentication
+./admin.sh enable-auth
+./admin.sh disable-auth
+
+# Clean up expired sessions
+./admin.sh clean-sessions
+```
+
+The CLI tool is particularly useful for:
+- Password resets when locked out
+- Initial setup and automation
+- Batch user creation
+- Server maintenance tasks
+
 ## Admin Panel Features
 
 ### User Management
@@ -205,13 +263,14 @@ password.min_length=8          # Password requirements
 
 ### Locked Out?
 
-If you forget your password:
+If you forget your password, use the CLI admin tool:
 
-1. Stop Beekeeper service
-2. Delete or rename `config.properties`
-3. Restart Beekeeper (auth will be disabled)
-4. Access admin panel and re-enable authentication
-5. Create a new account
+```bash
+cd /path/to/beekeeper
+./admin.sh reset-password your-email@example.com
+```
+
+The tool will prompt you for a new password. No need to stop the service or disable authentication.
 
 ### API Returns 401 Unauthorized
 

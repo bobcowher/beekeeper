@@ -44,6 +44,48 @@ session.lifetime_days=7         # How long users stay logged in
 password.min_length=8          # Minimum password length
 ```
 
+## CLI Admin Tool
+
+Beekeeper includes a command-line administration tool for server-side management:
+
+```bash
+./admin.sh --help
+```
+
+The `admin.sh` wrapper automatically activates the virtual environment.
+
+### Available Commands
+
+- `list-users` - List all users with admin status
+- `create-user` - Create a new user (interactive or with flags)
+- `reset-password` - Reset a user's password
+- `promote` - Promote user to administrator
+- `demote` - Demote admin to regular user
+- `delete-user` - Delete a user account
+- `list-api-keys` - List API keys for a user
+- `revoke-api-key` - Revoke an API key by name
+- `enable-auth` / `disable-auth` - Toggle authentication
+- `clean-sessions` - Remove expired sessions
+- `config` - Show current configuration
+
+### Examples
+
+```bash
+# Reset password for locked-out admin
+./admin.sh reset-password admin@example.com
+
+# Create a new admin user
+./admin.sh create-user --email new@example.com --name "New Admin" --admin
+
+# List all users
+./admin.sh list-users
+
+# View configuration
+./admin.sh config
+```
+
+The CLI tool is useful for password resets, initial setup, automation, and maintenance tasks.
+
 ## User Management
 
 ### Creating Users
@@ -188,13 +230,14 @@ User data is stored in `data/beekeeper.db` (SQLite):
 
 ### Locked Out?
 
-If you forget your password and are locked out:
+If you forget your password and are locked out, use the CLI admin tool:
 
-1. Stop Beekeeper
-2. Delete or rename `config.properties`
-3. Restart Beekeeper (auth will be disabled)
-4. Access admin panel and re-enable auth
-5. Create a new account
+```bash
+cd /path/to/beekeeper
+./admin.sh reset-password your-email@example.com
+```
+
+The tool will prompt you for a new password. You can also use it to create users, manage admin privileges, and more. Run `./admin.sh --help` for all available commands.
 
 ### API Returns 401
 
