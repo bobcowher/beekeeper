@@ -324,6 +324,7 @@ def show_config(args):
     print(f"Authentication enabled: {config.get_bool('auth.enabled', False)}")
     print(f"Session lifetime (days): {config.get_int('session.lifetime_days', 7)}")
     print(f"Min password length: {config.get_int('password.min_length', 8)}")
+    print(f"API rate limit (req/min): {config.get_int('api.rate_limit_per_minute', 10)}")
     print()
 
 

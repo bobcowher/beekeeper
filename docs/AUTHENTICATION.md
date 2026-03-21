@@ -241,6 +241,8 @@ result = response.json()
 - Only shown once during creation
 - Last-used timestamp for auditing
 - Instant revocation capability
+- IP-based rate limiting (default: 10 requests/minute)
+- Failed authentication attempts logged with IP address
 
 ## Architecture
 
@@ -253,9 +255,10 @@ User data stored in `data/beekeeper.db` (SQLite):
 ### Configuration
 Settings stored in `config.properties`:
 ```properties
-auth.enabled=false              # Toggle authentication
-session.lifetime_days=7         # Session expiration
-password.min_length=8          # Password requirements
+auth.enabled=false                 # Toggle authentication
+session.lifetime_days=7            # Session expiration
+password.min_length=8              # Password requirements
+api.rate_limit_per_minute=10       # API rate limit per IP
 ```
 
 ### Backward Compatibility
@@ -288,6 +291,10 @@ Check that:
 - API key is valid and not revoked
 - Authorization header format: `Authorization: Bearer bk_...`
 - Key matches exactly (no extra spaces)
+
+### API Returns 429 Rate Limit Exceeded
+
+Your IP has exceeded the rate limit (default: 10 requests/minute). This protects against brute force attacks. Wait a minute and try again, or increase `api.rate_limit_per_minute` in `config.properties`.
 
 ### Can't Access Admin Panel
 

@@ -39,9 +39,10 @@ Access the admin panel at `/admin` (requires admin privileges).
 Edit settings via the Admin panel (stored in `config.properties`):
 
 ```properties
-auth.enabled=false              # Enable/disable authentication
-session.lifetime_days=7         # How long users stay logged in
-password.min_length=8          # Minimum password length
+auth.enabled=false                 # Enable/disable authentication
+session.lifetime_days=7            # How long users stay logged in
+password.min_length=8              # Minimum password length
+api.rate_limit_per_minute=10       # API rate limit per IP address
 ```
 
 ## CLI Admin Tool
@@ -164,6 +165,8 @@ curl -H "Authorization: Bearer bk_abc123..." \
 - Only the prefix is shown in the UI for identification
 - Last usage timestamp helps identify unused keys
 - Keys can be revoked instantly from the Admin panel
+- IP-based rate limiting prevents brute force attacks (configurable)
+- All authentication attempts are logged with IP addresses
 
 ## Session Management
 
@@ -255,6 +258,10 @@ Check that:
 - API key is valid and not revoked
 - Authorization header format is correct: `Bearer bk_...`
 - Key hasn't been deleted
+
+### API Returns 429 (Rate Limit)
+
+Your IP exceeded the rate limit (default: 10 requests/minute). This is an anti-brute-force protection. Wait a minute or adjust `api.rate_limit_per_minute` in `config.properties`.
 
 ### Can't Access Admin Panel
 

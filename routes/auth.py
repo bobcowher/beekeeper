@@ -1,9 +1,12 @@
+import logging
 from datetime import datetime
 from flask import Blueprint, render_template, request, redirect, url_for, flash, make_response
 
 from services.auth_service import hash_password, verify_password, create_session_for_user, get_current_user
 from services.config_service import get_config_int
 from services.db_service import get_db
+
+logger = logging.getLogger(__name__)
 
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
@@ -24,14 +27,17 @@ def login():
 
     db = get_db()
     user = db.get_user_by_email(email)
+    client_ip = request.remote_addr
 
     if not user:
+        logger.warning(f"Login attempt from {client_ip} for non-existent email: {email}")
         flash('Invalid email or password', 'error')
         return redirect(url_for('auth.login'))
 
     # Check if account is locked
     if user.is_locked():
         minutes_left = int((user.locked_until - datetime.now()).total_seconds() / 60) + 1
+        logger.warning(f"Login attempt from {client_ip} for locked account: {email}")
         flash(f'Account locked due to too many failed login attempts. Try again in {minutes_left} minute(s).', 'error')
         return redirect(url_for('auth.login'))
 
@@ -44,9 +50,15 @@ def login():
         user = db.get_user_by_email(email)
         attempts_left = 5 - user.failed_login_attempts
 
+        logger.warning(
+            f"Failed login attempt from {client_ip} for {email} "
+            f"(attempt {user.failed_login_attempts}/5, {attempts_left} remaining)"
+        )
+
         if attempts_left > 0:
             flash(f'Invalid email or password. {attempts_left} attempt(s) remaining before account lockout.', 'error')
         else:
+            logger.warning(f"Account {email} locked due to failed login attempts from {client_ip}")
             flash('Account locked due to too many failed login attempts. Locked for 15 minutes.', 'error')
 
         return redirect(url_for('auth.login'))
@@ -56,6 +68,8 @@ def login():
 
     # Update last login
     db.update_user(user.id, last_login_at=datetime.now())
+
+    logger.info(f"Successful login from {client_ip} for {email}")
 
     # Create session
     session_id = create_session_for_user(user.id)

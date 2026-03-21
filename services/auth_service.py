@@ -1,5 +1,6 @@
 import secrets
 import bcrypt
+import logging
 from datetime import datetime, timedelta
 from functools import wraps
 from typing import Optional
@@ -9,6 +10,9 @@ from flask import request, redirect, url_for, jsonify, g
 from models.user import User
 from services.config_service import get_config_int, is_auth_enabled
 from services.db_service import get_db
+from services.rate_limiter import get_rate_limiter
+
+logger = logging.getLogger(__name__)
 
 
 def hash_password(password: str) -> str:
@@ -80,11 +84,29 @@ def api_key_required(f):
     """Decorator to require API key for API routes."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        client_ip = request.remote_addr
+
+        # Check rate limit
+        rate_limiter = get_rate_limiter()
+        max_requests = get_config_int('api.rate_limit_per_minute', 10)
+        is_allowed, request_count = rate_limiter.is_allowed(client_ip, max_requests)
+
+        if not is_allowed:
+            logger.warning(f"API rate limit exceeded for IP {client_ip} ({request_count} requests/min)")
+            return jsonify({
+                "success": False,
+                "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": f"Rate limit exceeded. Maximum {max_requests} requests per minute."
+                }
+            }), 429
+
         if not is_auth_enabled():
             return f(*args, **kwargs)  # Auth disabled, allow access
 
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
+            logger.warning(f"API request from {client_ip} missing Authorization header")
             return jsonify({
                 "success": False,
                 "error": {
@@ -97,6 +119,7 @@ def api_key_required(f):
         db = get_db()
         user = db.validate_api_key(key)
         if not user:
+            logger.warning(f"API request from {client_ip} with invalid API key")
             return jsonify({
                 "success": False,
                 "error": {
@@ -107,6 +130,7 @@ def api_key_required(f):
 
         # Store user in request context
         g.user = user
+        logger.info(f"API request from {client_ip} authenticated as {user.email}")
         return f(*args, **kwargs)
     return decorated
 
