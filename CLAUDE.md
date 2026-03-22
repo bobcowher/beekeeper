@@ -38,7 +38,23 @@ Beekeeper is a Flask web app for managing ML training projects. It provides:
 - Collapsible JS moved to app.js for shared use across all pages
 - Fixed HTML entity rendering for collapse arrows (use Unicode directly)
 
+## Local Testing
+
+Beekeeper runs as a systemd service on the local machine:
+```bash
+# Restart after code changes
+sudo systemctl restart beekeeper
+
+# Check status
+sudo systemctl status beekeeper
+
+# View logs
+sudo journalctl -u beekeeper -f
+```
+
 ## Deployment
+
+**DO NOT** deploy to remote host "lab" without explicit permission - it runs live production jobs.
 
 Local `deploy.sh` (gitignored) deploys to remote host "lab":
 ```
