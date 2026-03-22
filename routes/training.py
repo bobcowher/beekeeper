@@ -147,3 +147,84 @@ def logs_download(name):
         return jsonify({"error": "No log file found"}), 404
     return send_file(log_path, as_attachment=True,
                      download_name=f"{name}-train.log")
+
+
+@training_bp.route("/<name>/history")
+def history(name):
+    """Get training run history for a project."""
+    from services.db_service import get_db
+    projects_dir = current_app.config["PROJECTS_DIR"]
+
+    config_path = os.path.join(projects_dir, name, "project.json")
+    if not os.path.isfile(config_path):
+        return jsonify({"error": "Project not found"}), 404
+
+    runs = get_db().get_training_runs(name, limit=20)
+    return jsonify({"runs": runs})
+
+
+@training_bp.route("/<name>/history/<int:run_id>/log")
+def history_log(name, run_id):
+    """Download archived log for a specific run."""
+    from services.db_service import get_db
+    projects_dir = current_app.config["PROJECTS_DIR"]
+
+    run = get_db().get_training_run(run_id)
+    if not run or run['project_name'] != name:
+        return jsonify({"error": "Run not found"}), 404
+
+    if not run.get('log_file_path'):
+        return jsonify({"error": "Log file not available"}), 404
+
+    log_path = os.path.join(projects_dir, name, run['log_file_path'])
+    if not os.path.isfile(log_path):
+        return jsonify({"error": "Log file not found"}), 404
+
+    return send_file(log_path, as_attachment=True,
+                     download_name=f"{name}-run-{run_id}.log")
+
+
+@training_bp.route("/<name>/history/clear", methods=["POST"])
+def clear_history(name):
+    """Clear all run history for a project."""
+    from services.db_service import get_db
+    import shutil
+    projects_dir = current_app.config["PROJECTS_DIR"]
+
+    config_path = os.path.join(projects_dir, name, "project.json")
+    if not os.path.isfile(config_path):
+        return jsonify({"error": "Project not found"}), 404
+
+    # Get all runs to delete files
+    runs = get_db().get_training_runs(name, limit=None)
+
+    # Delete archived logs and Tensorboard directories
+    for run in runs:
+        if run.get('log_file_path'):
+            log_path = os.path.join(projects_dir, name, run['log_file_path'])
+            if os.path.isfile(log_path):
+                try:
+                    os.unlink(log_path)
+                except Exception:
+                    pass
+
+        if run.get('tensorboard_dir'):
+            tb_path = os.path.join(projects_dir, name, run['tensorboard_dir'])
+            if os.path.isdir(tb_path):
+                try:
+                    shutil.rmtree(tb_path)
+                except Exception:
+                    pass
+
+    # Delete run_logs directory if empty
+    run_logs_dir = os.path.join(projects_dir, name, "run_logs")
+    if os.path.isdir(run_logs_dir):
+        try:
+            os.rmdir(run_logs_dir)
+        except OSError:
+            pass  # Directory not empty, leave it
+
+    # Delete all database records
+    count = get_db().delete_all_runs(name)
+
+    return jsonify({"message": f"Deleted {count} runs"})

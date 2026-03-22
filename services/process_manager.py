@@ -138,11 +138,13 @@ def _monitor_process(projects_dir, name):
         if ret is not None:
             log_path = None
             started_at = None
+            run_id = None
             with _lock:
                 info = _running.get(name)
                 if info:
                     log_path = info.get("log_path")
                     started_at = info.get("started_at")
+                    run_id = info.get("run_id")
                     # Migrate tensorboard to standalone tracking
                     tb = info.get("tb_process")
                     tb_port = info.get("tb_port")
@@ -157,6 +159,17 @@ def _monitor_process(projects_dir, name):
 
             if log_path and started_at:
                 _append_run_footer(log_path, ret, started_at)
+
+            # Archive log and finalize run record
+            archived_log_path = None
+            if run_id and log_path and os.path.isfile(log_path):
+                archived_log_path = _archive_run_log(projects_dir, name, run_id, log_path)
+
+            if run_id and started_at:
+                _finalize_run_record(run_id, ret, started_at, archived_log_path)
+
+            # Prune old runs (keep last 20)
+            _prune_old_runs(projects_dir, name, keep_last=20)
 
             status = "stopped" if ret == 0 else "crashed"
             _update_project_json(projects_dir, name,
@@ -260,6 +273,89 @@ def _append_run_footer(log_path, ret, started_at):
         pass
 
 
+def _archive_run_log(projects_dir: str, project_name: str, run_id: int, source_log_path: str) -> str:
+    """
+    Copy train.log to archived location.
+    Returns relative path (e.g., "run_logs/run-20260321-171532-0042.log").
+    """
+    import shutil
+
+    # Create archive directory
+    archive_dir = os.path.join(projects_dir, project_name, "run_logs")
+    os.makedirs(archive_dir, exist_ok=True)
+
+    # Generate filename: run-{YYYYMMDD-HHMMSS}-{id}.log
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    filename = f"run-{timestamp}-{run_id:04d}.log"
+    dest_path = os.path.join(archive_dir, filename)
+
+    # Copy log file atomically
+    try:
+        shutil.copy2(source_log_path, dest_path)
+        return f"run_logs/{filename}"
+    except Exception as e:
+        log.error(f"Failed to archive log for run {run_id}: {e}")
+        return None
+
+
+def _finalize_run_record(run_id: int, exit_code: int, started_at: float, log_path: str):
+    """Update run record with completion data."""
+    from services.db_service import get_db
+
+    ended_at = datetime.datetime.now()
+    duration = int(time.time() - started_at)
+
+    # Determine status from exit code
+    if exit_code == 0:
+        status = 'completed'
+    elif exit_code < 0:  # Killed by signal (SIGTERM=-15, SIGKILL=-9)
+        status = 'canceled'
+    else:
+        status = 'crashed'
+
+    get_db().update_training_run(
+        run_id,
+        ended_at=ended_at,
+        duration_seconds=duration,
+        status=status,
+        exit_code=exit_code,
+        log_file_path=log_path
+    )
+
+
+def _prune_old_runs(projects_dir: str, project_name: str, keep_last: int = 20):
+    """
+    Delete runs beyond retention limit.
+    Removes: DB records, archived log files, Tensorboard directories.
+    """
+    from services.db_service import get_db
+    import shutil
+
+    db = get_db()
+    deleted_runs = db.prune_old_runs(project_name, keep_last=keep_last)
+
+    for run in deleted_runs:
+        # Delete archived log file
+        if run.get('log_file_path'):
+            log_path = os.path.join(projects_dir, project_name, run['log_file_path'])
+            try:
+                if os.path.isfile(log_path):
+                    os.unlink(log_path)
+                    log.info(f"Deleted archived log: {log_path}")
+            except Exception as e:
+                log.warning(f"Failed to delete archived log {log_path}: {e}")
+
+        # Delete Tensorboard directory
+        if run.get('tensorboard_dir'):
+            tb_path = os.path.join(projects_dir, project_name, run['tensorboard_dir'])
+            try:
+                if os.path.isdir(tb_path):
+                    shutil.rmtree(tb_path)
+                    log.info(f"Deleted Tensorboard logs: {tb_path}")
+            except Exception as e:
+                log.warning(f"Failed to delete Tensorboard logs {tb_path}: {e}")
+
+
 def start_training(projects_dir, name):
     """Start the training subprocess for a project."""
     with _lock:
@@ -302,6 +398,22 @@ def start_training(projects_dir, name):
         return {"error": f"Git pull failed: {e}"}
 
     run_meta = _collect_run_metadata(workspace_dir, python_bin, branch)
+
+    # Create run record in database
+    from services.db_service import get_db
+    run_id = get_db().create_training_run(
+        project_name=name,
+        metadata={
+            'started_at': datetime.datetime.now(),
+            'status': 'running',
+            'commit_sha': run_meta['commit_sha'],
+            'commit_message': run_meta['commit_msg'],
+            'branch': branch,
+            'python_version': run_meta['python_version'],
+            'gpu_info': json.dumps(run_meta['gpu_info']),
+            'hostname': run_meta['hostname'],
+        }
+    )
 
     # Ensure data dir symlink exists (before setup script so setup.sh can use it)
     if project.get("data_dir_enabled") and project.get("data_dir_remote"):
@@ -394,22 +506,34 @@ def start_training(projects_dir, name):
     if old_tb:
         _kill_tb_process(old_tb["tb_process"])
 
-    # Start tensorboard
+    # Start tensorboard with timestamped directory
     tb_process = None
     tb_port = None
+    tb_run_dir_rel = None
     tb_bin = _resolve_tensorboard_binary(projects_dir, project)
     if tb_bin:
         tb_port = _find_free_port()
         if tb_port:
-            tb_logdir = os.path.join(workspace_dir, project.get("tensorboard_log_dir", "runs"))
+            tb_logdir_base = os.path.join(workspace_dir, project.get("tensorboard_log_dir", "runs"))
+
+            # Create timestamped subdirectory for this run
+            run_timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            tb_run_dir = os.path.join(tb_logdir_base, run_timestamp)
+            os.makedirs(tb_run_dir, exist_ok=True)
+            tb_run_dir_rel = f"{project.get('tensorboard_log_dir', 'runs')}/{run_timestamp}"
+
+            # Launch Tensorboard pointing to the base directory (shows all runs)
             try:
                 tb_process = subprocess.Popen(
-                    [tb_bin, "--logdir", tb_logdir, "--port", str(tb_port),
+                    [tb_bin, "--logdir", tb_logdir_base, "--port", str(tb_port),
                      "--bind_all"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     start_new_session=True,
                 )
+
+                # Update run record with Tensorboard directory
+                get_db().update_training_run(run_id, tensorboard_dir=tb_run_dir_rel)
             except Exception as e:
                 log.warning("Failed to start tensorboard for %s: %s", name, e)
                 tb_port = None
@@ -421,6 +545,7 @@ def start_training(projects_dir, name):
             "tb_process": tb_process,
             "tb_port": tb_port,
             "started_at": time.time(),
+            "run_id": run_id,
         }
 
     _update_project_json(projects_dir, name,

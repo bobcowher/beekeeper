@@ -89,6 +89,18 @@
     </div>
 </section>
 
+<section class="card collapsible" id="history-section">
+    <h2 class="collapsible-header" data-target="history-body">Run History <span class="collapse-icon">▶</span></h2>
+    <div class="collapsible-body" id="history-body" style="display:none">
+        <div class="history-controls">
+            <button id="clear-history-btn" class="btn btn-danger btn-sm">Clear All History</button>
+        </div>
+        <div id="run-history-list">
+            <p class="muted">Loading run history...</p>
+        </div>
+    </div>
+</section>
+
 <section class="card collapsible" id="tb-section">
     <h2 class="collapsible-header" data-target="tb-body">Tensorboard <span class="collapse-icon">▶</span></h2>
     <div class="collapsible-body" id="tb-body" style="display:none">
@@ -186,5 +198,6 @@ curl http://{{ host }}/api/v1/stats</pre>
 </script>
 <script src="{{ url_for('static', filename='js/training.js') }}"></script>
 <script src="{{ url_for('static', filename='js/files.js') }}"></script>
+<script src="{{ url_for('static', filename='js/history.js') }}"></script>
 {% endif %}
 {% endblock %}

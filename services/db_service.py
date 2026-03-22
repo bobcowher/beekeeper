@@ -314,6 +314,128 @@ class DatabaseService:
                 for row in rows
             ]
 
+    # Training run operations
+    def create_training_run(self, project_name: str, metadata: dict) -> int:
+        """Create new run record. Returns run_id."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                '''INSERT INTO training_runs
+                   (project_name, started_at, status, commit_sha, commit_message,
+                    branch, python_version, gpu_info, hostname)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (
+                    project_name,
+                    metadata['started_at'].isoformat(),
+                    metadata['status'],
+                    metadata.get('commit_sha'),
+                    metadata.get('commit_message'),
+                    metadata.get('branch'),
+                    metadata.get('python_version'),
+                    metadata.get('gpu_info'),
+                    metadata.get('hostname'),
+                )
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def update_training_run(self, run_id: int, **fields):
+        """Update run fields (status, end_time, duration, etc.)."""
+        allowed_fields = ['ended_at', 'duration_seconds', 'status', 'exit_code',
+                         'log_file_path', 'tensorboard_dir']
+        updates = []
+        values = []
+
+        for field, value in fields.items():
+            if field in allowed_fields:
+                updates.append(f'{field} = ?')
+                if isinstance(value, datetime):
+                    values.append(value.isoformat())
+                else:
+                    values.append(value)
+
+        if not updates:
+            return
+
+        values.append(run_id)
+        query = f"UPDATE training_runs SET {', '.join(updates)} WHERE id = ?"
+
+        with self._get_connection() as conn:
+            conn.execute(query, values)
+            conn.commit()
+
+    def get_training_runs(self, project_name: str, limit: int = 20) -> list[dict]:
+        """Fetch recent runs for a project, ordered by started_at DESC."""
+        with self._get_connection() as conn:
+            if limit is None:
+                rows = conn.execute(
+                    'SELECT * FROM training_runs WHERE project_name = ? ORDER BY started_at DESC',
+                    (project_name,)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    'SELECT * FROM training_runs WHERE project_name = ? ORDER BY started_at DESC LIMIT ?',
+                    (project_name, limit)
+                ).fetchall()
+
+            return [dict(row) for row in rows]
+
+    def get_training_run(self, run_id: int) -> dict:
+        """Fetch single run details."""
+        with self._get_connection() as conn:
+            row = conn.execute('SELECT * FROM training_runs WHERE id = ?', (run_id,)).fetchone()
+            return dict(row) if row else None
+
+    def delete_training_run(self, run_id: int):
+        """Delete run record."""
+        with self._get_connection() as conn:
+            conn.execute('DELETE FROM training_runs WHERE id = ?', (run_id,))
+            conn.commit()
+
+    def count_training_runs(self, project_name: str) -> int:
+        """Count total runs for project."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                'SELECT COUNT(*) as count FROM training_runs WHERE project_name = ?',
+                (project_name,)
+            ).fetchone()
+            return row['count']
+
+    def prune_old_runs(self, project_name: str, keep_last: int = 20) -> list[dict]:
+        """Delete runs beyond retention limit. Returns list of deleted runs."""
+        with self._get_connection() as conn:
+            # Get runs to delete (all but the most recent keep_last)
+            rows = conn.execute(
+                '''SELECT * FROM training_runs
+                   WHERE project_name = ?
+                   ORDER BY started_at DESC
+                   LIMIT -1 OFFSET ?''',
+                (project_name, keep_last)
+            ).fetchall()
+
+            deleted_runs = [dict(row) for row in rows]
+
+            # Delete them
+            if deleted_runs:
+                ids_to_delete = [row['id'] for row in deleted_runs]
+                placeholders = ','.join('?' * len(ids_to_delete))
+                conn.execute(
+                    f'DELETE FROM training_runs WHERE id IN ({placeholders})',
+                    ids_to_delete
+                )
+                conn.commit()
+
+            return deleted_runs
+
+    def delete_all_runs(self, project_name: str) -> int:
+        """Delete all run history for a project. Returns count deleted."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                'DELETE FROM training_runs WHERE project_name = ?',
+                (project_name,)
+            )
+            conn.commit()
+            return cursor.rowcount
+
 
 # Global database instance (initialized in app.py)
 _db: DatabaseService | None = None

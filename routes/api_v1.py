@@ -391,3 +391,94 @@ def system_stats():
     """Get system stats (CPU, RAM, GPU)."""
     stats = get_all_stats()
     return api_response(data=stats)
+
+
+# ---------------------------------------------------------------------------
+# Run History
+# ---------------------------------------------------------------------------
+
+@api_v1_bp.route("/projects/<name>/runs")
+@api_key_required
+def list_runs(name):
+    """List training run history."""
+    project, error = load_project(name)
+    if error:
+        return error
+
+    from services.db_service import get_db
+    runs = get_db().get_training_runs(name, limit=20)
+
+    return api_response(data={"runs": runs})
+
+
+@api_v1_bp.route("/projects/<name>/runs/<int:run_id>")
+@api_key_required
+def get_run(name, run_id):
+    """Get details for a specific run."""
+    project, error = load_project(name)
+    if error:
+        return error
+
+    from services.db_service import get_db
+    run = get_db().get_training_run(run_id)
+
+    if not run or run['project_name'] != name:
+        return api_response(
+            error_code="NOT_FOUND",
+            error_message=f"Run {run_id} not found",
+            status_code=404
+        )
+
+    return api_response(data={"run": run})
+
+
+@api_v1_bp.route("/projects/<name>/runs/<int:run_id>/log")
+@api_key_required
+def download_run_log(name, run_id):
+    """Download archived log for a run."""
+    project, error = load_project(name)
+    if error:
+        return error
+
+    from services.db_service import get_db
+    run = get_db().get_training_run(run_id)
+
+    if not run or run['project_name'] != name:
+        return api_response(
+            error_code="NOT_FOUND",
+            error_message=f"Run {run_id} not found",
+            status_code=404
+        )
+
+    if not run.get('log_file_path'):
+        return api_response(
+            error_code="NOT_FOUND",
+            error_message="Log file not available",
+            status_code=404
+        )
+
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    log_path = os.path.join(projects_dir, name, run['log_file_path'])
+
+    if not os.path.isfile(log_path):
+        return api_response(
+            error_code="NOT_FOUND",
+            error_message="Log file not found on disk",
+            status_code=404
+        )
+
+    from flask import send_file
+    return send_file(log_path, as_attachment=True)
+
+
+@api_v1_bp.route("/projects/<name>/runs/clear", methods=["DELETE"])
+@api_key_required
+def clear_all_runs(name):
+    """Clear all run history."""
+    project, error = load_project(name)
+    if error:
+        return error
+
+    # Delegate to training route handler logic
+    from routes.training import clear_history
+    return clear_history(name)
