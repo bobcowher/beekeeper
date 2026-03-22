@@ -668,8 +668,13 @@ def start_tensorboard(projects_dir, name):
 
     workspace_dir = os.path.join(projects_dir, name, "workspace")
     tb_logdir = os.path.join(workspace_dir, project.get("tensorboard_log_dir", "runs"))
+
+    # Create the log directory if it doesn't exist
     if not os.path.isdir(tb_logdir):
-        return {"error": f"Tensorboard log directory not found: {project.get('tensorboard_log_dir', 'runs')}"}
+        try:
+            os.makedirs(tb_logdir, exist_ok=True)
+        except Exception as e:
+            return {"error": f"Failed to create Tensorboard log directory: {e}"}
 
     tb_port = _find_free_port()
     if not tb_port:
