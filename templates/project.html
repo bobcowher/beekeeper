@@ -162,6 +162,12 @@ curl http://{{ host }}/api/v1/projects/{{ project.name }}/files
 curl -O http://{{ host }}/api/v1/projects/{{ project.name }}/files/<filepath>
 curl -o workspace.zip "http://{{ host }}/api/v1/projects/{{ project.name }}/files?zip=1"
 
+# TensorBoard Metrics
+curl http://{{ host }}/api/v1/projects/{{ project.name }}/tensorboard/latest
+curl "http://{{ host }}/api/v1/projects/{{ project.name }}/tensorboard/latest?detail=medium"
+curl "http://{{ host }}/api/v1/projects/{{ project.name }}/tensorboard/latest?metrics=loss,accuracy"
+curl http://{{ host }}/api/v1/projects/{{ project.name }}/runs/42/metrics
+
 # System Stats
 curl http://{{ host }}/api/v1/stats</pre>
     </div>

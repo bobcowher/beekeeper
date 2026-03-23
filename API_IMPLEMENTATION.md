@@ -26,6 +26,14 @@ Successfully implemented a REST API at `/api/v1/` for programmatic access to Bee
   - Returns file download for files
   - Supports `?zip=1` to download directories as zip
 
+### TensorBoard Metrics
+
+- `GET /api/v1/projects/<name>/tensorboard/latest` - Get metrics analysis for latest completed run
+  - Query params: `?detail=low|medium|high`, `?metrics=loss,accuracy`
+  - Returns: Trend analysis, statistics, convergence detection, anomalies
+- `GET /api/v1/projects/<name>/runs/<run_id>/metrics` - Get metrics for specific run
+  - Same query params as above
+
 ### System
 - `GET /api/v1/stats` - System stats (CPU, RAM, GPU)
 
@@ -63,6 +71,11 @@ All endpoints return JSON with a consistent envelope:
 | `STOP_FAILED` | 400 | Failed to stop training |
 | `READ_ERROR` | 500 | Failed to read log file |
 | `LOAD_ERROR` | 500 | Failed to load project |
+| `NO_TENSORBOARD_DATA` | 404 | No TensorBoard metrics found |
+| `METRIC_NOT_FOUND` | 404 | Requested metric doesn't exist |
+| `NO_COMPLETED_RUNS` | 404 | No completed runs available |
+| `INVALID_PARAMETER` | 400 | Invalid query parameter value |
+| `PARSE_ERROR` | 500 | Failed to parse TFEvents |
 
 ## Example Usage
 
@@ -96,6 +109,71 @@ curl -o workspace.zip "http://localhost:5000/api/v1/projects/demo-project/files?
 
 # Get system stats
 curl http://localhost:5000/api/v1/stats
+
+# Get latest run metrics (summary only)
+curl http://localhost:5000/api/v1/projects/demo-project/tensorboard/latest
+
+# Get metrics with sampled points
+curl "http://localhost:5000/api/v1/projects/demo-project/tensorboard/latest?detail=medium"
+
+# Filter specific metrics
+curl "http://localhost:5000/api/v1/projects/demo-project/tensorboard/latest?metrics=train/loss,val/loss"
+
+# Get metrics for specific run
+curl http://localhost:5000/api/v1/projects/demo-project/runs/42/metrics
+```
+
+### TensorBoard Metrics Response Format
+
+**Low Detail (default):**
+```json
+{
+  "success": true,
+  "data": {
+    "run_id": 42,
+    "run_info": {
+      "started_at": "2026-03-22 14:30:00",
+      "ended_at": "2026-03-22 16:15:00",
+      "status": "completed",
+      "duration_seconds": 6300
+    },
+    "metrics": {
+      "train/loss": {
+        "trend": "improving",
+        "initial_value": 2.345,
+        "final_value": 0.234,
+        "best_value": 0.189,
+        "best_step": 8500,
+        "improvement_percent": -90.02,
+        "converged": true,
+        "convergence_step": 7800,
+        "anomaly_count": 2,
+        "anomalies": [
+          {"step": 2300, "value": 5.67, "reason": "spike_high"},
+          {"step": 4100, "value": 4.23, "reason": "spike_high"}
+        ],
+        "summary": "train/loss improved by 90.0% from 2.35 to 0.23. Converged at step 7800. 2 anomalies detected.",
+        "total_points": 10234
+      }
+    }
+  }
+}
+```
+
+**Medium Detail:**
+Same as low, but includes `sampled_points` array (~100 key points):
+```json
+{
+  "sampled_points": [
+    {"step": 0, "value": 2.345, "wall_time": 1711114200.123},
+    {"step": 100, "value": 2.189, "wall_time": 1711114215.456},
+    ...
+  ]
+}
+```
+
+**High Detail:**
+Same as medium (sampled points included). Full raw data is intentionally not included for performance reasons.
 ```
 
 ## Additional Work Completed

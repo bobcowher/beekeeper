@@ -38,6 +38,20 @@ Beekeeper is a Flask web app for managing ML training projects. It provides:
 - Collapsible JS moved to app.js for shared use across all pages
 - Fixed HTML entity rendering for collapse arrows (use Unicode directly)
 
+## Dependency Management
+
+**ALWAYS install dependencies via requirements.txt in the venv.**
+
+```bash
+# Install in venv (tests the file works)
+./venv/bin/pip install -r requirements.txt
+
+# Then restart the service to pick up changes
+sudo systemctl restart beekeeper
+```
+
+**Never use `pip install <package>` directly.** This ensures requirements.txt is always tested and never breaks project setup.
+
 ## Local Testing
 
 Beekeeper runs as a systemd service on the local machine:

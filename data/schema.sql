@@ -67,3 +67,40 @@ CREATE TABLE IF NOT EXISTS training_runs (
 CREATE INDEX IF NOT EXISTS idx_runs_project ON training_runs(project_name);
 CREATE INDEX IF NOT EXISTS idx_runs_started ON training_runs(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_project_started ON training_runs(project_name, started_at DESC);
+
+-- Metric analyses table
+CREATE TABLE IF NOT EXISTS metric_analyses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    metric_name TEXT NOT NULL,
+
+    -- Analysis summary
+    trend TEXT,  -- 'improving', 'stable', 'unstable', 'insufficient_data'
+    initial_value REAL,
+    final_value REAL,
+    best_value REAL,
+    best_step INTEGER,
+    improvement_percent REAL,
+
+    -- Convergence detection
+    converged BOOLEAN DEFAULT 0,
+    convergence_step INTEGER,
+
+    -- Anomaly detection
+    anomaly_count INTEGER DEFAULT 0,
+    anomaly_details TEXT,  -- JSON array
+
+    -- Summary
+    summary TEXT,
+
+    -- Sampled data
+    sampled_points TEXT,  -- JSON: 100 key points
+    total_points INTEGER,
+
+    parsed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (run_id) REFERENCES training_runs(id) ON DELETE CASCADE,
+    UNIQUE(run_id, metric_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_metric_analyses_run ON metric_analyses(run_id);

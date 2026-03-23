@@ -54,6 +54,39 @@ class DatabaseService:
             if 'locked_until' not in columns:
                 conn.execute('ALTER TABLE users ADD COLUMN locked_until TIMESTAMP')
 
+            # Check if metric_analyses table exists
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='metric_analyses'"
+            )
+            if not cursor.fetchone():
+                # Create metric_analyses table
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS metric_analyses (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        run_id INTEGER NOT NULL,
+                        metric_name TEXT NOT NULL,
+                        trend TEXT,
+                        initial_value REAL,
+                        final_value REAL,
+                        best_value REAL,
+                        best_step INTEGER,
+                        improvement_percent REAL,
+                        converged BOOLEAN DEFAULT 0,
+                        convergence_step INTEGER,
+                        anomaly_count INTEGER DEFAULT 0,
+                        anomaly_details TEXT,
+                        summary TEXT,
+                        sampled_points TEXT,
+                        total_points INTEGER,
+                        parsed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (run_id) REFERENCES training_runs(id) ON DELETE CASCADE,
+                        UNIQUE(run_id, metric_name)
+                    )
+                ''')
+                conn.execute(
+                    'CREATE INDEX IF NOT EXISTS idx_metric_analyses_run ON metric_analyses(run_id)'
+                )
+
             conn.commit()
 
     # User operations
@@ -435,6 +468,81 @@ class DatabaseService:
             )
             conn.commit()
             return cursor.rowcount
+
+    # Metric analysis operations
+    def save_metric_analysis(self, run_id: int, metric_name: str, analysis_data: dict):
+        """Insert or replace metric analysis."""
+        import json
+
+        with self._get_connection() as conn:
+            conn.execute(
+                '''INSERT OR REPLACE INTO metric_analyses
+                   (run_id, metric_name, trend, initial_value, final_value, best_value,
+                    best_step, improvement_percent, converged, convergence_step,
+                    anomaly_count, anomaly_details, summary, sampled_points, total_points)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (
+                    run_id,
+                    metric_name,
+                    analysis_data.get('trend'),
+                    analysis_data.get('initial_value'),
+                    analysis_data.get('final_value'),
+                    analysis_data.get('best_value'),
+                    analysis_data.get('best_step'),
+                    analysis_data.get('improvement_percent'),
+                    analysis_data.get('converged', False),
+                    analysis_data.get('convergence_step'),
+                    analysis_data.get('anomaly_count', 0),
+                    json.dumps(analysis_data.get('anomalies', [])),
+                    analysis_data.get('summary'),
+                    json.dumps(analysis_data.get('sampled_points', [])),
+                    analysis_data.get('total_points'),
+                )
+            )
+            conn.commit()
+
+    def get_metric_analyses(self, run_id: int, metric_names: list = None) -> dict:
+        """Get cached analyses for a run."""
+        import json
+
+        with self._get_connection() as conn:
+            if metric_names:
+                placeholders = ','.join('?' * len(metric_names))
+                query = f'''SELECT * FROM metric_analyses
+                           WHERE run_id = ? AND metric_name IN ({placeholders})'''
+                params = [run_id] + metric_names
+                rows = conn.execute(query, params).fetchall()
+            else:
+                rows = conn.execute(
+                    'SELECT * FROM metric_analyses WHERE run_id = ?',
+                    (run_id,)
+                ).fetchall()
+
+            result = {}
+            for row in rows:
+                result[row['metric_name']] = {
+                    'trend': row['trend'],
+                    'initial_value': row['initial_value'],
+                    'final_value': row['final_value'],
+                    'best_value': row['best_value'],
+                    'best_step': row['best_step'],
+                    'improvement_percent': row['improvement_percent'],
+                    'converged': bool(row['converged']),
+                    'convergence_step': row['convergence_step'],
+                    'anomaly_count': row['anomaly_count'],
+                    'anomalies': json.loads(row['anomaly_details']) if row['anomaly_details'] else [],
+                    'summary': row['summary'],
+                    'sampled_points': json.loads(row['sampled_points']) if row['sampled_points'] else [],
+                    'total_points': row['total_points'],
+                }
+
+            return result
+
+    def delete_metric_analyses(self, run_id: int):
+        """Delete all analyses for a run."""
+        with self._get_connection() as conn:
+            conn.execute('DELETE FROM metric_analyses WHERE run_id = ?', (run_id,))
+            conn.commit()
 
 
 # Global database instance (initialized in app.py)

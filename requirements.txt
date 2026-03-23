@@ -3,3 +3,5 @@ psutil
 nvitop
 gunicorn
 bcrypt==4.1.2
+tbparse==0.0.8
+numpy

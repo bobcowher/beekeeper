@@ -168,6 +168,16 @@ def _monitor_process(projects_dir, name):
             if run_id and started_at:
                 _finalize_run_record(run_id, ret, started_at, archived_log_path)
 
+            # Trigger background metric parsing for completed runs
+            if run_id and ret == 0:  # Only successful runs
+                import threading
+                from services import tensorboard_service
+                threading.Thread(
+                    target=tensorboard_service.parse_run_metrics,
+                    args=(projects_dir, name, run_id),
+                    daemon=True
+                ).start()
+
             # Prune old runs (keep last 20)
             _prune_old_runs(projects_dir, name, keep_last=20)
 

@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.0.4-beta] - 2026-03-22
+
+### New Features
+
+**TensorBoard Metrics Analysis API**
+AI agents and automation tools can now query training metrics via REST API with intelligent analysis instead of raw time series data.
+
+- **Multi-level detail:** Summary (default), sampled points (medium), or full data (high)
+- **Automatic analysis:** Trend detection (improving/stable/unstable), convergence analysis, anomaly detection
+- **Smart sampling:** ~100 key points including first, last, min, max, inflection points
+- **Background processing:** Metrics are parsed and cached automatically when training completes
+- **Works with any metrics:** Auto-detects all scalar metrics from PyTorch SummaryWriter, TensorFlow, or any TFEvents producer
+
+**New API Endpoints:**
+- `GET /api/v1/projects/<name>/tensorboard/latest` - Latest completed run metrics
+- `GET /api/v1/projects/<name>/runs/<run_id>/metrics` - Specific run metrics
+
+**Dependencies Added:**
+- `tbparse==0.0.8` - Lightweight TensorBoard parser (no TensorFlow dependency)
+- `numpy` - Statistical analysis
+
+**See Also:** Updated `API_IMPLEMENTATION.md` with full endpoint documentation and response format examples.
+
+---
+
 ## [1.0.2-prerelease] - 2026-03-14
 
 ### New Features

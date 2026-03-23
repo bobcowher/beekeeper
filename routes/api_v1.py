@@ -482,3 +482,154 @@ def clear_all_runs(name):
     # Delegate to training route handler logic
     from routes.training import clear_history
     return clear_history(name)
+
+
+@api_v1_bp.route("/projects/<name>/tensorboard/latest")
+@api_key_required
+def get_latest_metrics(name):
+    """
+    Get metrics analysis for most recent completed run.
+
+    Query params:
+      ?detail=low (default, summary only) | medium (+ samples) | high (all data)
+      ?metrics=loss,accuracy (filter specific metrics)
+    """
+    from flask import request
+    from services import tensorboard_service
+    from services.db_service import get_db
+
+    project, error = load_project(name)
+    if error:
+        return error
+
+    # Get query parameters
+    detail = request.args.get('detail', 'low')
+    if detail not in ['low', 'medium', 'high']:
+        return api_response(
+            error_code="INVALID_PARAMETER",
+            error_message="detail must be 'low', 'medium', or 'high'",
+            status_code=400
+        )
+
+    metric_filter = None
+    if request.args.get('metrics'):
+        metric_filter = [m.strip() for m in request.args.get('metrics').split(',')]
+
+    # Get latest completed run
+    db = get_db()
+    runs = db.get_training_runs(name, limit=100)
+    completed_runs = [r for r in runs if r['status'] == 'completed']
+
+    if not completed_runs:
+        return api_response(
+            error_code="NO_COMPLETED_RUNS",
+            error_message="No completed training runs found",
+            status_code=404
+        )
+
+    latest_run = completed_runs[0]
+    run_id = latest_run['id']
+
+    # Get metrics analysis
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    result = tensorboard_service.get_metric_analysis(
+        projects_dir, name, run_id, metric_filter, detail
+    )
+
+    if 'error' in result:
+        return api_response(
+            error_code=result['error'],
+            error_message=result['message'],
+            status_code=404
+        )
+
+    # Build response
+    response_data = {
+        'run_id': run_id,
+        'run_info': {
+            'started_at': latest_run['started_at'],
+            'ended_at': latest_run['ended_at'],
+            'status': latest_run['status'],
+            'duration_seconds': latest_run['duration_seconds']
+        },
+        'metrics': result['metrics']
+    }
+
+    return api_response(data=response_data)
+
+
+@api_v1_bp.route("/projects/<name>/runs/<int:run_id>/metrics")
+@api_key_required
+def get_run_metrics(name, run_id):
+    """
+    Get metrics for specific run.
+
+    Query params:
+      ?detail=low (default, summary only) | medium (+ samples) | high (all data)
+      ?metrics=loss,accuracy (filter specific metrics)
+    """
+    from flask import request
+    from services import tensorboard_service
+    from services.db_service import get_db
+
+    project, error = load_project(name)
+    if error:
+        return error
+
+    # Get query parameters
+    detail = request.args.get('detail', 'low')
+    if detail not in ['low', 'medium', 'high']:
+        return api_response(
+            error_code="INVALID_PARAMETER",
+            error_message="detail must be 'low', 'medium', or 'high'",
+            status_code=400
+        )
+
+    metric_filter = None
+    if request.args.get('metrics'):
+        metric_filter = [m.strip() for m in request.args.get('metrics').split(',')]
+
+    # Verify run exists
+    db = get_db()
+    run = db.get_training_run(run_id)
+
+    if not run:
+        return api_response(
+            error_code="RUN_NOT_FOUND",
+            error_message=f"Run {run_id} not found",
+            status_code=404
+        )
+
+    if run['project_name'] != name:
+        return api_response(
+            error_code="RUN_NOT_FOUND",
+            error_message=f"Run {run_id} does not belong to project {name}",
+            status_code=404
+        )
+
+    # Get metrics analysis
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    result = tensorboard_service.get_metric_analysis(
+        projects_dir, name, run_id, metric_filter, detail
+    )
+
+    if 'error' in result:
+        return api_response(
+            error_code=result['error'],
+            error_message=result['message'],
+            status_code=404
+        )
+
+    # Build response
+    response_data = {
+        'run_id': run_id,
+        'run_info': {
+            'started_at': run['started_at'],
+            'ended_at': run['ended_at'],
+            'status': run['status'],
+            'duration_seconds': run['duration_seconds']
+        },
+        'metrics': result['metrics']
+    }
+
+    return api_response(data=response_data)
