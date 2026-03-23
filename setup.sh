@@ -32,18 +32,16 @@ echo ""
 # --- Create venv & install deps ---
 echo "--- Creating virtual environment ---"
 
-# Check if venv module is available
-if ! $PYTHON_BIN -m venv --help &>/dev/null; then
-    echo ""
-    echo "ERROR: Python venv module is not available."
-    echo ""
+# Detect Python version for package checking
+PYTHON_VERSION=$($PYTHON_BIN -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+VENV_PACKAGE="python${PYTHON_VERSION}-venv"
 
-    # Detect Python version for specific package name
-    PYTHON_VERSION=$($PYTHON_BIN -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-    VENV_PACKAGE="python${PYTHON_VERSION}-venv"
-
-    # Check if we're on a Debian/Ubuntu system
-    if command -v apt &>/dev/null; then
+# Check if venv package is installed (Debian/Ubuntu specific)
+if command -v apt &>/dev/null; then
+    if ! dpkg -l | grep -q "^ii.*$VENV_PACKAGE"; then
+        echo ""
+        echo "ERROR: $VENV_PACKAGE is not installed."
+        echo ""
         echo "On Debian/Ubuntu systems, you need to install the venv package:"
         echo "    sudo apt update"
         echo "    sudo apt install $VENV_PACKAGE"
@@ -55,17 +53,15 @@ if ! $PYTHON_BIN -m venv --help &>/dev/null; then
             sudo apt update -qq
             sudo apt install -y $VENV_PACKAGE
             echo "✓ $VENV_PACKAGE installed"
+            echo ""
         else
             echo "Aborted. Please install $VENV_PACKAGE and re-run setup."
             exit 1
         fi
-    else
-        echo "Please install the venv module for your Python installation and re-run."
-        exit 1
     fi
 fi
 
-# Create venv (either it was available or we just installed it)
+# Create venv
 $PYTHON_BIN -m venv "$VENV_DIR"
 
 echo "--- Installing dependencies ---"
