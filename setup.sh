@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# --- Parse arguments ---
+AUTO_YES=false
+if [[ "${1:-}" == "-y" || "${1:-}" == "--yes" ]]; then
+    AUTO_YES=true
+fi
+
 # --- Resolve install location ---
 BEEKEEPER_HOME="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$BEEKEEPER_HOME/venv"
@@ -46,17 +52,26 @@ if command -v apt &>/dev/null; then
         echo "    sudo apt update"
         echo "    sudo apt install $VENV_PACKAGE"
         echo ""
-        read -p "Install $VENV_PACKAGE now? (y/N): " -n 1 -r
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            echo "Installing $VENV_PACKAGE..."
+
+        if [ "$AUTO_YES" = true ]; then
+            echo "Auto-installing $VENV_PACKAGE (--yes mode)..."
             sudo apt update -qq
             sudo apt install -y $VENV_PACKAGE
             echo "✓ $VENV_PACKAGE installed"
             echo ""
         else
-            echo "Aborted. Please install $VENV_PACKAGE and re-run setup."
-            exit 1
+            read -p "Install $VENV_PACKAGE now? (y/N): " -n 1 -r
+            echo ""
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                echo "Installing $VENV_PACKAGE..."
+                sudo apt update -qq
+                sudo apt install -y $VENV_PACKAGE
+                echo "✓ $VENV_PACKAGE installed"
+                echo ""
+            else
+                echo "Aborted. Please install $VENV_PACKAGE and re-run setup."
+                exit 1
+            fi
         fi
     fi
 fi
@@ -119,10 +134,19 @@ echo "--- Optional: Passwordless service management ---"
 echo "This allows restarting the service without a password prompt."
 echo "Useful for development (e.g., quick restarts after code changes)."
 echo ""
-read -p "Enable passwordless sudo for beekeeper service? (y/N): " -n 1 -r
-echo ""
 
-if [[ $REPLY =~ ^[Yy]$ ]]; then
+ENABLE_PASSWORDLESS=false
+if [ "$AUTO_YES" = true ]; then
+    echo "Skipping passwordless sudo setup (--yes mode, use interactive setup to enable)"
+else
+    read -p "Enable passwordless sudo for beekeeper service? (y/N): " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        ENABLE_PASSWORDLESS=true
+    fi
+fi
+
+if [ "$ENABLE_PASSWORDLESS" = true ]; then
     SUDOERS_FILE="/etc/sudoers.d/$SERVICE_NAME"
     TEMP_SUDOERS=$(mktemp)
     SYSTEMCTL_PATH="$(command -v systemctl)"
