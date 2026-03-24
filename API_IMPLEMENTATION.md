@@ -34,6 +34,13 @@ Successfully implemented a REST API at `/api/v1/` for programmatic access to Bee
 - `GET /api/v1/projects/<name>/runs/<run_id>/metrics` - Get metrics for specific run
   - Same query params as above
 
+### Agent Integration
+- `GET /api/v1/projects/<name>/agent/sdk` - Download Python SDK for AI agents
+  - Downloads a self-contained Python client file
+  - Pre-configured with project details (URL, name, etc.)
+  - Includes all API methods with type hints and examples
+  - Requires: `pip install requests`
+
 ### System
 - `GET /api/v1/stats` - System stats (CPU, RAM, GPU)
 
@@ -121,6 +128,16 @@ curl "http://localhost:5000/api/v1/projects/demo-project/tensorboard/latest?metr
 
 # Get metrics for specific run
 curl http://localhost:5000/api/v1/projects/demo-project/runs/42/metrics
+
+# Download Python SDK for AI agents
+curl -O http://localhost:5000/api/v1/projects/demo-project/agent/sdk
+
+# Use the SDK
+python3 -c "
+from beekeeper_client_demo_project import BeekeeperClient
+client = BeekeeperClient(api_key='bk_your_api_key')
+client.start_training()
+"
 ```
 
 ### TensorBoard Metrics Response Format

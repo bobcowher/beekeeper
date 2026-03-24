@@ -633,3 +633,35 @@ def get_run_metrics(name, run_id):
     }
 
     return api_response(data=response_data)
+
+
+# ---------------------------------------------------------------------------
+# Agent Integration SDK
+# ---------------------------------------------------------------------------
+
+@api_v1_bp.route("/projects/<name>/agent/sdk")
+@api_key_required
+def download_agent_sdk(name):
+    """Generate and download Python SDK for AI agent integration."""
+    from services.agent_sdk_generator import generate_sdk
+
+    project, error = load_project(name)
+    if error:
+        return error
+
+    # Generate SDK content
+    sdk_content = generate_sdk(
+        project_name=name,
+        base_url=request.url_root.rstrip('/'),
+        project=project
+    )
+
+    # Return as downloadable file
+    filename = f"beekeeper_client_{name.replace('-', '_')}.py"
+    return Response(
+        sdk_content,
+        mimetype='text/x-python',
+        headers={
+            'Content-Disposition': f'attachment; filename="{filename}"'
+        }
+    )

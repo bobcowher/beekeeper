@@ -148,6 +148,18 @@
 <section class="card collapsible" id="api-section">
     <h2 class="collapsible-header" data-target="api-body">API <span class="collapse-icon">▶</span></h2>
     <div class="collapsible-body" id="api-body" style="display:none">
+        <!-- Download SDK Button -->
+        <div style="margin-bottom: 1rem;">
+            <a href="/api/v1/projects/{{ project.name }}/agent/sdk"
+               class="btn btn-primary"
+               download>
+                Download Python SDK
+            </a>
+            <span style="color: var(--text-secondary); margin-left: 1rem;">
+                One-file client for AI agents
+            </span>
+        </div>
+
         <pre class="api-examples" id="api-examples">{% set host = request.host %}# Training
 curl -X POST http://{{ host }}/api/v1/projects/{{ project.name }}/training/start
 curl -X POST http://{{ host }}/api/v1/projects/{{ project.name }}/training/stop

@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.0.5-beta] - 2026-03-23
+
+### New Features
+
+**Agent Integration SDK**
+AI agents can now download a single-file Python SDK pre-configured for any project, enabling zero-configuration automation and control.
+
+- **One-file download:** `GET /api/v1/projects/<name>/agent/sdk` returns a complete Python client
+- **Pre-configured:** Project URL, name, and details baked into the generated file
+- **Full API coverage:** All endpoints wrapped in a BeekeeperClient class with type hints and docstrings
+- **Comprehensive examples:** Usage examples included directly in the SDK file
+- **Zero dependencies:** Only requires `pip install requests`
+- **Web UI integration:** Download button added to project API section
+
+**Use Case:** Download SDK, set API key, start controlling training—no manual configuration needed.
+
+---
+
 ## [1.0.4-beta] - 2026-03-22
 
 ### New Features
