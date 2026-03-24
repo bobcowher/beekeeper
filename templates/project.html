@@ -148,18 +148,119 @@
 <section class="card collapsible" id="api-section">
     <h2 class="collapsible-header" data-target="api-body">API <span class="collapse-icon">▶</span></h2>
     <div class="collapsible-body" id="api-body" style="display:none">
-        <!-- Download SDK Button -->
-        <div style="margin-bottom: 1rem;">
-            <a href="/api/v1/projects/{{ project.name }}/agent/sdk"
-               class="btn btn-primary"
-               download>
-                Download Python SDK
-            </a>
-            <span style="color: var(--text-secondary); margin-left: 1rem;">
-                One-file client for AI agents
-            </span>
+        <!-- Agent Instructions -->
+        <div style="margin-bottom: 1.5rem;">
+            <h3 style="margin-top: 0; margin-bottom: 0.5rem; font-size: 1rem;">Agent Instructions</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 0.75rem; font-size: 0.9rem;">
+                Copy and paste these instructions into your AI agent or save to beekeeper.md
+            </p>
+            <pre class="api-examples" style="background: var(--bg-secondary); padding: 1rem; border-radius: 4px; font-size: 0.85rem;">{% set host = request.host %}# Beekeeper API Control: {{ project.name }}
+
+## Project Details
+- **Base URL:** http://{{ host }}
+- **Project Name:** {{ project.name }}
+- **Git Repository:** {{ project.git_url }}
+- **Branch:** {{ project.branch }}
+- **Setup Status:** {{ project.setup_status }}
+
+## Authentication
+V1: No authentication required. API endpoints are publicly accessible.
+
+## Core Endpoints
+
+### Training Control
+- **Start Training**
+  - `POST /api/v1/projects/{{ project.name }}/training/start`
+  - Returns: `{"success": true, "data": {"status": "started", "pid": 12345, "tb_port": 6006}}`
+
+- **Stop Training**
+  - `POST /api/v1/projects/{{ project.name }}/training/stop`
+  - Returns: `{"success": true, "data": {"status": "stopped"}}`
+
+- **Get Training Status**
+  - `GET /api/v1/projects/{{ project.name }}/training/status`
+  - Returns: `{"success": true, "data": {"status": "running|idle|crashed", "pid": 12345, ...}}`
+
+### Logs
+- **Get Recent Logs**
+  - `GET /api/v1/projects/{{ project.name }}/logs?tail=100`
+  - Returns: `{"success": true, "data": {"content": "log text...", "lines": 100}}`
+
+- **Stream Logs (SSE)**
+  - `GET /api/v1/projects/{{ project.name }}/logs/stream`
+  - Server-Sent Events stream of log lines in real-time
+
+### Files & Workspace
+- **List Files**
+  - `GET /api/v1/projects/{{ project.name }}/files`
+  - Returns directory listing with file metadata
+
+- **Download File**
+  - `GET /api/v1/projects/{{ project.name }}/files/<filepath>`
+  - Returns file content for download
+
+- **Download Workspace as Zip**
+  - `GET /api/v1/projects/{{ project.name }}/files?zip=1`
+  - Returns entire workspace as zip archive
+
+### TensorBoard Metrics
+- **Get Latest Run Metrics**
+  - `GET /api/v1/projects/{{ project.name }}/tensorboard/latest`
+  - Optional params: `?detail=low|medium|high`, `?metrics=loss,accuracy`
+  - Returns analyzed metrics with trends, convergence, anomalies
+
+- **Get Specific Run Metrics**
+  - `GET /api/v1/projects/{{ project.name }}/runs/<run_id>/metrics`
+  - Same params as above
+
+### Run History
+- **List Training Runs**
+  - `GET /api/v1/projects/{{ project.name }}/runs`
+  - Returns list of past training runs with status and timestamps
+
+- **Get Run Details**
+  - `GET /api/v1/projects/{{ project.name }}/runs/<run_id>`
+  - Returns detailed info for specific run
+
+- **Download Run Log**
+  - `GET /api/v1/projects/{{ project.name }}/runs/<run_id>/log`
+  - Downloads archived log file for completed run
+
+### System Stats
+- **Get System Resources**
+  - `GET /api/v1/stats`
+  - Returns CPU, RAM, GPU usage and availability
+
+## Response Format
+All endpoints return JSON with consistent envelope:
+```json
+// Success
+{"success": true, "data": {...}}
+
+// Error
+{"success": false, "error": {"code": "ERROR_CODE", "message": "description"}}
+```
+
+## Common Workflows
+
+**Start training and monitor:**
+1. POST to /training/start
+2. GET /training/status to verify running
+3. GET /logs/stream to watch progress in real-time
+
+**Check training progress:**
+1. GET /tensorboard/latest?detail=medium
+2. Analyze metrics trends and convergence
+3. GET /logs?tail=50 for recent output
+
+**Download results:**
+1. GET /runs to find completed run ID
+2. GET /runs/<id>/metrics for final metrics
+3. GET /files?zip=1 to download all outputs
+</pre>
         </div>
 
+        <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem; font-size: 1rem;">curl Examples (for humans)</h3>
         <pre class="api-examples" id="api-examples">{% set host = request.host %}# Training
 curl -X POST http://{{ host }}/api/v1/projects/{{ project.name }}/training/start
 curl -X POST http://{{ host }}/api/v1/projects/{{ project.name }}/training/stop

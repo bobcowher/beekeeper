@@ -4,17 +4,16 @@
 
 ### New Features
 
-**Agent Integration SDK**
-AI agents can now download a single-file Python SDK pre-configured for any project, enabling zero-configuration automation and control.
+**Agent Instructions**
+AI agents can now access comprehensive, project-specific API documentation directly from the project page.
 
-- **One-file download:** `GET /api/v1/projects/<name>/agent/sdk` returns a complete Python client
-- **Pre-configured:** Project URL, name, and details baked into the generated file
-- **Full API coverage:** All endpoints wrapped in a BeekeeperClient class with type hints and docstrings
-- **Comprehensive examples:** Usage examples included directly in the SDK file
-- **Zero dependencies:** Only requires `pip install requests`
-- **Web UI integration:** Download button added to project API section
+- **Copy/paste ready:** Agent Instructions section in project API tab
+- **Project-specific:** All examples pre-filled with actual project name, URL, and details
+- **Complete API coverage:** All endpoints with request/response formats and common workflows
+- **Agent-optimized:** Written for AI agents to read and understand, not traditional SDK documentation
+- **No file management:** Just copy instructions and provide to your AI agent
 
-**Use Case:** Download SDK, set API key, start controlling training—no manual configuration needed.
+**Use Case:** Open project page, copy Agent Instructions, paste into Claude or save to beekeeper.md—agent can immediately control training.
 
 ---
 

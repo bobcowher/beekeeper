@@ -35,11 +35,7 @@ Successfully implemented a REST API at `/api/v1/` for programmatic access to Bee
   - Same query params as above
 
 ### Agent Integration
-- `GET /api/v1/projects/<name>/agent/sdk` - Download Python SDK for AI agents
-  - Downloads a self-contained Python client file
-  - Pre-configured with project details (URL, name, etc.)
-  - Includes all API methods with type hints and examples
-  - Requires: `pip install requests`
+Project pages include an "Agent Instructions" section with comprehensive API documentation tailored to each project. Users can copy/paste these instructions into their AI agent or save to a markdown file. Instructions include project-specific details (URL, name, git repo), all endpoints with response formats, and common workflows.
 
 ### System
 - `GET /api/v1/stats` - System stats (CPU, RAM, GPU)
@@ -128,16 +124,18 @@ curl "http://localhost:5000/api/v1/projects/demo-project/tensorboard/latest?metr
 
 # Get metrics for specific run
 curl http://localhost:5000/api/v1/projects/demo-project/runs/42/metrics
+```
 
-# Download Python SDK for AI agents
-curl -O http://localhost:5000/api/v1/projects/demo-project/agent/sdk
+### Agent Instructions
 
-# Use the SDK
-python3 -c "
-from beekeeper_client_demo_project import BeekeeperClient
-client = BeekeeperClient(api_key='bk_your_api_key')
-client.start_training()
-"
+Each project page includes an "Agent Instructions" section in the API tab. This provides:
+- Project-specific API documentation (URLs, endpoints, examples pre-filled with project name)
+- All endpoints with request/response formats
+- Common workflows for agents to follow
+- Copy/paste ready for use with AI agents or saving to beekeeper.md
+
+Users can simply copy the instructions and provide them to their AI agent for automated control.
+
 ```
 
 ### TensorBoard Metrics Response Format
