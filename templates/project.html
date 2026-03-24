@@ -148,51 +148,13 @@
 <section class="card collapsible" id="api-section">
     <h2 class="collapsible-header" data-target="api-body">API <span class="collapse-icon">▶</span></h2>
     <div class="collapsible-body" id="api-body" style="display:none">
-
-        <!-- Human Section -->
-        <div style="margin-bottom: 1rem;">
-            <h3 class="collapsible-header" data-target="human-api-body" style="margin: 0; padding: 0.5rem 0; font-size: 1rem; cursor: pointer; user-select: none;">
-                Human <span class="collapse-icon">▶</span>
-            </h3>
-            <div class="collapsible-body" id="human-api-body" style="display:none; padding-left: 0.5rem;">
-                <p style="color: var(--text-secondary); margin-bottom: 0.75rem; font-size: 0.9rem;">
-                    Quick reference for making API calls from the command line.
-                </p>
-                <pre class="api-examples">{% set host = request.host %}# Training
-curl -X POST http://{{ host }}/api/v1/projects/{{ project.name }}/training/start
-curl -X POST http://{{ host }}/api/v1/projects/{{ project.name }}/training/stop
-curl http://{{ host }}/api/v1/projects/{{ project.name }}/training/status
-
-# Logs
-curl "http://{{ host }}/api/v1/projects/{{ project.name }}/logs?tail=50"
-curl -N http://{{ host }}/api/v1/projects/{{ project.name }}/logs/stream
-
-# Files
-curl http://{{ host }}/api/v1/projects/{{ project.name }}/files
-curl -O http://{{ host }}/api/v1/projects/{{ project.name }}/files/<filepath>
-curl -o workspace.zip "http://{{ host }}/api/v1/projects/{{ project.name }}/files?zip=1"
-
-# TensorBoard Metrics
-curl http://{{ host }}/api/v1/projects/{{ project.name }}/tensorboard/latest
-curl "http://{{ host }}/api/v1/projects/{{ project.name }}/tensorboard/latest?detail=medium"
-curl "http://{{ host }}/api/v1/projects/{{ project.name }}/tensorboard/latest?metrics=loss,accuracy"
-curl http://{{ host }}/api/v1/projects/{{ project.name }}/runs/42/metrics
-
-# System Stats
-curl http://{{ host }}/api/v1/stats</pre>
-            </div>
-        </div>
-
-        <!-- Agent Section -->
-        <div style="margin-bottom: 1rem;">
-            <h3 class="collapsible-header" data-target="agent-api-body" style="margin: 0; padding: 0.5rem 0; font-size: 1rem; cursor: pointer; user-select: none;">
-                Agent <span class="collapse-icon">▶</span>
-            </h3>
-            <div class="collapsible-body" id="agent-api-body" style="display:none; padding-left: 0.5rem;">
-                <p style="color: var(--text-secondary); margin-bottom: 0.75rem; font-size: 0.9rem;">
-                    Copy and paste these instructions into your AI agent or save to beekeeper.md
-                </p>
-                <pre class="api-examples" style="background: var(--bg-secondary); padding: 1rem; border-radius: 4px; font-size: 0.85rem;">{% set host = request.host %}# Beekeeper API Control: {{ project.name }}
+        <!-- Agent Instructions -->
+        <div style="margin-bottom: 1.5rem;">
+            <h3 style="margin-top: 0; margin-bottom: 0.5rem; font-size: 1rem;">Agent Instructions</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 0.75rem; font-size: 0.9rem;">
+                Copy and paste these instructions into your AI agent or save to beekeeper.md
+            </p>
+            <pre class="api-examples" style="background: var(--bg-secondary); padding: 1rem; border-radius: 4px; font-size: 0.85rem;">{% set host = request.host %}# Beekeeper API Control: {{ project.name }}
 
 ## Project Details
 - **Base URL:** http://{{ host }}
@@ -296,10 +258,31 @@ All endpoints return JSON with consistent envelope:
 2. GET /runs/<id>/metrics for final metrics
 3. GET /files?zip=1 to download all outputs
 </pre>
-            </div>
         </div>
 
+        <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem; font-size: 1rem;">curl Examples (for humans)</h3>
+        <pre class="api-examples" id="api-examples">{% set host = request.host %}# Training
+curl -X POST http://{{ host }}/api/v1/projects/{{ project.name }}/training/start
+curl -X POST http://{{ host }}/api/v1/projects/{{ project.name }}/training/stop
+curl http://{{ host }}/api/v1/projects/{{ project.name }}/training/status
 
+# Logs
+curl "http://{{ host }}/api/v1/projects/{{ project.name }}/logs?tail=50"
+curl -N http://{{ host }}/api/v1/projects/{{ project.name }}/logs/stream
+
+# Files
+curl http://{{ host }}/api/v1/projects/{{ project.name }}/files
+curl -O http://{{ host }}/api/v1/projects/{{ project.name }}/files/<filepath>
+curl -o workspace.zip "http://{{ host }}/api/v1/projects/{{ project.name }}/files?zip=1"
+
+# TensorBoard Metrics
+curl http://{{ host }}/api/v1/projects/{{ project.name }}/tensorboard/latest
+curl "http://{{ host }}/api/v1/projects/{{ project.name }}/tensorboard/latest?detail=medium"
+curl "http://{{ host }}/api/v1/projects/{{ project.name }}/tensorboard/latest?metrics=loss,accuracy"
+curl http://{{ host }}/api/v1/projects/{{ project.name }}/runs/42/metrics
+
+# System Stats
+curl http://{{ host }}/api/v1/stats</pre>
     </div>
 </section>
 {% endif %}
