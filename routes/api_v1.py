@@ -558,6 +558,156 @@ def get_latest_metrics(name):
     return api_response(data=response_data)
 
 
+# ---------------------------------------------------------------------------
+# Agent Instructions
+# ---------------------------------------------------------------------------
+
+@api_v1_bp.route("/projects/<name>/agent/instructions")
+@api_key_required
+def get_agent_instructions(name):
+    """
+    Download agent instructions as a markdown file.
+
+    This file can be added to a project's CLAUDE.md or similar
+    to give AI agents full access to Beekeeper functionality.
+    """
+    project, error = load_project(name)
+    if error:
+        return error
+
+    host = request.host
+
+    content = f"""# Beekeeper: {name}
+
+Control this ML training project via HTTP API. Base URL: http://{host}
+
+## Quick Reference
+
+| Action | Method | Endpoint |
+|--------|--------|----------|
+| Start training | POST | `/api/v1/projects/{name}/training/start` |
+| Stop training | POST | `/api/v1/projects/{name}/training/stop` |
+| Check status | GET | `/api/v1/projects/{name}/training/status` |
+| Get logs | GET | `/api/v1/projects/{name}/logs?tail=100` |
+| Get metrics | GET | `/api/v1/projects/{name}/tensorboard/latest` |
+| List files | GET | `/api/v1/projects/{name}/files` |
+| Download file | GET | `/api/v1/projects/{name}/files/<path>` |
+| System stats | GET | `/api/v1/stats` |
+
+## Response Format
+
+All endpoints return JSON:
+```json
+{{"success": true, "data": {{...}}}}
+{{"success": false, "error": {{"code": "...", "message": "..."}}}}
+```
+
+## Workflows
+
+### Start and Monitor Training
+1. `POST /api/v1/projects/{name}/training/start`
+2. `GET /api/v1/projects/{name}/training/status` - verify running
+3. `GET /api/v1/projects/{name}/logs?tail=50` - check progress
+
+### Analyze Results
+1. `GET /api/v1/projects/{name}/tensorboard/latest?detail=medium`
+2. Review metrics: loss trends, convergence status, anomalies
+
+### Download Outputs
+1. `GET /api/v1/projects/{name}/files` - list available files
+2. `GET /api/v1/projects/{name}/files/<path>` - download specific file
+3. Or: `GET /api/v1/projects/{name}/files?zip=1` - download all as zip
+
+## Endpoint Details
+
+### Training Control
+
+**Start Training**
+```
+POST /api/v1/projects/{name}/training/start
+Response: {{"success": true, "data": {{"status": "started", "pid": 12345, "tb_port": 6006}}}}
+```
+
+**Stop Training**
+```
+POST /api/v1/projects/{name}/training/stop
+Response: {{"success": true, "data": {{"status": "stopped"}}}}
+```
+
+**Get Status**
+```
+GET /api/v1/projects/{name}/training/status
+Response: {{"success": true, "data": {{"status": "running|idle|crashed", "pid": 12345}}}}
+```
+
+### Logs
+
+**Get Recent Logs**
+```
+GET /api/v1/projects/{name}/logs?tail=100
+Response: {{"success": true, "data": {{"content": "...", "lines": 100}}}}
+```
+
+### TensorBoard Metrics
+
+**Get Latest Metrics**
+```
+GET /api/v1/projects/{name}/tensorboard/latest
+GET /api/v1/projects/{name}/tensorboard/latest?detail=medium
+GET /api/v1/projects/{name}/tensorboard/latest?metrics=loss,accuracy
+
+Response includes: trends, convergence analysis, anomaly detection
+```
+
+### Files
+
+**List Files**
+```
+GET /api/v1/projects/{name}/files
+GET /api/v1/projects/{name}/files/subdir
+```
+
+**Download File**
+```
+GET /api/v1/projects/{name}/files/path/to/file.pth
+```
+
+**Download All as Zip**
+```
+GET /api/v1/projects/{name}/files?zip=1
+```
+
+### Run History
+
+**List Past Runs**
+```
+GET /api/v1/projects/{name}/runs
+```
+
+**Get Run Details**
+```
+GET /api/v1/projects/{name}/runs/<run_id>
+GET /api/v1/projects/{name}/runs/<run_id>/metrics
+```
+
+### System
+
+**Get System Stats**
+```
+GET /api/v1/stats
+Response: CPU, RAM, GPU usage and availability
+```
+"""
+
+    return Response(
+        content,
+        mimetype="text/markdown",
+        headers={
+            "Content-Disposition": f"attachment; filename=BEEKEEPER_{name}.md"
+        }
+    )
+
+
 @api_v1_bp.route("/projects/<name>/runs/<int:run_id>/metrics")
 @api_key_required
 def get_run_metrics(name, run_id):
