@@ -29,14 +29,18 @@ Beekeeper is a Flask web app for managing ML training projects. It provides:
 - **Red** (`--danger: #c94040`) - Error/crashed states
 - **Gray** (`--text-secondary`) - Idle/stopped states
 
-## Recent Work (March 2026)
+## Recent Work (March 23, 2026)
 
-- Added "Running" status with blue color to distinguish from "Ready" (green)
-- Dashboard now shows training status for ready projects (running/crashed) or "Ready" if idle
-- Fixed status badge alignment with fixed-width columns
-- Made Danger Zone collapsible (starts closed)
-- Collapsible JS moved to app.js for shared use across all pages
-- Fixed HTML entity rendering for collapse arrows (use Unicode directly)
+- **Agent Integration SDK** - Downloadable single-file Python SDK for AI agent automation
+  - Endpoint: `GET /api/v1/projects/<name>/agent/sdk`
+  - Pre-configured BeekeeperClient class with all API methods
+  - Download button in project API section
+  - See: CHANGELOG.md v1.0.5-beta, softwarespec.md
+
+Previous work (March 2026):
+- TensorBoard Metrics Analysis API with intelligent analysis (v1.0.4-beta)
+- Running status (blue) vs Ready (green) distinction
+- Collapsible sections, status badges, inline file viewer
 
 ## Dependency Management
 
@@ -52,25 +56,37 @@ sudo systemctl restart beekeeper
 
 **Never use `pip install <package>` directly.** This ensures requirements.txt is always tested and never breaks project setup.
 
-## Local Testing
+## URLs
 
-Beekeeper runs as a systemd service on the local machine:
-```bash
-# Restart after code changes
-sudo systemctl restart beekeeper
+- **Local development:** http://localhost:5000
+- **Remote lab:** http://192.168.1.57:5000 (production, runs live training jobs)
+- **Documentation:** /home/robertcowher/webapps/teaandrobots/content/software/beekeeper (hosted at teaandrobots.com)
 
-# Check status
-sudo systemctl status beekeeper
+## Development Workflow
 
-# View logs
-sudo journalctl -u beekeeper -f
-```
+**Default: Test locally first**
+
+1. Make code changes
+2. Commit & push (on develop branch, no need to ask)
+3. Test locally:
+   ```bash
+   sudo systemctl restart beekeeper
+   sudo systemctl status beekeeper
+   sudo journalctl -u beekeeper -f  # view logs
+   ```
+4. Test at http://localhost:5000
+5. If ready for production, ask to run deploy.sh
 
 ## Deployment
 
-**DO NOT** deploy to remote host "lab" without explicit permission - it runs live production jobs.
+**IMPORTANT:** Always use `./deploy.sh` - never manually SSH or restart services.
 
-Local `deploy.sh` (gitignored) deploys to remote host "lab":
-```
+- **Ask for permission once per session** before running deploy.sh
+- **Never run deploy.sh the first time without asking** - remote host runs live production jobs
+- deploy.sh handles everything: stops service, pulls from git, starts service
+- Deploys to remote host "lab" at 192.168.1.57:5000
+
+```bash
+# What deploy.sh does:
 ssh -t lab 'cd /home/bobcowher/beekeeper && sudo systemctl stop beekeeper && git pull && sudo systemctl start beekeeper'
 ```
