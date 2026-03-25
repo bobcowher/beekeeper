@@ -581,6 +581,14 @@ def get_agent_instructions(name):
 
 Control this ML training project via HTTP API. Base URL: http://{host}
 
+## Terminology
+
+When asked to "check logs", "look at tensorboard", "see how training is going", or "check progress":
+- Use `/tensorboard/latest` for **metrics analysis** (loss curves, convergence, trends)
+- Use `/logs?tail=N` for **raw training output** (print statements, errors, warnings)
+
+Both are useful. Metrics give you quantitative analysis; logs give you the actual output.
+
 ## Quick Reference
 
 | Action | Method | Endpoint |
@@ -602,16 +610,64 @@ All endpoints return JSON:
 {{"success": false, "error": {{"code": "...", "message": "..."}}}}
 ```
 
+## Understanding Metrics
+
+The `/tensorboard/latest` endpoint analyzes TensorBoard data and returns insights.
+
+**Detail levels** (`?detail=low|medium|high`):
+- `low` (default): Summary stats only
+- `medium`: Includes sampled data points for plotting
+- `high`: All raw data points
+
+**Key fields in each metric:**
+
+| Field | Meaning |
+|-------|---------|
+| `trend` | `improving`, `stable`, `worsening`, or `unstable` |
+| `improvement_percent` | How much the metric improved from start to end |
+| `converged` | Boolean - has the metric stabilized? |
+| `convergence_step` | Step number where convergence was detected |
+| `anomaly_count` | Number of unusual spikes or drops |
+| `anomalies` | Array of {{step, value, type}} for each anomaly |
+| `summary` | Human-readable interpretation of this metric |
+
+**Interpreting trends:**
+- `improving`: Metric is moving in the expected direction (loss decreasing, accuracy increasing)
+- `stable`: Metric has leveled off - may indicate convergence or plateau
+- `worsening`: Metric is degrading - may need intervention
+- `unstable`: High variance, no clear direction - training may be struggling
+
+**Example response:**
+```json
+{{
+  "metrics": {{
+    "loss": {{
+      "trend": "improving",
+      "initial_value": 2.45,
+      "final_value": 0.34,
+      "improvement_percent": 86.1,
+      "converged": true,
+      "convergence_step": 8500,
+      "anomaly_count": 0,
+      "summary": "loss: improving by 86.1% (2.45 → 0.34). Converged at step 8500"
+    }}
+  }}
+}}
+```
+
 ## Workflows
 
 ### Start and Monitor Training
 1. `POST /api/v1/projects/{name}/training/start`
 2. `GET /api/v1/projects/{name}/training/status` - verify running
-3. `GET /api/v1/projects/{name}/logs?tail=50` - check progress
+3. `GET /api/v1/projects/{name}/logs?tail=50` - check for errors or progress messages
 
-### Analyze Results
+### Analyze Training Progress
 1. `GET /api/v1/projects/{name}/tensorboard/latest?detail=medium`
-2. Review metrics: loss trends, convergence status, anomalies
+2. Check `trend` for each metric - are they improving?
+3. Check `converged` - has training stabilized?
+4. Check `anomalies` - any unexpected spikes or drops?
+5. Read `summary` for a quick interpretation
 
 ### Download Outputs
 1. `GET /api/v1/projects/{name}/files` - list available files
@@ -650,13 +706,11 @@ Response: {{"success": true, "data": {{"content": "...", "lines": 100}}}}
 
 ### TensorBoard Metrics
 
-**Get Latest Metrics**
+**Get Latest Metrics** (see "Understanding Metrics" above for response details)
 ```
 GET /api/v1/projects/{name}/tensorboard/latest
 GET /api/v1/projects/{name}/tensorboard/latest?detail=medium
 GET /api/v1/projects/{name}/tensorboard/latest?metrics=loss,accuracy
-
-Response includes: trends, convergence analysis, anomaly detection
 ```
 
 ### Files
