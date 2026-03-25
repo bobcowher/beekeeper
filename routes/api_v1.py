@@ -581,6 +581,10 @@ def get_agent_instructions(name):
 
 Control this ML training project via HTTP API. Base URL: http://{host}
 
+## How to Use
+
+Use `curl` via Bash to interact with this API. There is no dedicated client library - just make HTTP requests directly.
+
 ## Terminology
 
 When asked to "check logs", "look at tensorboard", "see how training is going", or "check progress":
