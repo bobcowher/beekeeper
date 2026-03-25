@@ -302,8 +302,10 @@ body {
     color: var(--text-secondary);
     font-size: 12px;
     font-family: var(--font-mono);
-    min-width: 70px;
-    text-align: right;
+    max-width: 10ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* Info grid */
