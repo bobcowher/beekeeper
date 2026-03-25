@@ -644,6 +644,7 @@ def get_training_status(name):
             return {
                 "status": "running",
                 "pid": proc.pid,
+                "run_id": info.get("run_id"),
                 "started_at": info.get("started_at"),
                 "tb_port": info.get("tb_port"),
                 "elapsed": time.time() - info.get("started_at", time.time()),

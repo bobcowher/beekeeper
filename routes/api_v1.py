@@ -532,7 +532,10 @@ def cleanup_orphaned_runs(name):
 @api_key_required
 def get_latest_metrics(name):
     """
-    Get metrics analysis for most recent completed run.
+    Get metrics analysis for the current or most recent run.
+
+    Prioritizes the currently running run if one exists, otherwise
+    returns the most recent completed run.
 
     Query params:
       ?detail=low (default, summary only) | medium (+ samples) | high (all data)
@@ -559,20 +562,36 @@ def get_latest_metrics(name):
     if request.args.get('metrics'):
         metric_filter = [m.strip() for m in request.args.get('metrics').split(',')]
 
-    # Get latest completed run
+    # Get runs and determine which one to analyze
     db = get_db()
     runs = db.get_training_runs(name, limit=100)
-    completed_runs = [r for r in runs if r['status'] == 'completed']
 
-    if not completed_runs:
+    if not runs:
         return api_response(
-            error_code="NO_COMPLETED_RUNS",
-            error_message="No completed training runs found",
+            error_code="NO_RUNS",
+            error_message="No training runs found",
             status_code=404
         )
 
-    latest_run = completed_runs[0]
-    run_id = latest_run['id']
+    # Prioritize running run, then most recent completed
+    running_runs = [r for r in runs if r['status'] == 'running']
+    completed_runs = [r for r in runs if r['status'] == 'completed']
+
+    if running_runs:
+        target_run = running_runs[0]
+        is_active = True
+    elif completed_runs:
+        target_run = completed_runs[0]
+        is_active = False
+    else:
+        # All runs are canceled/crashed with no completed runs
+        return api_response(
+            error_code="NO_USABLE_RUNS",
+            error_message="No running or completed training runs found",
+            status_code=404
+        )
+
+    run_id = target_run['id']
 
     # Get metrics analysis
     projects_dir = current_app.config["PROJECTS_DIR"]
@@ -590,11 +609,12 @@ def get_latest_metrics(name):
     # Build response
     response_data = {
         'run_id': run_id,
+        'is_active': is_active,
         'run_info': {
-            'started_at': latest_run['started_at'],
-            'ended_at': latest_run['ended_at'],
-            'status': latest_run['status'],
-            'duration_seconds': latest_run['duration_seconds']
+            'started_at': target_run['started_at'],
+            'ended_at': target_run['ended_at'],
+            'status': target_run['status'],
+            'duration_seconds': target_run['duration_seconds']
         },
         'metrics': result['metrics']
     }
@@ -674,10 +694,28 @@ All endpoints return JSON:
 
 The `/tensorboard/latest` endpoint analyzes TensorBoard data and returns insights.
 
+**Which run does it analyze?**
+- If training is **running**, it analyzes the current active run
+- If training is **idle**, it analyzes the most recent completed run
+- The response includes `is_active: true/false` to indicate which
+
+**To compare with past runs:**
+1. `GET /runs` - list all runs with their IDs
+2. `GET /runs/<id>/metrics` - get metrics for a specific past run
+
 **Detail levels** (`?detail=low|medium|high`):
 - `low` (default): Summary stats only
 - `medium`: Includes sampled data points for plotting
 - `high`: All raw data points
+
+**Key fields in response:**
+
+| Field | Meaning |
+|-------|---------|
+| `run_id` | The run being analyzed |
+| `is_active` | `true` if this is the currently running training |
+| `run_info` | Status, timestamps, duration of the run |
+| `metrics` | Object with analysis for each metric |
 
 **Key fields in each metric:**
 
@@ -753,8 +791,9 @@ Response: {{"success": true, "data": {{"status": "stopped"}}}}
 **Get Status**
 ```
 GET /api/v1/projects/{name}/training/status
-Response: {{"success": true, "data": {{"status": "running|idle|crashed", "pid": 12345}}}}
+Response: {{"success": true, "data": {{"status": "running|idle", "run_id": 4, "pid": 12345}}}}
 ```
+Note: `run_id` is included when training is running - use it to fetch metrics for the current run.
 
 ### Logs
 
