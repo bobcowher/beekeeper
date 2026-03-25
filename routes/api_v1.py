@@ -7,6 +7,7 @@ All endpoints return JSON with a consistent envelope:
 """
 
 import os
+import subprocess
 import time
 from flask import Blueprint, current_app, jsonify, request, Response
 
@@ -859,6 +860,188 @@ Response: CPU, RAM, GPU usage and availability
             "Content-Disposition": f"attachment; filename=BEEKEEPER_{name}.md"
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# Branch Management
+# ---------------------------------------------------------------------------
+
+@api_v1_bp.route("/projects/<name>/branches")
+@api_key_required
+def list_branches(name):
+    """List available branches from the remote repository."""
+    project, error = load_project(name)
+    if error:
+        return error
+
+    if not project.git_url:
+        return api_response(
+            error_code="NO_GIT_URL",
+            error_message="Project has no git URL configured",
+            status_code=400
+        )
+
+    try:
+        # Get remote branches
+        result = subprocess.run(
+            ["git", "ls-remote", "--heads", project.git_url],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode != 0:
+            return api_response(
+                error_code="GIT_ERROR",
+                error_message=f"Failed to list remote branches: {result.stderr.strip()}",
+                status_code=500
+            )
+
+        # Parse branch names from output
+        # Format: <sha>\trefs/heads/<branch>
+        branches = []
+        for line in result.stdout.strip().split("\n"):
+            if line and "\t" in line:
+                ref = line.split("\t")[1]
+                if ref.startswith("refs/heads/"):
+                    branch_name = ref[len("refs/heads/"):]
+                    branches.append(branch_name)
+
+        branches.sort()
+
+        return api_response(data={
+            "branches": branches,
+            "current": project.branch
+        })
+
+    except subprocess.TimeoutExpired:
+        return api_response(
+            error_code="TIMEOUT",
+            error_message="Timed out fetching branches from remote",
+            status_code=504
+        )
+    except Exception as e:
+        return api_response(
+            error_code="ERROR",
+            error_message=str(e),
+            status_code=500
+        )
+
+
+@api_v1_bp.route("/projects/<name>/branch", methods=["POST"])
+@api_key_required
+def switch_branch(name):
+    """Switch to a different branch."""
+    project, error = load_project(name)
+    if error:
+        return error
+
+    # Check if training is running
+    status = get_training_status(name)
+    if status["status"] == "running":
+        return api_response(
+            error_code="TRAINING_RUNNING",
+            error_message="Cannot switch branches while training is running",
+            status_code=409
+        )
+
+    # Get requested branch
+    data = request.get_json() or {}
+    new_branch = data.get("branch")
+    if not new_branch:
+        return api_response(
+            error_code="MISSING_BRANCH",
+            error_message="Branch name is required",
+            status_code=400
+        )
+
+    if new_branch == project.branch:
+        return api_response(data={
+            "branch": new_branch,
+            "status": "already_on_branch"
+        })
+
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    workspace_dir = os.path.join(projects_dir, name, "workspace")
+
+    if not os.path.isdir(workspace_dir):
+        return api_response(
+            error_code="NO_WORKSPACE",
+            error_message="Project workspace does not exist",
+            status_code=400
+        )
+
+    try:
+        # Check for uncommitted changes
+        status_result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=workspace_dir,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if status_result.stdout.strip():
+            return api_response(
+                error_code="UNCOMMITTED_CHANGES",
+                error_message="Uncommitted changes in workspace",
+                status_code=409
+            )
+
+        # Fetch from origin
+        fetch_result = subprocess.run(
+            ["git", "fetch", "origin"],
+            cwd=workspace_dir,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        if fetch_result.returncode != 0:
+            return api_response(
+                error_code="FETCH_FAILED",
+                error_message=f"Failed to fetch: {fetch_result.stderr.strip()}",
+                status_code=500
+            )
+
+        # Checkout the branch
+        checkout_result = subprocess.run(
+            ["git", "checkout", new_branch],
+            cwd=workspace_dir,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if checkout_result.returncode != 0:
+            return api_response(
+                error_code="CHECKOUT_FAILED",
+                error_message=f"Failed to checkout: {checkout_result.stderr.strip()}",
+                status_code=500
+            )
+
+        # Update project.json with new branch
+        project.branch = new_branch
+        config_path = os.path.join(projects_dir, name, "project.json")
+        project.save(config_path)
+
+        return api_response(data={
+            "branch": new_branch,
+            "status": "switched"
+        })
+
+    except subprocess.TimeoutExpired:
+        return api_response(
+            error_code="TIMEOUT",
+            error_message="Git operation timed out",
+            status_code=504
+        )
+    except Exception as e:
+        return api_response(
+            error_code="ERROR",
+            error_message=str(e),
+            status_code=500
+        )
 
 
 @api_v1_bp.route("/projects/<name>/runs/<int:run_id>/metrics")

@@ -10,8 +10,102 @@
     const btnStop = document.getElementById("btn-stop");
     const btnClear = document.getElementById("btn-clear-log");
     const elapsedEl = document.getElementById("elapsed-time");
+    const branchSelect = document.getElementById("branch-select");
 
     let eventSource = null;
+
+    // --- Branch selector ---
+
+    async function loadBranches() {
+        if (!branchSelect) return;
+
+        try {
+            const resp = await fetch(`/api/v1/projects/${name}/branches`);
+            if (!resp.ok) {
+                console.error("Failed to load branches");
+                return;
+            }
+
+            const result = await resp.json();
+            if (!result.success) {
+                console.error("Failed to load branches:", result.error);
+                return;
+            }
+
+            const { branches, current } = result.data;
+
+            // Populate dropdown
+            branchSelect.innerHTML = "";
+            for (const branch of branches) {
+                const option = document.createElement("option");
+                option.value = branch;
+                option.textContent = branch;
+                if (branch === current) {
+                    option.selected = true;
+                }
+                branchSelect.appendChild(option);
+            }
+
+            // Enable if not training
+            if (config.status !== "running") {
+                branchSelect.disabled = false;
+            }
+        } catch (e) {
+            console.error("Error loading branches:", e);
+        }
+    }
+
+    async function switchBranch(newBranch) {
+        if (!branchSelect) return;
+
+        const oldBranch = config.currentBranch || branchSelect.dataset.originalValue;
+        branchSelect.disabled = true;
+
+        try {
+            const resp = await fetch(`/api/v1/projects/${name}/branch`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ branch: newBranch })
+            });
+
+            const result = await resp.json();
+
+            if (!result.success) {
+                alert(result.error.message || "Failed to switch branch");
+                // Revert selection
+                branchSelect.value = oldBranch;
+                branchSelect.disabled = false;
+                return;
+            }
+
+            if (result.data.status === "switched") {
+                // Reload page to reflect changes
+                location.reload();
+            } else {
+                // Already on branch, just re-enable
+                branchSelect.disabled = false;
+            }
+        } catch (e) {
+            alert("Network error switching branch");
+            branchSelect.value = oldBranch;
+            branchSelect.disabled = false;
+        }
+    }
+
+    if (branchSelect) {
+        // Store original value for reverting on error
+        branchSelect.dataset.originalValue = branchSelect.value;
+
+        branchSelect.addEventListener("change", (e) => {
+            const newBranch = e.target.value;
+            if (newBranch !== branchSelect.dataset.originalValue) {
+                switchBranch(newBranch);
+            }
+        });
+
+        // Load branches on page load
+        loadBranches();
+    }
 
     // --- Collapsible section actions (toggle handled by app.js) ---
 
