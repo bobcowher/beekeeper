@@ -484,6 +484,50 @@ def clear_all_runs(name):
     return clear_history(name)
 
 
+@api_v1_bp.route("/projects/<name>/runs/cleanup-orphaned", methods=["POST"])
+@api_key_required
+def cleanup_orphaned_runs(name):
+    """
+    Mark orphaned runs as 'canceled'.
+
+    Orphaned runs are those stuck in 'running' status but the process
+    is no longer active (e.g., after a server restart).
+    """
+    project, error = load_project(name)
+    if error:
+        return error
+
+    from services.db_service import get_db
+    from services.process_manager import get_training_status
+
+    db = get_db()
+    runs = db.get_training_runs(name, limit=100)
+
+    # Find runs marked as running
+    running_runs = [r for r in runs if r['status'] == 'running']
+
+    # Check if training is actually running
+    status = get_training_status(name)
+    actual_running = status.get('status') == 'running'
+
+    cleaned = 0
+    for run in running_runs:
+        # If nothing is actually running, or this run is old, mark as canceled
+        if not actual_running:
+            db.update_training_run(
+                run['id'],
+                status='canceled',
+                ended_at=run['started_at'],  # Use start time as end since we don't know
+                duration_seconds=0
+            )
+            cleaned += 1
+
+    return api_response(data={
+        "cleaned": cleaned,
+        "message": f"Marked {cleaned} orphaned run(s) as canceled"
+    })
+
+
 @api_v1_bp.route("/projects/<name>/tensorboard/latest")
 @api_key_required
 def get_latest_metrics(name):

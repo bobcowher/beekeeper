@@ -597,9 +597,27 @@ def stop_training(projects_dir, name):
         except (ProcessLookupError, OSError):
             pass
 
+    # Get exit code
+    exit_code = proc.returncode if proc.returncode is not None else -15  # SIGTERM
+
     with _lock:
         info = _running.pop(name, None)
         if info:
+            # Finalize run record in database
+            log_path = info.get("log_path")
+            started_at = info.get("started_at")
+            run_id = info.get("run_id")
+
+            if log_path and started_at:
+                _append_run_footer(log_path, exit_code, started_at)
+
+            archived_log_path = None
+            if run_id and log_path and os.path.isfile(log_path):
+                archived_log_path = _archive_run_log(projects_dir, name, run_id, log_path)
+
+            if run_id and started_at:
+                _finalize_run_record(run_id, exit_code, started_at, archived_log_path)
+
             # Migrate tensorboard to standalone tracking
             tb = info.get("tb_process")
             tb_port = info.get("tb_port")
