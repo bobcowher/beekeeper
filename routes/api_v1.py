@@ -585,6 +585,18 @@ Control this ML training project via HTTP API. Base URL: http://{host}
 
 Use `curl` via Bash to interact with this API. There is no dedicated client library - just make HTTP requests directly.
 
+## Before Taking Action
+
+**Always check status first** before starting or stopping training:
+```
+GET /api/v1/projects/{name}/training/status
+```
+
+- Before starting: verify status is `idle` (not already running)
+- Before stopping: verify status is `running` (not already stopped)
+
+This avoids errors like `ALREADY_RUNNING` or `NOT_RUNNING`.
+
 ## Terminology
 
 When asked to "check logs", "look at tensorboard", "see how training is going", or "check progress":
