@@ -64,18 +64,27 @@ sudo systemctl restart beekeeper
 
 ## Development Workflow
 
-**Default: Test locally first**
+**Default: Always test locally after making changes**
 
 1. Make code changes
-2. Commit & push (on develop branch, no need to ask)
-3. Test locally:
+2. Restart and verify service is running:
    ```bash
-   sudo systemctl restart beekeeper
-   sudo systemctl status beekeeper
-   sudo journalctl -u beekeeper -f  # view logs
+   sudo /usr/bin/systemctl restart beekeeper
+   sudo /usr/bin/systemctl status beekeeper
    ```
-4. Test at http://localhost:5000
+3. Test the feature at http://localhost:5000
+4. Commit & push (on develop branch, no need to ask)
 5. If ready for production, ask to run deploy.sh
+
+**Passwordless sudo commands** (configured in sudoers):
+```bash
+sudo /usr/bin/systemctl start beekeeper
+sudo /usr/bin/systemctl stop beekeeper
+sudo /usr/bin/systemctl restart beekeeper
+sudo /usr/bin/systemctl status beekeeper
+```
+
+Note: Must use exact command format above - no extra flags like `--no-pager`.
 
 ## Deployment
 
