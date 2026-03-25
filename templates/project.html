@@ -150,39 +150,8 @@
     <div class="collapsible-body" id="api-body" style="display:none">
         {% set host = request.host %}
 
-        <!-- Agent Section -->
-        <div class="collapsible" style="margin-bottom: 1rem;">
-            <h3 class="collapsible-header" data-target="agent-api-body" style="margin: 0; padding: 0.5rem 0; font-size: 1rem; cursor: pointer; user-select: none;">
-                Agent <span class="collapse-icon">▶</span>
-            </h3>
-            <div class="collapsible-body" id="agent-api-body" style="display:none;">
-                <p style="color: var(--text-secondary); margin-bottom: 0.75rem; font-size: 0.9rem;">
-                    Download and add to your project's CLAUDE.md (or paste into agent context)
-                </p>
-                <div style="margin-bottom: 1rem;">
-                    <a href="{{ url_for('api_v1.get_agent_instructions', name=project.name) }}"
-                       class="btn btn-secondary" style="display: inline-flex; align-items: center; gap: 0.5rem;">
-                        <span style="font-size: 1.1rem;">&#8615;</span> Download BEEKEEPER_{{ project.name }}.md
-                    </a>
-                </div>
-                <details style="margin-top: 1rem;">
-                    <summary style="cursor: pointer; color: var(--text-secondary); font-size: 0.9rem;">Preview endpoints</summary>
-                    <pre class="api-examples" style="margin-top: 0.5rem; font-size: 0.8rem;">| Action         | Method | Endpoint                                          |
-|----------------|--------|---------------------------------------------------|
-| Start training | POST   | /api/v1/projects/{{ project.name }}/training/start  |
-| Stop training  | POST   | /api/v1/projects/{{ project.name }}/training/stop   |
-| Check status   | GET    | /api/v1/projects/{{ project.name }}/training/status |
-| Get logs       | GET    | /api/v1/projects/{{ project.name }}/logs?tail=100   |
-| Get metrics    | GET    | /api/v1/projects/{{ project.name }}/tensorboard/latest |
-| List files     | GET    | /api/v1/projects/{{ project.name }}/files           |
-| Download file  | GET    | /api/v1/projects/{{ project.name }}/files/&lt;path&gt;    |
-| System stats   | GET    | /api/v1/stats                                     |</pre>
-                </details>
-            </div>
-        </div>
-
         <!-- Human Section -->
-        <div class="collapsible" style="margin-bottom: 0;">
+        <div class="collapsible" style="margin-bottom: 1rem;">
             <h3 class="collapsible-header" data-target="human-api-body" style="margin: 0; padding: 0.5rem 0; font-size: 1rem; cursor: pointer; user-select: none;">
                 Human <span class="collapse-icon">▶</span>
             </h3>
@@ -210,6 +179,38 @@ curl "http://{{ host }}/api/v1/projects/{{ project.name }}/tensorboard/latest?de
 
 # System Stats
 curl http://{{ host }}/api/v1/stats</pre>
+            </div>
+        </div>
+
+        <!-- Agent Section -->
+        <div class="collapsible" style="margin-bottom: 0;">
+            <h3 class="collapsible-header" data-target="agent-api-body" style="margin: 0; padding: 0.5rem 0; font-size: 1rem; cursor: pointer; user-select: none;">
+                Agent <span class="collapse-icon">▶</span>
+            </h3>
+            <div class="collapsible-body" id="agent-api-body" style="display:none;">
+                <p style="color: var(--text-secondary); margin-bottom: 0.75rem; font-size: 0.9rem;">
+                    Download and add to your project's CLAUDE.md (or paste into agent context)
+                </p>
+                <div style="margin-bottom: 1rem;">
+                    <a href="{{ url_for('api_v1.get_agent_instructions', name=project.name) }}"
+                       class="btn btn-secondary" style="display: inline-flex; align-items: center; gap: 0.5rem;">
+                        <span style="font-size: 1.1rem;">&#8615;</span> Download BEEKEEPER_{{ project.name }}.md
+                    </a>
+                </div>
+                <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1rem;">curl -o BEEKEEPER_{{ project.name }}.md http://{{ host }}/api/v1/projects/{{ project.name }}/agent/instructions</pre>
+                <details>
+                    <summary style="cursor: pointer; color: var(--text-secondary); font-size: 0.9rem;">Preview endpoints</summary>
+                    <pre class="api-examples" style="margin-top: 0.5rem; font-size: 0.8rem;">| Action         | Method | Endpoint                                          |
+|----------------|--------|---------------------------------------------------|
+| Start training | POST   | /api/v1/projects/{{ project.name }}/training/start  |
+| Stop training  | POST   | /api/v1/projects/{{ project.name }}/training/stop   |
+| Check status   | GET    | /api/v1/projects/{{ project.name }}/training/status |
+| Get logs       | GET    | /api/v1/projects/{{ project.name }}/logs?tail=100   |
+| Get metrics    | GET    | /api/v1/projects/{{ project.name }}/tensorboard/latest |
+| List files     | GET    | /api/v1/projects/{{ project.name }}/files           |
+| Download file  | GET    | /api/v1/projects/{{ project.name }}/files/&lt;path&gt;    |
+| System stats   | GET    | /api/v1/stats                                     |</pre>
+                </details>
             </div>
         </div>
     </div>
