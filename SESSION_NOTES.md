@@ -35,19 +35,24 @@ Added guidance to help agents understand:
 - Marks stuck "running" runs as "canceled"
 - Useful after server restarts
 
-### 4. Updated Documentation
-- Updated teaandrobots.com docs with API and Agent Integration sections
-- Updated this session notes file
+### 4. Improved Run Identification for Agents (Complete ✅)
+- `/training/status` now includes `run_id` when training is running
+- `/tensorboard/latest` now prioritizes running run over completed runs
+- Response includes `is_active: true/false` flag
+- Agents can now easily identify current run and compare to past runs
+
+### 5. Updated Documentation
+- Updated teaandrobots.com docs with API, Agent Integration, Run History sections
+- Documented active run priority and run comparison workflows
 
 ## Current State
 - Branch: develop
-- Latest commit: 4b085c3
-- All changes deployed to lab (192.168.1.57:5000)
-- User testing new training run with fixes
+- Latest commit: fe43f52
+- Changes pushed but NOT deployed (user has active training)
 
 ## Files Changed Today
-- `routes/api_v1.py` - Agent instructions endpoint, cleanup-orphaned endpoint
-- `services/process_manager.py` - Fixed stop_training() to finalize run records
+- `routes/api_v1.py` - Agent instructions, cleanup-orphaned, run_id in latest metrics
+- `services/process_manager.py` - Fixed stop_training(), added run_id to status
 - `templates/project.html` - Human/Agent collapsible sections in API
 
 ---
