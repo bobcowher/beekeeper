@@ -299,6 +299,139 @@ def stream_logs(name):
     )
 
 
+@api_v1_bp.route("/projects/<name>/logs/analysis")
+@api_key_required
+def analyze_logs(name):
+    """
+    Analyze training logs to extract episode metrics and trends.
+
+    Works for active runs where tensorboard data may not be flushed yet.
+    Parses log lines matching: "Episode N | reward: X | ..."
+
+    Query params:
+      ?tail=N - Only analyze last N lines (default: 500)
+    """
+    import re
+
+    project, error = load_project(name)
+    if error:
+        return error
+
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    log_path = os.path.join(projects_dir, name, "train.log")
+
+    if not os.path.isfile(log_path):
+        return api_response(
+            error_code="NO_LOGS",
+            error_message="No log file found",
+            status_code=404
+        )
+
+    tail = request.args.get("tail", default=500, type=int)
+
+    try:
+        offset = _tail_offset(log_path, tail)
+        with open(log_path, "r") as f:
+            f.seek(offset)
+            content = f.read()
+    except Exception as e:
+        return api_response(
+            error_code="READ_ERROR",
+            error_message=f"Failed to read log file: {e}",
+            status_code=500
+        )
+
+    # Parse episode lines - flexible pattern to match common formats
+    # "Episode 123 | reward: 4.5 | epsilon: 0.3 | steps: 200"
+    episode_pattern = re.compile(
+        r'Episode\s+(\d+)\s*\|\s*reward:\s*([-\d.]+)'
+        r'(?:\s*\|\s*epsilon:\s*([\d.]+))?'
+        r'(?:\s*\|\s*steps:\s*(\d+))?',
+        re.IGNORECASE
+    )
+
+    episodes = []
+    for line in content.split('\n'):
+        match = episode_pattern.search(line)
+        if match:
+            ep_num = int(match.group(1))
+            reward = float(match.group(2))
+            epsilon = float(match.group(3)) if match.group(3) else None
+            steps = int(match.group(4)) if match.group(4) else None
+            episodes.append({
+                'episode': ep_num,
+                'reward': reward,
+                'epsilon': epsilon,
+                'steps': steps
+            })
+
+    if not episodes:
+        return api_response(
+            error_code="NO_EPISODES",
+            error_message="No episode data found in logs",
+            status_code=404
+        )
+
+    # Compute statistics
+    rewards = [ep['reward'] for ep in episodes]
+    n = len(rewards)
+
+    # Quartile analysis for trend
+    q_size = n // 4 if n >= 4 else n
+    quartiles = []
+    if n >= 4:
+        for i in range(4):
+            start = i * q_size
+            end = start + q_size if i < 3 else n
+            q_rewards = rewards[start:end]
+            q_episodes = episodes[start:end]
+            quartiles.append({
+                'quartile': i + 1,
+                'episode_range': [q_episodes[0]['episode'], q_episodes[-1]['episode']],
+                'count': len(q_rewards),
+                'avg_reward': round(sum(q_rewards) / len(q_rewards), 2),
+                'min_reward': min(q_rewards),
+                'max_reward': max(q_rewards)
+            })
+
+    # Determine trend
+    if len(quartiles) >= 2:
+        first_avg = quartiles[0]['avg_reward']
+        last_avg = quartiles[-1]['avg_reward']
+        if last_avg > first_avg + 0.5:
+            trend = 'improving'
+        elif last_avg < first_avg - 0.5:
+            trend = 'declining'
+        else:
+            trend = 'stable'
+    else:
+        trend = 'insufficient_data'
+
+    # Recent window (last 20 episodes)
+    recent = episodes[-20:] if len(episodes) >= 20 else episodes
+    recent_rewards = [ep['reward'] for ep in recent]
+
+    return api_response(data={
+        'episode_range': [episodes[0]['episode'], episodes[-1]['episode']],
+        'total_episodes': n,
+        'trend': trend,
+        'overall': {
+            'avg_reward': round(sum(rewards) / n, 2),
+            'min_reward': min(rewards),
+            'max_reward': max(rewards),
+        },
+        'recent': {
+            'episode_range': [recent[0]['episode'], recent[-1]['episode']],
+            'count': len(recent),
+            'avg_reward': round(sum(recent_rewards) / len(recent_rewards), 2),
+            'min_reward': min(recent_rewards),
+            'max_reward': max(recent_rewards),
+        },
+        'quartiles': quartiles,
+        'latest_episode': episodes[-1],
+    })
+
+
 # ---------------------------------------------------------------------------
 # Files
 # ---------------------------------------------------------------------------
@@ -644,23 +777,49 @@ def get_agent_instructions(name):
 
     content = f"""# Beekeeper: {name}
 
-Control this ML training project via HTTP API. Base URL: http://{host}
+> **IMPORTANT: USE THIS API FIRST**
+> When asked about training status, logs, metrics, progress, or anything related to this ML project,
+> use the Beekeeper API below. Do NOT read tensorboard files directly or parse logs manually.
+> The API provides structured data and trend analysis.
 
-## How to Use
+Base URL: http://{host}
 
-Use `curl` via Bash to interact with this API. There is no dedicated client library - just make HTTP requests directly.
+## Quick Start
 
-## Before Taking Action
+```bash
+# Check if training is running
+curl http://{host}/api/v1/projects/{name}/training/status
 
-**Always check status first** before starting or stopping training:
+# Get training progress and trends (WORKS FOR ACTIVE RUNS)
+curl http://{host}/api/v1/projects/{name}/logs/analysis
+
+# Get recent log output
+curl "http://{host}/api/v1/projects/{name}/logs?tail=50"
+
+# Start/stop training
+curl -X POST http://{host}/api/v1/projects/{name}/training/start
+curl -X POST http://{host}/api/v1/projects/{name}/training/stop
+```
+
+## Checking Training Progress
+
+**For active runs**, use `/logs/analysis` - it parses episode data and returns trends:
+```
+GET /api/v1/projects/{name}/logs/analysis
+```
+Returns: episode range, trend (improving/stable/declining), quartile breakdown, recent averages.
+
+**For completed runs**, use `/tensorboard/latest` for full metric analysis.
+
+## Before Starting or Stopping
+
+Always check status first:
 ```
 GET /api/v1/projects/{name}/training/status
 ```
 
-- Before starting: verify status is `idle` (not already running)
-- Before stopping: verify status is `running` (not already stopped)
-
-This avoids errors like `ALREADY_RUNNING` or `NOT_RUNNING`.
+- Before starting: verify status is `idle`
+- Before stopping: verify status is `running`
 
 ## Terminology
 
@@ -674,11 +833,12 @@ Both are useful. Metrics give you quantitative analysis; logs give you the actua
 
 | Action | Method | Endpoint |
 |--------|--------|----------|
-| Start training | POST | `/api/v1/projects/{name}/training/start` |
-| Stop training | POST | `/api/v1/projects/{name}/training/stop` |
 | Check status | GET | `/api/v1/projects/{name}/training/status` |
+| **Get trends** | GET | `/api/v1/projects/{name}/logs/analysis` |
 | Get logs | GET | `/api/v1/projects/{name}/logs?tail=100` |
 | Get metrics | GET | `/api/v1/projects/{name}/tensorboard/latest` |
+| Start training | POST | `/api/v1/projects/{name}/training/start` |
+| Stop training | POST | `/api/v1/projects/{name}/training/stop` |
 | List files | GET | `/api/v1/projects/{name}/files` |
 | Download file | GET | `/api/v1/projects/{name}/files/<path>` |
 | System stats | GET | `/api/v1/stats` |
