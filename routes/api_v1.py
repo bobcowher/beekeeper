@@ -1192,8 +1192,7 @@ def switch_branch(name):
 
         # Update project.json with new branch
         project.branch = new_branch
-        config_path = os.path.join(projects_dir, name, "project.json")
-        project.save(config_path)
+        project.save(projects_dir)
 
         return api_response(data={
             "branch": new_branch,
