@@ -1164,7 +1164,7 @@ def switch_branch(name):
                 status_code=500
             )
 
-        # Checkout the branch
+        # Checkout the branch - try local first, then track remote
         checkout_result = subprocess.run(
             ["git", "checkout", new_branch],
             cwd=workspace_dir,
@@ -1172,6 +1172,16 @@ def switch_branch(name):
             text=True,
             timeout=30
         )
+
+        # If local checkout failed, try to track remote branch
+        if checkout_result.returncode != 0:
+            checkout_result = subprocess.run(
+                ["git", "checkout", "--track", f"origin/{new_branch}"],
+                cwd=workspace_dir,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
 
         if checkout_result.returncode != 0:
             return api_response(
