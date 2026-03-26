@@ -42,5 +42,8 @@ def register_middleware(app):
 
     @app.context_processor
     def inject_user():
-        """Inject user into all templates."""
-        return dict(user=g.get('user', None))
+        """Inject user and auth status into all templates."""
+        return dict(
+            user=g.get('user', None),
+            auth_enabled=is_auth_enabled()
+        )

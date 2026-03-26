@@ -22,7 +22,7 @@ def index():
     }
 
     users = db.list_all_users()
-    api_keys = db.list_user_api_keys(current_user.id)
+    api_keys = db.list_user_api_keys(current_user.id) if current_user else []
 
     return render_template('admin.html', config=config, users=users, api_keys=api_keys, current_user=current_user)
 

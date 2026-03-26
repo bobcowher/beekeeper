@@ -117,7 +117,7 @@
                         {% endif %}
                     </td>
                     <td class="actions">
-                        {% if user_item.id != current_user.id %}
+                        {% if not current_user or user_item.id != current_user.id %}
                         <form method="POST" action="{{ url_for('admin.toggle_admin', user_id=user_item.id) }}" style="display: inline;">
                             <button type="submit" class="btn btn-small">
                                 {% if user_item.is_admin %}Remove Admin{% else %}Make Admin{% endif %}
@@ -137,7 +137,8 @@
         </table>
     </section>
 
-    <!-- API Keys Section -->
+    <!-- API Keys Section (only when logged in) -->
+    {% if current_user %}
     <section class="admin-section">
         <h2>API Keys</h2>
         <p class="help-text">API keys allow programmatic access to Beekeeper when authentication is enabled.</p>
@@ -181,6 +182,7 @@
         <p class="text-muted">No API keys created yet.</p>
         {% endif %}
     </section>
+    {% endif %}
 </div>
 
 <style>

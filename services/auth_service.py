@@ -71,6 +71,9 @@ def admin_required(f):
     """Decorator to require admin access for route."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        if not is_auth_enabled():
+            return f(*args, **kwargs)  # Auth disabled, allow access
+
         user = get_current_user()
         if not user or not user.is_admin:
             return "Forbidden", 403
