@@ -36,6 +36,7 @@
         html += '<th>Started</th>';
         html += '<th>Duration</th>';
         html += '<th>Status</th>';
+        html += '<th>Branch</th>';
         html += '<th>Commit</th>';
         html += '<th>Actions</th>';
         html += '</tr></thead><tbody>';
@@ -45,13 +46,15 @@
             const startedStr = started.toLocaleString();
             const durationStr = formatDuration(run.duration_seconds);
             const statusClass = getStatusClass(run.status);
-            const commitShort = run.commit_sha ? run.commit_sha.substring(0, 8) : 'unknown';
+            const branch = run.branch || '-';
+            const commitShort = run.commit_sha ? run.commit_sha.substring(0, 7) : '-';
             const commitMsg = run.commit_message || '';
 
             html += '<tr>';
             html += `<td>${startedStr}</td>`;
             html += `<td>${durationStr}</td>`;
             html += `<td><span class="status-badge status-${statusClass}">${run.status}</span></td>`;
+            html += `<td><code>${branch}</code></td>`;
             html += `<td><code title="${commitMsg}">${commitShort}</code></td>`;
             html += '<td class="run-actions">';
             if (run.log_file_path) {

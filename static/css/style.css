@@ -576,26 +576,28 @@ label {
     transition: transform 0.15s;
 }
 
-/* Branch selector */
-.branch-selector {
+/* Branch control (in Project Info) */
+.branch-control {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
     display: flex;
     align-items: center;
     gap: 12px;
-    margin-bottom: 16px;
 }
 
-.branch-selector label {
+.branch-control label {
     margin-bottom: 0;
     flex-shrink: 0;
 }
 
-.branch-selector select {
+.branch-control select {
     width: auto;
     min-width: 150px;
     max-width: 250px;
 }
 
-.branch-selector select:disabled {
+.branch-control select:disabled {
     opacity: 0.6;
     cursor: not-allowed;
 }

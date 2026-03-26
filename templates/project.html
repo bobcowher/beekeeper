@@ -53,17 +53,19 @@
         {% endfor %}
     </dl>
     {% endif %}
+    {% if project.get('setup_status') == 'ready' %}
+    <div class="branch-control">
+        <label for="branch-select">Active Branch</label>
+        <select id="branch-select" disabled>
+            <option value="{{ project.branch }}">{{ project.branch }}</option>
+        </select>
+    </div>
+    {% endif %}
 </section>
 
 {% if project.get('setup_status') == 'ready' %}
 <section class="card">
     <h2>Controls</h2>
-    <div class="branch-selector">
-        <label for="branch-select">Branch</label>
-        <select id="branch-select" disabled>
-            <option value="{{ project.branch }}">{{ project.branch }}</option>
-        </select>
-    </div>
     <div class="training-controls" id="training-controls" data-name="{{ project.name }}">
         {% if training.status == 'running' %}
         <div class="training-info">
