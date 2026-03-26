@@ -29,16 +29,25 @@ Beekeeper is a Flask web app for managing ML training projects. It provides:
 - **Red** (`--danger: #c94040`) - Error/crashed states
 - **Gray** (`--text-secondary`) - Idle/stopped states
 
-## Recent Work (March 23, 2026)
+## Recent Work (March 25, 2026)
 
-- **Agent Integration SDK** - Downloadable single-file Python SDK for AI agent automation
-  - Endpoint: `GET /api/v1/projects/<name>/agent/sdk`
-  - Pre-configured BeekeeperClient class with all API methods
-  - Download button in project API section
-  - See: CHANGELOG.md v1.0.5-beta, softwarespec.md
+- **Log Analysis Endpoint** - `GET /api/v1/projects/<name>/logs/analysis`
+  - Parses episode data from logs, returns trend analysis (improving/stable/declining)
+  - Quartile breakdown, recent averages - works for active runs without tensorboard
+  - Designed for AI agent consumption without needing screenshots
+
+- **Branch Switching** - Dropdown in Project Info section
+  - `GET /api/v1/projects/<name>/branches` - list remote branches
+  - `POST /api/v1/projects/<name>/branch` - switch branches (checks for uncommitted changes)
+  - Run history now shows branch and commit SHA
+
+- **Admin Panel Fix** - Admin link shows when auth is disabled (so you can enable it)
+
+- **Agent Instructions Improved** - Prominent opener telling agents to use API first
 
 Previous work (March 2026):
-- TensorBoard Metrics Analysis API with intelligent analysis (v1.0.4-beta)
+- Agent Integration SDK (v1.0.5-beta)
+- TensorBoard Metrics Analysis API (v1.0.4-beta)
 - Running status (blue) vs Ready (green) distinction
 - Collapsible sections, status badges, inline file viewer
 
