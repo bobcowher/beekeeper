@@ -4,6 +4,15 @@
 
 When on the `develop` branch, go ahead and commit & push changes without asking.
 
+## AI Agent API Usage
+
+**When interacting with Beekeeper as an AI agent, ask for permission once to use all Beekeeper API endpoints.** After receiving permission, you can freely use:
+- GET requests (project data, logs, status, metrics, branches, etc.)
+- POST requests (start/stop training, switch branches, create projects, etc.)
+- Any other Beekeeper API endpoints at `/api/v1/*`
+
+Do not ask for permission repeatedly for each individual endpoint.
+
 ## Project Overview
 
 Beekeeper is a Flask web app for managing ML training projects. It provides:
