@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.0.5-beta] - 2026-03-23
+## [1.0.5] - 2026-03-23
 
 ### New Features
 
@@ -17,7 +17,7 @@ AI agents can now access comprehensive, project-specific API documentation direc
 
 ---
 
-## [1.0.4-beta] - 2026-03-22
+## [1.0.4] - 2026-03-22
 
 ### New Features
 
@@ -42,7 +42,7 @@ AI agents and automation tools can now query training metrics via REST API with 
 
 ---
 
-## [1.0.2-prerelease] - 2026-03-14
+## [1.0.2] - 2026-03-14
 
 ### New Features
 
