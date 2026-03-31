@@ -110,10 +110,13 @@ Note: Must use exact command format above - no extra flags like `--no-pager`.
 
 - **Ask for permission once per session** before running deploy.sh
 - **Never run deploy.sh the first time without asking** - remote host runs live production jobs
-- deploy.sh handles everything: stops service, pulls from git, starts service
 - Deploys to remote host "lab" at 192.168.1.57:5000
+- deploy.sh does a FULL rebuild (stops service, pulls from git, deletes venv, runs setup.sh, starts service)
+- This ensures clean deployment but takes ~1-2 minutes due to venv rebuild
 
 ```bash
-# What deploy.sh does:
-ssh -t lab 'cd /home/bobcowher/beekeeper && sudo systemctl stop beekeeper && git pull && sudo systemctl start beekeeper'
+# What deploy.sh actually does:
+ssh lab 'cd /home/bobcowher/beekeeper && sudo systemctl stop beekeeper && git pull && sudo rm -rf venv && ./setup.sh -y'
 ```
+
+Note: setup.sh rebuilds the venv and reinstalls all dependencies, then starts the service.
