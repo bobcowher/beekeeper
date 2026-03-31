@@ -121,6 +121,9 @@ def _setup_project(projects_dir, project, is_retry=False):
             else:
                 _save_status("creating_env")
                 pip_bin = _create_conda_env(project, _save_status)
+                env_path = _resolve_conda_env_path(conda_bin, env_name) if conda_bin else None
+            # Store for setup script execution
+            use_conda = True
         else:
             env_dir = os.path.join(project_dir, "venv")
             if os.path.isdir(env_dir):
@@ -129,6 +132,9 @@ def _setup_project(projects_dir, project, is_retry=False):
             else:
                 _save_status("creating_env")
                 pip_bin = _create_venv(project, env_dir, _save_status)
+            # Store for setup script execution
+            use_conda = False
+            env_path = env_dir
 
         if pip_bin is None:
             return  # _save_status("error", ...) already called
@@ -159,9 +165,21 @@ def _setup_project(projects_dir, project, is_retry=False):
             if os.path.isfile(script_path):
                 _save_status("running_setup_script")
                 try:
+                    # Run setup script in the activated environment
+                    if use_conda:
+                        # Use conda run to execute in the conda environment
+                        cmd = [conda_bin, "run", "-n", env_name, "bash", script_path]
+                    else:
+                        # For venv, set environment variables so python/pip resolve correctly
+                        cmd = ["bash", script_path]
+                        env = os.environ.copy()
+                        env["VIRTUAL_ENV"] = env_path
+                        env["PATH"] = f"{env_path}/bin:{env.get('PATH', '')}"
+
                     subprocess.run(
-                        ["bash", script_path],
+                        cmd,
                         cwd=workspace_dir,
+                        env=env if not use_conda else None,
                         check=True, capture_output=True, text=True, timeout=300,
                     )
                 except subprocess.CalledProcessError as e:
