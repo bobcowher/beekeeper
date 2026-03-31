@@ -805,6 +805,14 @@ label {
     white-space: nowrap;
 }
 
+.fb-col-modified {
+    width: 140px;
+    text-align: right;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
 .fb-col-actions {
     width: 40px;
     text-align: right;

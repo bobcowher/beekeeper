@@ -76,6 +76,32 @@
         return IMAGE_EXTS.has(ext) || TEXT_EXTS.has(ext);
     }
 
+    function formatTime(timestamp) {
+        const now = Date.now() / 1000;
+        const diff = now - timestamp;
+
+        if (diff < 60) return 'just now';
+        if (diff < 3600) {
+            const mins = Math.floor(diff / 60);
+            return `${mins} min${mins > 1 ? 's' : ''} ago`;
+        }
+        if (diff < 86400) {
+            const hours = Math.floor(diff / 3600);
+            return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+        }
+        if (diff < 604800) {
+            const days = Math.floor(diff / 86400);
+            return `${days} day${days > 1 ? 's' : ''} ago`;
+        }
+
+        // For older files, show the actual date
+        const date = new Date(timestamp * 1000);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
     function renderListing(entries, dirPath) {
         if (!entries.length) {
             listing.innerHTML = '<p class="muted">Empty directory.</p>';
@@ -85,6 +111,7 @@
         let html = '<table class="fb-table"><thead><tr>';
         html += '<th class="fb-col-name">Name</th>';
         html += '<th class="fb-col-size">Size</th>';
+        html += '<th class="fb-col-modified">Modified</th>';
         html += '<th class="fb-col-actions"></th>';
         html += '</tr></thead><tbody>';
 
@@ -97,6 +124,7 @@
                     <a href="#" class="fb-link fb-dir" data-path="${entry.path}">${icon} ${entry.name}/</a>
                 </td>`;
                 html += `<td class="fb-col-size muted">&mdash;</td>`;
+                html += `<td class="fb-col-modified muted">${formatTime(entry.mtime)}</td>`;
                 html += `<td class="fb-col-actions">
                     <div class="fb-menu">
                         <button class="fb-menu-trigger" title="Actions">⋮</button>
@@ -114,6 +142,7 @@
                     }
                 </td>`;
                 html += `<td class="fb-col-size muted">${entry.size_h}</td>`;
+                html += `<td class="fb-col-modified muted">${formatTime(entry.mtime)}</td>`;
                 html += `<td class="fb-col-actions">
                     <div class="fb-menu">
                         <button class="fb-menu-trigger" title="Actions">⋮</button>
