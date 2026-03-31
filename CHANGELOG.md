@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.0.6] - 2026-03-30
+
+### Bug Fixes
+
+**Retry Setup Now Pulls Latest Code**
+Fixed an issue where clicking "Retry Setup" would reuse the old workspace without pulling updates from git. This meant fixes to `setup.sh` or other repo files wouldn't be picked up on retry.
+
+- **Clean workspace on retry:** The workspace directory is now deleted before re-running setup
+- **Fresh git clone:** Latest code is pulled from the repository
+- **Data safety:** Data directories are preserved (symlinks are deleted, but actual data at `data_dir_remote` is untouched)
+- **Venv preserved:** Python environments (venv/conda) are reused to save time
+
+---
+
 ## [1.0.5] - 2026-03-23
 
 ### New Features
