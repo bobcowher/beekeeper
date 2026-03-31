@@ -60,9 +60,16 @@ def create_project(projects_dir, data):
 
 
 def retry_setup(projects_dir, name):
-    """Re-run setup for a project in error state, skipping already-completed steps."""
+    """Re-run setup for a project in error state with a clean workspace."""
     config_path = os.path.join(projects_dir, name, "project.json")
     project = Project.load(config_path)
+
+    # Clean workspace to force fresh git clone (preserves venv and data symlinks point to external data)
+    workspace_dir = os.path.join(projects_dir, name, "workspace")
+    if os.path.isdir(workspace_dir):
+        log.info("Retry setup: removing existing workspace for %s", name)
+        shutil.rmtree(workspace_dir)
+
     project.setup_status = "pending"
     project.setup_error = ""
     project.save(projects_dir)
