@@ -444,15 +444,32 @@ def start_training(projects_dir, name):
         else:
             return {"error": f"Data directory '{data_dir_remote}' does not exist on this server."}
 
-    # Run setup script if configured and present
+    # Run setup script if configured and present (in activated environment)
     setup_script = project.get("setup_script", "")
     if setup_script:
         script_path = os.path.join(workspace_dir, setup_script)
         if os.path.isfile(script_path):
             try:
+                # Run setup script in the activated environment
+                if project.get("env_type") == "conda":
+                    # Use conda run to execute in the conda environment
+                    from services.python_versions import _find_conda_bin
+                    conda_bin = _find_conda_bin()
+                    env_name = f"beekeeper-{name}"
+                    cmd = [conda_bin, "run", "-n", env_name, "bash", script_path]
+                    env = None
+                else:
+                    # For venv, set environment variables so python/pip resolve correctly
+                    venv_path = os.path.join(projects_dir, name, "venv")
+                    cmd = ["bash", script_path]
+                    env = os.environ.copy()
+                    env["VIRTUAL_ENV"] = venv_path
+                    env["PATH"] = f"{venv_path}/bin:{env.get('PATH', '')}"
+
                 result = subprocess.run(
-                    ["bash", script_path],
+                    cmd,
                     cwd=workspace_dir,
+                    env=env,
                     capture_output=True, text=True, timeout=300,
                 )
                 if result.returncode != 0:
