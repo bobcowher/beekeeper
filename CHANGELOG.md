@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### New Features
+(Add new features here as they're developed)
+
+### Bug Fixes
+(Add bug fixes here as they're developed)
+
+### Internal
+(Add internal changes here as they're developed)
+
+---
+
 ## [1.0.6] - 2026-03-30
 
 ### Bug Fixes

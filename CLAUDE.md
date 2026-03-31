@@ -123,18 +123,21 @@ Note: setup.sh rebuilds the venv and reinstalls all dependencies, then starts th
 
 ## Release Process
 
+**During development:** Always add changes to the `[Unreleased]` section at the top of CHANGELOG.md. This ensures nothing gets lost between Claude sessions.
+
 When the user says **"Release the code to the public"**, follow these steps:
 
-1. **Update CHANGELOG.md** - Add a new version section with release notes for all changes
-2. **Commit changelog** - Commit to develop branch
-3. **Merge to main** - `git checkout main && git merge develop`
-4. **Tag the release** - `git tag -a X.Y.Z -m "Release X.Y.Z - description"`
-5. **Push everything** - `git push && git push --tags`
-6. **Check documentation** - Verify `/home/robertcowher/webapps/teaandrobots/content/software/beekeeper/index.md` is current (usually no changes needed)
+1. **Review CHANGELOG.md** - Check the `[Unreleased]` section for all pending changes
+2. **Create version section** - Rename `[Unreleased]` to `[X.Y.Z] - YYYY-MM-DD` with today's date
+3. **Add new Unreleased section** - Add a fresh `[Unreleased]` section at the top for future changes
+4. **Commit changelog** - Commit to develop branch: `git commit -m "Prepare release X.Y.Z"`
+5. **Merge to main** - `git checkout main && git merge develop`
+6. **Tag the release** - `git tag -a X.Y.Z -m "Release X.Y.Z - description"`
+7. **Push everything** - `git push && git push --tags`
+8. **Check documentation** - Verify `/home/robertcowher/webapps/teaandrobots/content/software/beekeeper/index.md` is current (usually no changes needed)
+9. **Return to develop** - `git checkout develop && git merge main && git push`
 
 Version numbering:
 - Patch (X.Y.Z): Bug fixes, no new features
 - Minor (X.Y.0): New features, backwards compatible
 - Major (X.0.0): Breaking changes
-
-After release, switch back to develop: `git checkout develop`
