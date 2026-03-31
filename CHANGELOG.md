@@ -12,6 +12,14 @@ Fixed an issue where clicking "Retry Setup" would reuse the old workspace withou
 - **Data safety:** Data directories are preserved (symlinks are deleted, but actual data at `data_dir_remote` is untouched)
 - **Venv preserved:** Python environments (venv/conda) are reused to save time
 
+**Setup Script Now Runs in Activated Environment**
+Fixed an issue where `setup.sh` was running in the base Python environment instead of the project's conda/venv environment. This caused pip install commands in setup scripts to install packages to the wrong location.
+
+- **Conda projects:** Uses `conda run -n env_name bash setup.sh`
+- **Venv projects:** Sets `VIRTUAL_ENV` and `PATH` environment variables
+- **Applies to both:** Initial project setup and pre-training execution
+- **Result:** Python/pip commands in setup.sh now correctly resolve to the project environment
+
 ---
 
 ## [1.0.5] - 2026-03-23
