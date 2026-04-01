@@ -14,7 +14,7 @@ from services.db_service import get_db
 log = logging.getLogger(__name__)
 
 
-def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> bool:
+def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> dict:
     """
     Parse TFEvents and cache analysis for all metrics.
 
@@ -24,7 +24,7 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> bool
         run_id: Training run ID
 
     Returns:
-        True if successful, False otherwise
+        dict with 'success': bool and optional 'reason' for failure
     """
     try:
         db = get_db()
@@ -33,13 +33,19 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> bool
         run = db.get_training_run(run_id)
         if not run or not run.get('tensorboard_dir'):
             log.warning(f"Run {run_id} has no tensorboard_dir")
-            return False
+            return {'success': False, 'reason': 'no_tensorboard_dir'}
 
         # Find TensorBoard directory
         tb_dir = os.path.join(projects_dir, project_name, run['tensorboard_dir'])
         if not os.path.isdir(tb_dir):
             log.warning(f"TensorBoard directory not found: {tb_dir}")
-            return False
+            return {'success': False, 'reason': 'directory_not_found', 'path': tb_dir}
+
+        # Check if any event files exist
+        event_files = list(Path(tb_dir).glob('**/events.out.tfevents.*'))
+        if not event_files:
+            log.warning(f"No TensorBoard event files in {tb_dir}")
+            return {'success': False, 'reason': 'no_event_files', 'path': tb_dir}
 
         # Parse all metrics using tbparse
         try:
@@ -47,12 +53,12 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> bool
             scalars_df = reader.scalars
 
             if scalars_df.empty:
-                log.warning(f"No scalar metrics found in {tb_dir}")
-                return False
+                log.warning(f"No scalar metrics found in {tb_dir} (files exist but empty/not flushed)")
+                return {'success': False, 'reason': 'no_scalars', 'path': tb_dir, 'event_files': len(event_files)}
 
         except Exception as e:
             log.error(f"Failed to parse TensorBoard events in {tb_dir}: {e}")
-            return False
+            return {'success': False, 'reason': 'parse_error', 'error': str(e)}
 
         # Group by metric tag
         metric_groups = scalars_df.groupby('tag')
@@ -78,11 +84,11 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> bool
             db.save_metric_analysis(run_id, metric_name, analysis)
 
         log.info(f"Successfully parsed and analyzed {len(metric_groups)} metrics for run {run_id}")
-        return True
+        return {'success': True}
 
     except Exception as e:
         log.error(f"Error parsing metrics for run {run_id}: {e}", exc_info=True)
-        return False
+        return {'success': False, 'reason': 'unexpected_error', 'error': str(e)}
 
 
 def analyze_metric(metric_name: str, data: list) -> dict:
@@ -373,11 +379,32 @@ def get_metric_analysis(
 
     # If not cached, try to parse
     if not cached:
-        success = parse_run_metrics(projects_dir, project_name, run_id)
-        if not success:
+        result = parse_run_metrics(projects_dir, project_name, run_id)
+        if not result['success']:
+            # Provide diagnostic error messages
+            reason = result.get('reason', 'unknown')
+            if reason == 'no_tensorboard_dir':
+                message = 'Run has no TensorBoard directory configured'
+            elif reason == 'directory_not_found':
+                message = f"TensorBoard directory not found: {result.get('path', 'unknown')}"
+            elif reason == 'no_event_files':
+                message = (f"TensorBoard directory exists but contains no event files. "
+                          f"Check if the training script is writing TensorBoard data. "
+                          f"Path: {result.get('path', 'unknown')}")
+            elif reason == 'no_scalars':
+                message = (f"TensorBoard event files exist ({result.get('event_files', 0)} files) "
+                          f"but contain no scalar metrics. This usually means the data hasn't been "
+                          f"flushed yet. Try calling writer.flush() in your training script, or wait "
+                          f"longer for automatic flushing.")
+            elif reason == 'parse_error':
+                message = f"Failed to parse TensorBoard events: {result.get('error', 'unknown')}"
+            else:
+                message = f"Failed to parse TensorBoard data: {reason}"
+
             return {
                 'error': 'NO_TENSORBOARD_DATA',
-                'message': 'No TensorBoard metrics found for this run'
+                'message': message,
+                'diagnostic': result
             }
 
         # Fetch after parsing

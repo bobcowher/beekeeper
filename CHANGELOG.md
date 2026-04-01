@@ -19,6 +19,14 @@
 ### Bug Fixes
 (Add bug fixes here as they're developed)
 
+### Improvements
+
+**Better TensorBoard Diagnostics**
+- When `/tensorboard/latest` returns NO_TENSORBOARD_DATA, the error message now includes diagnostic information:
+  - Distinguishes between: directory not found, no event files, event files exist but empty/not flushed, parse errors
+  - Provides specific guidance (e.g., "call writer.flush() in your training script")
+  - Includes paths and file counts to help debug TensorBoard issues
+
 ### Internal
 (Add internal changes here as they're developed)
 
