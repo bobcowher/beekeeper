@@ -392,11 +392,48 @@
 
     // --- Status polling ---
 
+    function updateResourceDisplay(resources) {
+        const resourceEl = document.getElementById("resource-usage");
+        if (!resourceEl) return;
+
+        if (!resources) {
+            resourceEl.textContent = "";
+            return;
+        }
+
+        const parts = [];
+        if (resources.cpu_percent !== null && resources.cpu_percent !== undefined) {
+            parts.push(`CPU: ${resources.cpu_percent}%`);
+        }
+        if (resources.memory_mb !== null && resources.memory_mb !== undefined) {
+            const mem = resources.memory_mb >= 1024
+                ? `${(resources.memory_mb / 1024).toFixed(1)} GB`
+                : `${Math.round(resources.memory_mb)} MB`;
+            parts.push(`RAM: ${mem}`);
+        }
+        if (resources.gpu_memory_mb !== null && resources.gpu_memory_mb !== undefined) {
+            const gpuMem = resources.gpu_memory_mb >= 1024
+                ? `${(resources.gpu_memory_mb / 1024).toFixed(1)} GB`
+                : `${Math.round(resources.gpu_memory_mb)} MB`;
+            const gpuLabel = resources.gpu_id !== null
+                ? `GPU ${resources.gpu_id}: ${gpuMem}`
+                : `GPU: ${gpuMem}`;
+            parts.push(gpuLabel);
+        }
+
+        resourceEl.textContent = parts.length ? `| ${parts.join(' | ')}` : "";
+    }
+
     setInterval(async () => {
         try {
             const resp = await fetch(`/projects/${name}/status`);
             if (!resp.ok) return;
             const data = await resp.json();
+
+            // Update resource usage if running
+            if (data.status === "running" && data.resources) {
+                updateResourceDisplay(data.resources);
+            }
 
             if (config.status === "running" && data.status !== "running") {
                 location.reload();

@@ -658,13 +658,20 @@ def get_training_status(name):
         info = _running.get(name)
         if info:
             proc = info["process"]
+            pid = proc.pid
+
+            # Get resource usage for running process
+            from services.resource_tracker import get_process_resources
+            resources = get_process_resources(pid)
+
             return {
                 "status": "running",
-                "pid": proc.pid,
+                "pid": pid,
                 "run_id": info.get("run_id"),
                 "started_at": info.get("started_at"),
                 "tb_port": info.get("tb_port"),
                 "elapsed": time.time() - info.get("started_at", time.time()),
+                "resources": resources,
             }
     # Check standalone TB
     with _lock:
@@ -680,6 +687,7 @@ def get_training_status(name):
         "started_at": None,
         "tb_port": tb_port,
         "elapsed": None,
+        "resources": None,
     }
 
 

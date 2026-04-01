@@ -3,7 +3,18 @@
 ## [Unreleased]
 
 ### New Features
-(Add new features here as they're developed)
+
+**File Browser: Last Modified Timestamps**
+- File browser now displays last-edit timestamps for all files and directories
+- Recent files show relative time ("2 hours ago", "3 days ago")
+- Older files show formatted date (YYYY-MM-DD)
+
+**Project-Level Resource Tracking**
+- Training processes now display real-time CPU, memory, and GPU usage
+- Resource usage appears in the project page training controls section
+- Shows CPU percentage, RAM usage in MB/GB, and GPU memory allocation
+- GPU ID is displayed when the process is using a GPU
+- Updates every 3 seconds during training
 
 ### Bug Fixes
 (Add bug fixes here as they're developed)
