@@ -480,6 +480,8 @@ def _discover_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -
     import datetime
     from dateutil import parser as date_parser
 
+    log.info(f"_discover_tensorboard_dir called for project={project_name}, run_id={run.get('id')}")
+
     project_dir = os.path.join(projects_dir, project_name)
 
     # Parse run start time
