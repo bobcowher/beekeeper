@@ -536,12 +536,13 @@ def _discover_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -
                 time_diff_start = abs((oldest_dt - run_start).total_seconds())
                 time_diff_end = abs((newest_dt - run_start).total_seconds())
 
-                log.info(f"Checking {root}: oldest={oldest_dt}, newest={newest_dt}, "
-                        f"time_diff_start={time_diff_start:.0f}s, time_diff_end={time_diff_end:.0f}s")
+                log.warning(f"[AUTO-DISC] {root}: oldest={oldest_dt}, newest={newest_dt}, "
+                           f"diff_start={time_diff_start:.0f}s, diff_end={time_diff_end:.0f}s")
 
                 # Consider it a match if event file timestamps overlap with run time
                 # (within 1 hour of run start, or if run was active when files were written)
                 if time_diff_start < 3600 or time_diff_end < 3600:
+                    log.warning(f"[AUTO-DISC] ✓ MATCH! Adding candidate: {root}")
                     candidates.append({
                         'path': root,
                         'time_diff': min(time_diff_start, time_diff_end),
