@@ -521,15 +521,26 @@ def _discover_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -
             if event_files:
                 log.warning(f"[AUTO-DISC] Found {len(event_files)} event files in {root}")
                 # Found a directory with event files
-                # Check modification time of event files to estimate when they were created
-                event_paths = [os.path.join(root, f) for f in event_files]
-                mtimes = [os.path.getmtime(p) for p in event_paths]
-                oldest_mtime = min(mtimes)
-                newest_mtime = max(mtimes)
+                # Parse timestamps from TensorBoard event filenames
+                # Format: events.out.tfevents.{timestamp}.{hostname}.{pid}.{suffix}
+                import re
+                timestamps = []
+                for filename in event_files:
+                    match = re.search(r'events\.out\.tfevents\.(\d+)', filename)
+                    if match:
+                        timestamps.append(int(match.group(1)))
+
+                if not timestamps:
+                    # Fallback to mtime if filename parsing fails
+                    event_paths = [os.path.join(root, f) for f in event_files]
+                    timestamps = [int(os.path.getmtime(p)) for p in event_paths]
+
+                oldest_timestamp = min(timestamps)
+                newest_timestamp = max(timestamps)
 
                 # Convert to datetime
-                oldest_dt = datetime.datetime.fromtimestamp(oldest_mtime)
-                newest_dt = datetime.datetime.fromtimestamp(newest_mtime)
+                oldest_dt = datetime.datetime.fromtimestamp(oldest_timestamp)
+                newest_dt = datetime.datetime.fromtimestamp(newest_timestamp)
 
                 # Check if this matches our run timeframe
                 # Allow some tolerance (events might start slightly after run start)
