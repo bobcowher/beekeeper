@@ -806,13 +806,29 @@ curl -X POST http://{host}/api/v1/projects/{name}/training/stop
 
 ## Checking Training Progress
 
-**For active runs**, use `/logs/analysis` - it parses episode data and returns trends:
+**IMPORTANT: Use BOTH endpoints for complete analysis!**
+
+1. **Get TensorBoard metrics** (works for both active and completed runs):
+```
+GET /api/v1/projects/{name}/tensorboard/latest
+```
+Returns: Full metric analysis (loss curves, trends, convergence, anomalies) for all TensorBoard metrics.
+
+2. **Get log-based analysis** (works when TensorBoard data isn't flushed yet):
 ```
 GET /api/v1/projects/{name}/logs/analysis
 ```
-Returns: episode range, trend (improving/stable/declining), quartile breakdown, recent averages.
+Returns: Episode-based trends from log parsing (reward, epsilon, steps).
 
-**For completed runs**, use `/tensorboard/latest` for full metric analysis.
+**Why use both?**
+- TensorBoard provides rich metrics (multiple loss curves, world model performance, etc.)
+- Log analysis provides episode-level data even when TensorBoard hasn't flushed yet
+- If TensorBoard returns an error about unflushed data, log analysis still works
+
+**Recommended workflow:**
+1. Try `/tensorboard/latest` first - it has the most complete data
+2. If it fails (no data, not flushed), fall back to `/logs/analysis`
+3. For active runs, consider using both to get different perspectives
 
 ## Before Starting or Stopping
 
@@ -827,10 +843,11 @@ GET /api/v1/projects/{name}/training/status
 ## Terminology
 
 When asked to "check logs", "look at tensorboard", "see how training is going", or "check progress":
-- Use `/tensorboard/latest` for **metrics analysis** (loss curves, convergence, trends)
-- Use `/logs?tail=N` for **raw training output** (print statements, errors, warnings)
+- Use `/tensorboard/latest` for **structured metric analysis** (loss curves, convergence, trends, anomalies)
+- Use `/logs/analysis` for **episode-based trends** (rewards, epsilon decay) - works even when TB isn't flushed
+- Use `/logs?tail=N` for **raw training output** (print statements, errors, warnings, debugging)
 
-Both are useful. Metrics give you quantitative analysis; logs give you the actual output.
+**For a complete picture, use all three.** Each provides different information.
 
 ## Quick Reference
 
