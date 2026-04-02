@@ -40,12 +40,12 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> dict
 
         # If stored path doesn't exist, auto-discover TensorBoard data
         if not os.path.isdir(tb_dir):
-            log.warning(f"[AUTO-DISC] Stored TB path not found: {tb_dir}, attempting auto-discovery")
+            log.info(f"Stored TB path not found, attempting auto-discovery")
             try:
                 discovered = _discover_tensorboard_dir(projects_dir, project_name, run)
                 if discovered:
                     tb_dir = discovered
-                    log.warning(f"[AUTO-DISC] Success! Auto-discovered TensorBoard data at: {tb_dir}")
+                    log.info(f"Auto-discovered TensorBoard data at: {tb_dir}")
                 else:
                     log.warning(f"Auto-discovery found no matching TensorBoard directories")
                     return {'success': False, 'reason': 'directory_not_found', 'path': tb_dir}
@@ -489,14 +489,14 @@ def _discover_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -
     import datetime
     from dateutil import parser as date_parser
 
-    log.warning(f"[AUTO-DISC] _discover_tensorboard_dir called for project={project_name}, run_id={run.get('id')}")
+    log.debug(f"Auto-discovering TB dir for project={project_name}, run_id={run.get('id')}")
 
     project_dir = os.path.join(projects_dir, project_name)
 
     # Parse run start time
     try:
         run_start = date_parser.parse(run['started_at'])
-        log.warning(f"[AUTO-DISC] Looking for TB data for run started at {run_start}")
+        log.debug(f"Looking for TB data for run started at {run_start}")
     except Exception as e:
         log.warning(f"Could not parse run start time: {run.get('started_at')}: {e}")
         return None
@@ -514,21 +514,15 @@ def _discover_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -
 
     candidates = []
 
-    log.warning(f"[AUTO-DISC] Searching {len(search_paths)} potential locations")
-
     # Search for directories with TensorBoard event files
     for search_path in search_paths:
         if not os.path.isdir(search_path):
-            log.warning(f"[AUTO-DISC] Skipping non-existent path: {search_path}")
             continue
-
-        log.warning(f"[AUTO-DISC] Searching in: {search_path}")
 
         # Look for event files in this directory and subdirectories
         for root, dirs, files in os.walk(search_path):
             event_files = [f for f in files if f.startswith('events.out.tfevents.')]
             if event_files:
-                log.warning(f"[AUTO-DISC] Found {len(event_files)} event files in {root}")
                 # Found a directory with event files
                 # Parse timestamps from TensorBoard event filenames
                 # Format: events.out.tfevents.{timestamp}.{hostname}.{pid}.{suffix}
@@ -556,13 +550,9 @@ def _discover_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -
                 time_diff_start = abs((oldest_dt - run_start).total_seconds())
                 time_diff_end = abs((newest_dt - run_start).total_seconds())
 
-                log.warning(f"[AUTO-DISC] {root}: oldest={oldest_dt}, newest={newest_dt}, "
-                           f"diff_start={time_diff_start:.0f}s, diff_end={time_diff_end:.0f}s")
-
                 # Consider it a match if event file timestamps overlap with run time
                 # (within 1 hour of run start, or if run was active when files were written)
                 if time_diff_start < 3600 or time_diff_end < 3600:
-                    log.warning(f"[AUTO-DISC] ✓ MATCH! Adding candidate: {root}")
                     candidates.append({
                         'path': root,
                         'time_diff': min(time_diff_start, time_diff_end),
@@ -572,18 +562,13 @@ def _discover_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -
                     })
 
     if not candidates:
-        log.info(f"Auto-discovery: No candidate directories found (searched {len([p for p in search_paths if os.path.isdir(p)])} locations)")
         return None
 
     # Sort by time proximity and number of event files
     # Prefer directories with events closest to run start time
     candidates.sort(key=lambda c: (c['time_diff'], -c['event_count']))
 
-    best = candidates[0]
-    log.info(f"Auto-discovered TB dir: {best['path']} "
-             f"(time_diff={best['time_diff']:.0f}s, events={best['event_count']})")
-
-    return best['path']
+    return candidates[0]['path']
 
 
 def _is_lower_better(metric_name: str) -> bool:
