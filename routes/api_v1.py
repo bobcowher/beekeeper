@@ -710,9 +710,10 @@ def get_latest_metrics(name):
             status_code=404
         )
 
-    # Prioritize running run, then most recent completed
+    # Prioritize: running > completed > canceled/crashed (may have partial data)
     running_runs = [r for r in runs if r['status'] == 'running']
     completed_runs = [r for r in runs if r['status'] == 'completed']
+    other_runs = [r for r in runs if r['status'] in ('canceled', 'crashed')]
 
     if running_runs:
         target_run = running_runs[0]
@@ -720,11 +721,15 @@ def get_latest_metrics(name):
     elif completed_runs:
         target_run = completed_runs[0]
         is_active = False
+    elif other_runs:
+        # Fall back to canceled/crashed runs - they may have valuable TB data
+        target_run = other_runs[0]
+        is_active = False
     else:
-        # All runs are canceled/crashed with no completed runs
+        # No runs with any status we recognize
         return api_response(
             error_code="NO_USABLE_RUNS",
-            error_message="No running or completed training runs found",
+            error_message="No training runs found with usable status",
             status_code=404
         )
 
