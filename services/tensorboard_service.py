@@ -485,8 +485,9 @@ def _discover_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -
     # Parse run start time
     try:
         run_start = date_parser.parse(run['started_at'])
-    except Exception:
-        log.warning(f"Could not parse run start time: {run.get('started_at')}")
+        log.info(f"Auto-discovery: looking for TB data for run started at {run_start}")
+    except Exception as e:
+        log.warning(f"Could not parse run start time: {run.get('started_at')}: {e}")
         return None
 
     # Common TensorBoard locations to search
@@ -527,6 +528,9 @@ def _discover_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -
                 time_diff_start = abs((oldest_dt - run_start).total_seconds())
                 time_diff_end = abs((newest_dt - run_start).total_seconds())
 
+                log.info(f"Checking {root}: oldest={oldest_dt}, newest={newest_dt}, "
+                        f"time_diff_start={time_diff_start:.0f}s, time_diff_end={time_diff_end:.0f}s")
+
                 # Consider it a match if event file timestamps overlap with run time
                 # (within 1 hour of run start, or if run was active when files were written)
                 if time_diff_start < 3600 or time_diff_end < 3600:
@@ -539,6 +543,7 @@ def _discover_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -
                     })
 
     if not candidates:
+        log.info(f"Auto-discovery: No candidate directories found (searched {len([p for p in search_paths if os.path.isdir(p)])} locations)")
         return None
 
     # Sort by time proximity and number of event files
