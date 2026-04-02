@@ -40,12 +40,12 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> dict
 
         # If stored path doesn't exist, auto-discover TensorBoard data
         if not os.path.isdir(tb_dir):
-            log.info(f"Stored TB path not found: {tb_dir}, attempting auto-discovery")
+            log.warning(f"[AUTO-DISC] Stored TB path not found: {tb_dir}, attempting auto-discovery")
             try:
                 discovered = _discover_tensorboard_dir(projects_dir, project_name, run)
                 if discovered:
                     tb_dir = discovered
-                    log.info(f"Auto-discovered TensorBoard data at: {tb_dir}")
+                    log.warning(f"[AUTO-DISC] Success! Auto-discovered TensorBoard data at: {tb_dir}")
                 else:
                     log.warning(f"Auto-discovery found no matching TensorBoard directories")
                     return {'success': False, 'reason': 'directory_not_found', 'path': tb_dir}
@@ -480,14 +480,14 @@ def _discover_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -
     import datetime
     from dateutil import parser as date_parser
 
-    log.info(f"_discover_tensorboard_dir called for project={project_name}, run_id={run.get('id')}")
+    log.warning(f"[AUTO-DISC] _discover_tensorboard_dir called for project={project_name}, run_id={run.get('id')}")
 
     project_dir = os.path.join(projects_dir, project_name)
 
     # Parse run start time
     try:
         run_start = date_parser.parse(run['started_at'])
-        log.info(f"Auto-discovery: looking for TB data for run started at {run_start}")
+        log.warning(f"[AUTO-DISC] Looking for TB data for run started at {run_start}")
     except Exception as e:
         log.warning(f"Could not parse run start time: {run.get('started_at')}: {e}")
         return None
