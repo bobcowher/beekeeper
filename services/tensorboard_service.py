@@ -80,11 +80,20 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> dict
         # Analyze each metric
         for metric_name, group in metric_groups:
             # Extract data as list of (step, value, wall_time)
-            data = list(zip(
-                group['step'].tolist(),
-                group['value'].tolist(),
-                group['wall_time'].tolist()
-            ))
+            # Use wall_time if available, otherwise fall back to step
+            if 'wall_time' in group.columns:
+                data = list(zip(
+                    group['step'].tolist(),
+                    group['value'].tolist(),
+                    group['wall_time'].tolist()
+                ))
+            else:
+                # Fallback: use step as wall_time
+                data = list(zip(
+                    group['step'].tolist(),
+                    group['value'].tolist(),
+                    group['step'].tolist()
+                ))
 
             # Sort by step
             data.sort(key=lambda x: x[0])
