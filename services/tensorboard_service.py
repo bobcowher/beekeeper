@@ -505,15 +505,21 @@ def _discover_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -
 
     candidates = []
 
+    log.warning(f"[AUTO-DISC] Searching {len(search_paths)} potential locations")
+
     # Search for directories with TensorBoard event files
     for search_path in search_paths:
         if not os.path.isdir(search_path):
+            log.warning(f"[AUTO-DISC] Skipping non-existent path: {search_path}")
             continue
+
+        log.warning(f"[AUTO-DISC] Searching in: {search_path}")
 
         # Look for event files in this directory and subdirectories
         for root, dirs, files in os.walk(search_path):
             event_files = [f for f in files if f.startswith('events.out.tfevents.')]
             if event_files:
+                log.warning(f"[AUTO-DISC] Found {len(event_files)} event files in {root}")
                 # Found a directory with event files
                 # Check modification time of event files to estimate when they were created
                 event_paths = [os.path.join(root, f) for f in event_files]
