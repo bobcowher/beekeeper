@@ -41,12 +41,16 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> dict
         # If stored path doesn't exist, auto-discover TensorBoard data
         if not os.path.isdir(tb_dir):
             log.info(f"Stored TB path not found: {tb_dir}, attempting auto-discovery")
-            discovered = _discover_tensorboard_dir(projects_dir, project_name, run)
-            if discovered:
-                tb_dir = discovered
-                log.info(f"Auto-discovered TensorBoard data at: {tb_dir}")
-            else:
-                log.warning(f"TensorBoard directory not found and auto-discovery failed")
+            try:
+                discovered = _discover_tensorboard_dir(projects_dir, project_name, run)
+                if discovered:
+                    tb_dir = discovered
+                    log.info(f"Auto-discovered TensorBoard data at: {tb_dir}")
+                else:
+                    log.warning(f"Auto-discovery found no matching TensorBoard directories")
+                    return {'success': False, 'reason': 'directory_not_found', 'path': tb_dir}
+            except Exception as e:
+                log.error(f"Auto-discovery failed with exception: {e}", exc_info=True)
                 return {'success': False, 'reason': 'directory_not_found', 'path': tb_dir}
 
         # Check if any event files exist
