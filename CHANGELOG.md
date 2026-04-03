@@ -4,6 +4,26 @@
 
 ### New Features
 
+**Project Cloning (UI & API)**
+- Added "Clone" button to project page for quick project duplication
+- Clone creates a new project with all settings from the source project
+- Optionally override the git branch when cloning
+- API endpoint: `POST /api/v1/projects/<name>/clone`
+- Useful for creating project variations or experimental branches
+
+**Project Creation API**
+- Added `POST /api/v1/projects` endpoint for creating projects programmatically
+- Allows AI agents and scripts to create new projects without using the UI
+- Accepts JSON payload with project configuration (name, git_url, branch, python_version, etc.)
+- Enables full project lifecycle automation via API
+
+**Comprehensive API Documentation**
+- Added dedicated API documentation page at `/api/v1/docs`
+- Documents all API v1 endpoints including new project creation and cloning
+- Includes request/response examples, query parameters, and common workflows
+- Accessible from sidebar navigation
+- Shows both human-readable curl examples and detailed endpoint specifications
+
 **File Browser: Last Modified Timestamps**
 - File browser now displays last-edit timestamps for all files and directories
 - Recent files show relative time ("2 hours ago", "3 days ago")

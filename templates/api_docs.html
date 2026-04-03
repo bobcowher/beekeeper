@@ -1,0 +1,341 @@
+{% extends "base.html" %}
+
+{% block title %}Beekeeper - API Documentation{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>API Documentation</h1>
+    <span class="muted" style="font-size: 0.9rem;">Version 1.0</span>
+</div>
+
+<section class="card">
+    <h2>Overview</h2>
+    <p>
+        The Beekeeper API provides programmatic access to all project management, training control,
+        and monitoring features. All endpoints return JSON responses with a consistent envelope format.
+    </p>
+    <p style="margin-top: 1rem;">
+        <strong>Base URL:</strong> <code>http://{{ request.host }}/api/v1</code>
+    </p>
+</section>
+
+<section class="card">
+    <h2>Authentication</h2>
+    <p>
+        API requests require authentication via API key. Include the key in the <code>X-API-Key</code> header:
+    </p>
+    <pre class="api-examples">curl -H "X-API-Key: your-api-key-here" http://{{ request.host }}/api/v1/projects</pre>
+    <p style="margin-top: 1rem;">
+        Generate API keys from the <a href="{{ url_for('admin.index') }}">Admin Panel</a>.
+    </p>
+</section>
+
+<section class="card">
+    <h2>Response Format</h2>
+    <p>All API responses use a consistent JSON envelope:</p>
+
+    <h3 style="margin-top: 1rem;">Success Response</h3>
+    <pre class="api-examples">{
+  "success": true,
+  "data": { ... }
+}</pre>
+
+    <h3 style="margin-top: 1rem;">Error Response</h3>
+    <pre class="api-examples">{
+  "success": false,
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human-readable error message"
+  }
+}</pre>
+</section>
+
+<section class="card">
+    <h2 id="projects">Projects</h2>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /projects</h3>
+        <p>List all projects with basic info and training status.</p>
+        <pre class="api-examples">curl http://{{ request.host }}/api/v1/projects</pre>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method post">POST</span> /projects</h3>
+        <p>Create a new project from a git repository.</p>
+        <pre class="api-examples">curl -X POST http://{{ request.host }}/api/v1/projects \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-project",
+    "git_url": "https://github.com/user/repo.git",
+    "branch": "main",
+    "python_version": "3.12",
+    "train_file": "train.py",
+    "env_type": "venv"
+  }'</pre>
+        <p style="margin-top: 1rem;"><strong>Required fields:</strong></p>
+        <ul>
+            <li><code>name</code> - Project name (alphanumeric, hyphens, underscores only)</li>
+            <li><code>git_url</code> - Git repository URL</li>
+        </ul>
+        <p style="margin-top: 0.5rem;"><strong>Optional fields:</strong></p>
+        <ul>
+            <li><code>branch</code> - Git branch (default: "main")</li>
+            <li><code>python_version</code> - Python version (default: "3.12")</li>
+            <li><code>train_file</code> - Training script path (default: "train.py")</li>
+            <li><code>tensorboard_log_dir</code> - TensorBoard logs directory (default: "runs")</li>
+            <li><code>requirements_file</code> - Requirements file path (default: "requirements.txt")</li>
+            <li><code>env_type</code> - Environment type: "venv" or "conda" (default: "venv")</li>
+            <li><code>setup_script</code> - Optional setup script to run after dependency installation</li>
+        </ul>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /projects/{name}</h3>
+        <p>Get detailed project info including training status.</p>
+        <pre class="api-examples">curl http://{{ request.host }}/api/v1/projects/my-project</pre>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method post">POST</span> /projects/{name}/clone</h3>
+        <p>Clone an existing project with a new name.</p>
+        <pre class="api-examples">curl -X POST http://{{ request.host }}/api/v1/projects/my-project/clone \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-project-clone",
+    "branch": "experimental"
+  }'</pre>
+        <p style="margin-top: 1rem;"><strong>Required fields:</strong></p>
+        <ul>
+            <li><code>name</code> - New project name</li>
+        </ul>
+        <p style="margin-top: 0.5rem;"><strong>Optional fields:</strong></p>
+        <ul>
+            <li><code>branch</code> - Override the git branch (defaults to source project's branch)</li>
+        </ul>
+    </div>
+</section>
+
+<section class="card">
+    <h2 id="training">Training Control</h2>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method post">POST</span> /projects/{name}/training/start</h3>
+        <p>Start training for a project.</p>
+        <pre class="api-examples">curl -X POST http://{{ request.host }}/api/v1/projects/my-project/training/start</pre>
+        <p style="margin-top: 1rem;">Returns the process PID and TensorBoard port on success.</p>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method post">POST</span> /projects/{name}/training/stop</h3>
+        <p>Stop running training.</p>
+        <pre class="api-examples">curl -X POST http://{{ request.host }}/api/v1/projects/my-project/training/stop</pre>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /projects/{name}/training/status</h3>
+        <p>Get training status (running, idle, etc.).</p>
+        <pre class="api-examples">curl http://{{ request.host }}/api/v1/projects/my-project/training/status</pre>
+    </div>
+</section>
+
+<section class="card">
+    <h2 id="logs">Logs & Monitoring</h2>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /projects/{name}/logs</h3>
+        <p>Get log content. Use <code>?tail=N</code> for last N lines.</p>
+        <pre class="api-examples">curl "http://{{ request.host }}/api/v1/projects/my-project/logs?tail=100"</pre>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /projects/{name}/logs/stream</h3>
+        <p>Server-sent events (SSE) stream of log updates.</p>
+        <pre class="api-examples">curl -N http://{{ request.host }}/api/v1/projects/my-project/logs/stream</pre>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /projects/{name}/logs/analysis</h3>
+        <p>Parse episode data from logs and return trend analysis (improving/stable/declining).</p>
+        <pre class="api-examples">curl "http://{{ request.host }}/api/v1/projects/my-project/logs/analysis?tail=500"</pre>
+        <p style="margin-top: 1rem;">Works for active runs without needing TensorBoard data.</p>
+    </div>
+</section>
+
+<section class="card">
+    <h2 id="tensorboard">TensorBoard Metrics</h2>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /projects/{name}/tensorboard/latest</h3>
+        <p>Get metric analysis for the current or most recent run.</p>
+        <pre class="api-examples">curl http://{{ request.host }}/api/v1/projects/my-project/tensorboard/latest
+
+# With detail level
+curl "http://{{ request.host }}/api/v1/projects/my-project/tensorboard/latest?detail=medium"
+
+# Filter specific metrics
+curl "http://{{ request.host }}/api/v1/projects/my-project/tensorboard/latest?metrics=loss,accuracy"</pre>
+        <p style="margin-top: 1rem;"><strong>Query parameters:</strong></p>
+        <ul>
+            <li><code>detail</code> - low (default), medium, or high</li>
+            <li><code>metrics</code> - Comma-separated list of metric names to include</li>
+        </ul>
+    </div>
+</section>
+
+<section class="card">
+    <h2 id="branches">Branch Management</h2>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /projects/{name}/branches</h3>
+        <p>List available branches from the remote repository.</p>
+        <pre class="api-examples">curl http://{{ request.host }}/api/v1/projects/my-project/branches</pre>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method post">POST</span> /projects/{name}/branch</h3>
+        <p>Switch to a different branch.</p>
+        <pre class="api-examples">curl -X POST http://{{ request.host }}/api/v1/projects/my-project/branch \
+  -H "Content-Type: application/json" \
+  -d '{"branch": "experimental"}'</pre>
+        <p style="margin-top: 1rem;">Checks for uncommitted changes before switching.</p>
+    </div>
+</section>
+
+<section class="card">
+    <h2 id="files">Files</h2>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /projects/{name}/files</h3>
+        <p>List files in workspace root.</p>
+        <pre class="api-examples">curl http://{{ request.host }}/api/v1/projects/my-project/files</pre>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /projects/{name}/files/{path}</h3>
+        <p>Download a file or list directory contents.</p>
+        <pre class="api-examples"># List directory
+curl http://{{ request.host }}/api/v1/projects/my-project/files/subdir
+
+# Download file
+curl -O http://{{ request.host }}/api/v1/projects/my-project/files/model.pth
+
+# Download directory as zip
+curl -o workspace.zip "http://{{ request.host }}/api/v1/projects/my-project/files?zip=1"</pre>
+    </div>
+</section>
+
+<section class="card">
+    <h2 id="runs">Run History</h2>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /projects/{name}/runs</h3>
+        <p>List training run history (last 20 runs).</p>
+        <pre class="api-examples">curl http://{{ request.host }}/api/v1/projects/my-project/runs</pre>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /projects/{name}/runs/{run_id}</h3>
+        <p>Get details for a specific run.</p>
+        <pre class="api-examples">curl http://{{ request.host }}/api/v1/projects/my-project/runs/5</pre>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /projects/{name}/runs/{run_id}/metrics</h3>
+        <p>Get TensorBoard metrics for a specific run.</p>
+        <pre class="api-examples">curl http://{{ request.host }}/api/v1/projects/my-project/runs/5/metrics</pre>
+        <p style="margin-top: 1rem;">Accepts same query parameters as <code>/tensorboard/latest</code>.</p>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /projects/{name}/runs/{run_id}/log</h3>
+        <p>Download archived log file for a run.</p>
+        <pre class="api-examples">curl -O http://{{ request.host }}/api/v1/projects/my-project/runs/5/log</pre>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method delete">DELETE</span> /projects/{name}/runs/clear</h3>
+        <p>Clear all run history for a project.</p>
+        <pre class="api-examples">curl -X DELETE http://{{ request.host }}/api/v1/projects/my-project/runs/clear</pre>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method post">POST</span> /projects/{name}/runs/cleanup-orphaned</h3>
+        <p>Mark orphaned runs as canceled (stuck in "running" state after server restart).</p>
+        <pre class="api-examples">curl -X POST http://{{ request.host }}/api/v1/projects/my-project/runs/cleanup-orphaned</pre>
+    </div>
+</section>
+
+<section class="card">
+    <h2 id="system">System</h2>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /stats</h3>
+        <p>Get system stats (CPU, RAM, GPU usage and availability).</p>
+        <pre class="api-examples">curl http://{{ request.host }}/api/v1/stats</pre>
+    </div>
+</section>
+
+<section class="card">
+    <h2 id="agent">Agent Integration</h2>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /projects/{name}/agent/instructions</h3>
+        <p>Download agent instructions as a markdown file for AI agents.</p>
+        <pre class="api-examples">curl -o BEEKEEPER.md http://{{ request.host }}/api/v1/projects/my-project/agent/instructions</pre>
+        <p style="margin-top: 1rem;">
+            This file can be added to a project's CLAUDE.md or pasted into an AI agent's context
+            to give it full access to Beekeeper functionality.
+        </p>
+    </div>
+</section>
+
+<section class="card">
+    <h2 id="examples">Example Workflows</h2>
+
+    <h3>Create and Start Training</h3>
+    <pre class="api-examples"># 1. Create project
+curl -X POST http://{{ request.host }}/api/v1/projects \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-rl-project",
+    "git_url": "https://github.com/user/rl-project.git",
+    "branch": "main"
+  }'
+
+# 2. Wait for setup to complete (poll until setup_status is "ready")
+curl http://{{ request.host }}/api/v1/projects/my-rl-project
+
+# 3. Start training
+curl -X POST http://{{ request.host }}/api/v1/projects/my-rl-project/training/start
+
+# 4. Monitor logs
+curl "http://{{ request.host }}/api/v1/projects/my-rl-project/logs?tail=50"
+
+# 5. Check progress
+curl http://{{ request.host }}/api/v1/projects/my-rl-project/logs/analysis</pre>
+
+    <h3 style="margin-top: 2rem;">Clone Project for Experiments</h3>
+    <pre class="api-examples"># Clone existing project with different branch
+curl -X POST http://{{ request.host }}/api/v1/projects/my-rl-project/clone \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-rl-project-experimental",
+    "branch": "feature/new-reward"
+  }'
+
+# The cloned project will use the same settings but start fresh</pre>
+
+    <h3 style="margin-top: 2rem;">Switch Branch and Retrain</h3>
+    <pre class="api-examples"># 1. Stop training if running
+curl -X POST http://{{ request.host }}/api/v1/projects/my-project/training/stop
+
+# 2. Switch branch
+curl -X POST http://{{ request.host }}/api/v1/projects/my-project/branch \
+  -H "Content-Type: application/json" \
+  -d '{"branch": "experimental"}'
+
+# 3. Start training on new branch
+curl -X POST http://{{ request.host }}/api/v1/projects/my-project/training/start</pre>
+</section>
+
+{% endblock %}

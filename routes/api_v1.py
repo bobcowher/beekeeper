@@ -93,6 +93,102 @@ def list_projects():
     return api_response(data={"projects": projects})
 
 
+@api_v1_bp.route("/projects", methods=["POST"])
+@api_key_required
+def create_project():
+    """Create a new project from a git repository."""
+    import re
+    from services.project_service import create_project as create_project_service
+
+    data = request.get_json() or {}
+
+    # Validate required fields
+    name = data.get("name", "").strip()
+    if not name:
+        return api_response(
+            error_code="MISSING_NAME",
+            error_message="Project name is required",
+            status_code=400
+        )
+
+    if not re.match(r"^[a-zA-Z0-9_-]+$", name):
+        return api_response(
+            error_code="INVALID_NAME",
+            error_message="Invalid project name. Use only letters, numbers, hyphens, underscores.",
+            status_code=400
+        )
+
+    git_url = data.get("git_url", "").strip()
+    if not git_url:
+        return api_response(
+            error_code="MISSING_GIT_URL",
+            error_message="Git URL is required",
+            status_code=400
+        )
+
+    projects_dir = current_app.config["PROJECTS_DIR"]
+
+    # Check for duplicate
+    if os.path.exists(os.path.join(projects_dir, name)):
+        return api_response(
+            error_code="DUPLICATE_NAME",
+            error_message=f"Project '{name}' already exists",
+            status_code=409
+        )
+
+    # Validate data_dir if enabled
+    data_dir_enabled = data.get("data_dir_enabled", False)
+    if data_dir_enabled:
+        data_dir_remote = data.get("data_dir_remote", "").strip()
+        if not data_dir_remote:
+            return api_response(
+                error_code="MISSING_DATA_DIR",
+                error_message="System data path is required when data directory is enabled",
+                status_code=400
+            )
+        if not os.path.isdir(data_dir_remote):
+            return api_response(
+                error_code="INVALID_DATA_DIR",
+                error_message=f"System data path '{data_dir_remote}' does not exist or is not a directory",
+                status_code=400
+            )
+
+    # Build project data with defaults
+    project_data = {
+        "name": name,
+        "git_url": git_url,
+        "branch": data.get("branch", "main").strip() or "main",
+        "python_version": data.get("python_version", "3.12"),
+        "train_file": data.get("train_file", "train.py").strip() or "train.py",
+        "tensorboard_log_dir": data.get("tensorboard_log_dir", "runs").strip() or "runs",
+        "requirements_file": data.get("requirements_file", "requirements.txt").strip() or "requirements.txt",
+        "env_type": data.get("env_type", "venv"),
+        "setup_script": data.get("setup_script", "").strip(),
+        "data_dir_enabled": data_dir_enabled,
+        "data_dir_local": data.get("data_dir_local", "data").strip() or "data",
+        "data_dir_remote": data.get("data_dir_remote", "").strip(),
+    }
+
+    # Create the project
+    try:
+        create_project_service(projects_dir, project_data)
+    except Exception as e:
+        return api_response(
+            error_code="CREATE_FAILED",
+            error_message=f"Failed to create project: {e}",
+            status_code=500
+        )
+
+    # Load and return the created project
+    config_path = os.path.join(projects_dir, name, "project.json")
+    project = Project.load(config_path)
+
+    return api_response(
+        data={"project": project.to_dict()},
+        status_code=201
+    )
+
+
 @api_v1_bp.route("/projects/<name>")
 @api_key_required
 def get_project(name):
@@ -109,6 +205,85 @@ def get_project(name):
             "training": status,
         }
     })
+
+
+@api_v1_bp.route("/projects/<name>/clone", methods=["POST"])
+@api_key_required
+def clone_project(name):
+    """Clone an existing project with a new name."""
+    import re
+    from services.project_service import create_project as create_project_service
+
+    # Load the source project
+    project, error = load_project(name)
+    if error:
+        return error
+
+    # Get the new name from request
+    data = request.get_json() or {}
+    new_name = data.get("name", "").strip()
+
+    if not new_name:
+        return api_response(
+            error_code="MISSING_NAME",
+            error_message="New project name is required",
+            status_code=400
+        )
+
+    if not re.match(r"^[a-zA-Z0-9_-]+$", new_name):
+        return api_response(
+            error_code="INVALID_NAME",
+            error_message="Invalid project name. Use only letters, numbers, hyphens, underscores.",
+            status_code=400
+        )
+
+    projects_dir = current_app.config["PROJECTS_DIR"]
+
+    # Check for duplicate
+    if os.path.exists(os.path.join(projects_dir, new_name)):
+        return api_response(
+            error_code="DUPLICATE_NAME",
+            error_message=f"Project '{new_name}' already exists",
+            status_code=409
+        )
+
+    # Copy settings from source project, with optional overrides
+    project_data = project.to_dict()
+    project_data["name"] = new_name
+
+    # Allow overriding branch
+    if "branch" in data:
+        project_data["branch"] = data["branch"].strip() or project.branch
+
+    # Reset status fields for the new clone
+    project_data["setup_status"] = "pending"
+    project_data["setup_error"] = ""
+    project_data["train_status"] = "idle"
+    project_data["train_pid"] = 0
+    project_data["pinned"] = False
+    project_data["last_run_at"] = 0.0
+
+    # Create the cloned project
+    try:
+        create_project_service(projects_dir, project_data)
+    except Exception as e:
+        return api_response(
+            error_code="CLONE_FAILED",
+            error_message=f"Failed to clone project: {e}",
+            status_code=500
+        )
+
+    # Load and return the cloned project
+    config_path = os.path.join(projects_dir, new_name, "project.json")
+    cloned_project = Project.load(config_path)
+
+    return api_response(
+        data={
+            "project": cloned_project.to_dict(),
+            "source": name
+        },
+        status_code=201
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -762,6 +937,17 @@ def get_latest_metrics(name):
     }
 
     return api_response(data=response_data)
+
+
+# ---------------------------------------------------------------------------
+# API Documentation
+# ---------------------------------------------------------------------------
+
+@api_v1_bp.route("/docs")
+def api_documentation():
+    """Render the API documentation page."""
+    from flask import render_template
+    return render_template("api_docs.html")
 
 
 # ---------------------------------------------------------------------------
