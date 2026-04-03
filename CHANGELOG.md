@@ -41,6 +41,12 @@
 
 ### Improvements
 
+**Clearer Agent Documentation Refresh Instructions**
+- Agent instructions now include a prominent section at the top explaining how to refresh the documentation
+- Explicitly tells agents to use the API endpoint, not local file operations (find, grep, cat)
+- Prevents agents from searching locally for documentation that should be fetched from the API
+- Ensures agents always have the most up-to-date information
+
 **Better TensorBoard Diagnostics**
 - When `/tensorboard/latest` returns NO_TENSORBOARD_DATA, the error message now includes diagnostic information:
   - Distinguishes between: directory not found, no event files, event files exist but empty/not flushed, parse errors

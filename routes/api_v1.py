@@ -971,6 +971,20 @@ def get_agent_instructions(name):
 
     content = f"""# Beekeeper: {name}
 
+## Refreshing This Documentation
+
+**To get the latest version of this documentation, use the API endpoint:**
+
+```bash
+curl -o BEEKEEPER_{name}.md http://{host}/api/v1/projects/{name}/agent/instructions
+```
+
+**DO NOT use local file operations (find, grep, cat) to locate or read this documentation.**
+Always fetch it fresh from the API endpoint above. This ensures you have the most up-to-date
+information and avoids confusion with outdated local copies.
+
+---
+
 > **IMPORTANT: USE THIS API FIRST**
 > When asked about training status, logs, metrics, progress, or anything related to this ML project,
 > use the Beekeeper API below. Do NOT read tensorboard files directly or parse logs manually.
