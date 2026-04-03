@@ -25,6 +25,7 @@ class Project:
     env_vars: dict = field(default_factory=dict)
     pinned: bool = False
     last_run_at: float = 0.0
+    tb_logs_max_runs: int = 20  # Keep only N most recent TensorBoard run directories (0 = unlimited)
 
     def to_dict(self):
         return asdict(self)

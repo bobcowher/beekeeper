@@ -134,9 +134,14 @@
             {% endif %}
         </div>
         <div class="tb-controls">
-            <form action="{{ url_for('project.clear_tb_logs', name=project.name) }}" method="POST"
+            <form action="{{ url_for('project.cleanup_tb_logs', name=project.name) }}" method="POST" style="display: inline-flex; gap: 0.5rem; align-items: center; margin-right: 1rem;">
+                <label for="keep-count" style="margin: 0; font-size: 0.85rem;">Keep recent:</label>
+                <input type="number" id="keep-count" name="keep_count" min="1" value="{{ project.get('tb_logs_max_runs', 20) }}" style="width: 60px; padding: 4px 8px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 3px; color: var(--text-primary); font-size: 0.85rem;">
+                <button type="submit" class="btn btn-secondary btn-sm">Cleanup Old Logs</button>
+            </form>
+            <form action="{{ url_for('project.clear_tb_logs', name=project.name) }}" method="POST" style="display: inline;"
                   onsubmit="return confirm('Clear all Tensorboard logs? This cannot be undone.')">
-                <button type="submit" class="btn btn-danger btn-sm">Clear Tensorboard Logs</button>
+                <button type="submit" class="btn btn-danger btn-sm">Clear All Logs</button>
             </form>
         </div>
     </div>

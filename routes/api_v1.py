@@ -705,6 +705,35 @@ def system_stats():
     return api_response(data=stats)
 
 
+@api_v1_bp.route("/busy")
+@api_key_required
+def check_busy():
+    """
+    Check if any training is running (useful before deploying/restarting).
+
+    Returns:
+      {
+        "busy": true/false,
+        "running_projects": ["project1", "project2"]
+      }
+    """
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    running_projects = []
+
+    if os.path.isdir(projects_dir):
+        for name in os.listdir(projects_dir):
+            config_path = os.path.join(projects_dir, name, "project.json")
+            if os.path.isfile(config_path):
+                status = get_training_status(name)
+                if status.get("status") == "running":
+                    running_projects.append(name)
+
+    return api_response(data={
+        "busy": len(running_projects) > 0,
+        "running_projects": running_projects
+    })
+
+
 # ---------------------------------------------------------------------------
 # Run History
 # ---------------------------------------------------------------------------
@@ -937,6 +966,71 @@ def get_latest_metrics(name):
     }
 
     return api_response(data=response_data)
+
+
+@api_v1_bp.route("/projects/<name>/tensorboard/cleanup", methods=["POST"])
+@api_key_required
+def cleanup_tensorboard_logs(name):
+    """
+    Cleanup old TensorBoard log directories, keeping only N most recent runs.
+
+    Request body:
+      {
+        "keep_count": 10,  // Number of recent runs to keep
+        "cleanup_run_history": true  // Also cleanup old run records from database (default: true)
+      }
+    """
+    from services.tensorboard_service import cleanup_old_tb_logs
+
+    project, error = load_project(name)
+    if error:
+        return error
+
+    data = request.get_json() or {}
+    keep_count = data.get("keep_count")
+    cleanup_db = data.get("cleanup_run_history", True)
+
+    if not keep_count or not isinstance(keep_count, int) or keep_count < 1:
+        return api_response(
+            error_code="INVALID_KEEP_COUNT",
+            error_message="keep_count must be a positive integer",
+            status_code=400
+        )
+
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    workspace_dir = os.path.join(projects_dir, name, "workspace")
+    tb_logdir = os.path.join(workspace_dir, project.tensorboard_log_dir)
+
+    # Cleanup TensorBoard logs
+    result = cleanup_old_tb_logs(tb_logdir, keep_count)
+
+    # Cleanup old run history if requested
+    db_cleanup_info = None
+    if cleanup_db and result['deleted']:
+        from services.db_service import get_db
+        db = get_db()
+        runs = db.get_training_runs(name, limit=1000)
+
+        # Sort by started_at descending (newest first)
+        runs.sort(key=lambda r: r['started_at'], reverse=True)
+
+        # Delete runs beyond keep_count
+        deleted_run_ids = []
+        for run in runs[keep_count:]:
+            db.delete_training_run(run['id'])
+            deleted_run_ids.append(run['id'])
+
+        db_cleanup_info = {
+            'deleted_count': len(deleted_run_ids),
+            'kept_count': min(len(runs), keep_count)
+        }
+
+    response = {
+        'tensorboard': result,
+        'run_history': db_cleanup_info
+    }
+
+    return api_response(data=response)
 
 
 # ---------------------------------------------------------------------------

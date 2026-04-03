@@ -549,6 +549,14 @@ def start_training(projects_dir, name):
             os.makedirs(tb_run_dir, exist_ok=True)
             tb_run_dir_rel = f"{project.get('tensorboard_log_dir', 'runs')}/{run_timestamp}"
 
+            # Auto-cleanup old TensorBoard logs if configured
+            tb_logs_max_runs = project.get('tb_logs_max_runs', 20)
+            if tb_logs_max_runs > 0:
+                from services.tensorboard_service import cleanup_old_tb_logs
+                cleanup_result = cleanup_old_tb_logs(tb_logdir_base, tb_logs_max_runs)
+                if cleanup_result['deleted']:
+                    log.info(f"Auto-cleanup: {cleanup_result['message']}")
+
             # Launch Tensorboard pointing to the base directory (shows all runs)
             try:
                 tb_process = subprocess.Popen(

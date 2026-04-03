@@ -203,6 +203,33 @@ def clear_tb_logs(name):
     return redirect(url_for("project.detail", name=name))
 
 
+@project_bp.route("/<name>/cleanup-tb-logs", methods=["POST"])
+def cleanup_tb_logs(name):
+    from services.tensorboard_service import cleanup_old_tb_logs
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    config_path = os.path.join(projects_dir, name, "project.json")
+    if not os.path.isfile(config_path):
+        abort(404)
+
+    with open(config_path) as f:
+        project = json.load(f)
+
+    keep_count = request.form.get("keep_count", type=int)
+    if not keep_count or keep_count < 1:
+        flash("Please specify how many runs to keep (must be at least 1).", "error")
+        return redirect(url_for("project.detail", name=name))
+
+    tb_logdir = os.path.join(projects_dir, name, "workspace", project.get("tensorboard_log_dir", "runs"))
+    result = cleanup_old_tb_logs(tb_logdir, keep_count)
+
+    if result['deleted']:
+        flash(result['message'], "success")
+    else:
+        flash(result['message'], "info")
+
+    return redirect(url_for("project.detail", name=name))
+
+
 @project_bp.route("/<name>/pin", methods=["POST"])
 def toggle_pin(name):
     projects_dir = current_app.config["PROJECTS_DIR"]

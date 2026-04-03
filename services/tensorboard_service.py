@@ -619,3 +619,88 @@ def _generate_summary(
         parts.append(f"{len(anomalies)} anomalies detected")
 
     return '. '.join(parts) + '.'
+
+
+def cleanup_old_tb_logs(tb_logdir: str, keep_count: int) -> dict:
+    """
+    Keep only the N most recent TensorBoard run directories.
+
+    Args:
+        tb_logdir: Path to TensorBoard log directory (e.g., workspace/runs)
+        keep_count: Number of recent runs to keep (0 = keep all)
+
+    Returns:
+        dict with 'deleted': list of deleted directory names, 'kept': list of kept directory names
+    """
+    import shutil
+
+    if keep_count <= 0:
+        return {'deleted': [], 'kept': [], 'message': 'No limit set, nothing deleted'}
+
+    if not os.path.isdir(tb_logdir):
+        return {'deleted': [], 'kept': [], 'message': 'TensorBoard log directory not found'}
+
+    # Get all subdirectories (each run has a timestamp-named directory)
+    subdirs = []
+    for item in os.listdir(tb_logdir):
+        path = os.path.join(tb_logdir, item)
+        if os.path.isdir(path):
+            subdirs.append((item, path))
+
+    if len(subdirs) <= keep_count:
+        return {
+            'deleted': [],
+            'kept': [name for name, _ in subdirs],
+            'message': f'Only {len(subdirs)} run(s) found, nothing to delete'
+        }
+
+    # Sort by name (timestamps sort correctly - newest first)
+    subdirs.sort(reverse=True)
+
+    # Split into keep and delete lists
+    to_keep = subdirs[:keep_count]
+    to_delete = subdirs[keep_count:]
+
+    deleted_names = []
+    for name, path in to_delete:
+        try:
+            shutil.rmtree(path)
+            deleted_names.append(name)
+            log.info(f"Deleted old TensorBoard run: {name}")
+        except Exception as e:
+            log.error(f"Failed to delete {name}: {e}")
+
+    return {
+        'deleted': deleted_names,
+        'kept': [name for name, _ in to_keep],
+        'message': f'Deleted {len(deleted_names)} old run(s), kept {len(to_keep)} recent run(s)'
+    }
+
+
+def list_tb_run_directories(tb_logdir: str) -> list:
+    """
+    List all TensorBoard run directories with their timestamps.
+
+    Args:
+        tb_logdir: Path to TensorBoard log directory
+
+    Returns:
+        List of dicts with 'name', 'path', and 'mtime' for each run directory
+    """
+    if not os.path.isdir(tb_logdir):
+        return []
+
+    runs = []
+    for item in os.listdir(tb_logdir):
+        path = os.path.join(tb_logdir, item)
+        if os.path.isdir(path):
+            stat = os.stat(path)
+            runs.append({
+                'name': item,
+                'path': path,
+                'mtime': stat.st_mtime
+            })
+
+    # Sort by name (timestamp) descending (newest first)
+    runs.sort(key=lambda x: x['name'], reverse=True)
+    return runs
