@@ -46,6 +46,8 @@
 - Explicitly tells agents to use the API endpoint, not local file operations (find, grep, cat)
 - Prevents agents from searching locally for documentation that should be fetched from the API
 - Ensures agents always have the most up-to-date information
+- Added branch management endpoints to agent instructions (list branches, switch branch)
+- Added reference to global API documentation at /api/v1/docs for complete endpoint coverage
 
 **Better TensorBoard Diagnostics**
 - When `/tensorboard/latest` returns NO_TENSORBOARD_DATA, the error message now includes diagnostic information:

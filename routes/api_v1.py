@@ -971,16 +971,21 @@ def get_agent_instructions(name):
 
     content = f"""# Beekeeper: {name}
 
-## Refreshing This Documentation
+## Documentation Resources
 
-**To get the latest version of this documentation, use the API endpoint:**
-
+**Project-Specific Instructions (this file):**
 ```bash
 curl -o BEEKEEPER_{name}.md http://{host}/api/v1/projects/{name}/agent/instructions
 ```
 
-**DO NOT use local file operations (find, grep, cat) to locate or read this documentation.**
-Always fetch it fresh from the API endpoint above. This ensures you have the most up-to-date
+**Complete API Reference:**
+For comprehensive documentation covering ALL Beekeeper endpoints (including project creation, cloning, and other features), visit:
+```
+http://{host}/api/v1/docs
+```
+
+**DO NOT use local file operations (find, grep, cat) to locate or read documentation.**
+Always fetch it fresh from the API endpoints above. This ensures you have the most up-to-date
 information and avoids confusion with outdated local copies.
 
 ---
@@ -1064,6 +1069,8 @@ When asked to "check logs", "look at tensorboard", "see how training is going", 
 | Get metrics | GET | `/api/v1/projects/{name}/tensorboard/latest` |
 | Start training | POST | `/api/v1/projects/{name}/training/start` |
 | Stop training | POST | `/api/v1/projects/{name}/training/stop` |
+| List branches | GET | `/api/v1/projects/{name}/branches` |
+| Switch branch | POST | `/api/v1/projects/{name}/branch` |
 | List files | GET | `/api/v1/projects/{name}/files` |
 | Download file | GET | `/api/v1/projects/{name}/files/<path>` |
 | System stats | GET | `/api/v1/stats` |
@@ -1228,6 +1235,29 @@ GET /api/v1/projects/{name}/runs
 GET /api/v1/projects/{name}/runs/<run_id>
 GET /api/v1/projects/{name}/runs/<run_id>/metrics
 ```
+
+### Branch Management
+
+**List Available Branches**
+```
+GET /api/v1/projects/{name}/branches
+Response: {{"success": true, "data": {{"branches": ["main", "develop", "feature-x"], "current": "main"}}}}
+```
+Returns all remote branches from the git repository and the currently active branch.
+
+**Switch Branch**
+```
+POST /api/v1/projects/{name}/branch
+Request: {{"branch": "develop"}}
+Response: {{"success": true, "data": {{"branch": "develop", "status": "switched"}}}}
+```
+Switches the project to a different git branch. This will:
+- Check for uncommitted changes (fails if any exist)
+- Fetch from remote
+- Checkout the requested branch
+- Update project.json with the new branch
+
+**IMPORTANT:** You cannot switch branches while training is running. Stop training first.
 
 ### System
 
