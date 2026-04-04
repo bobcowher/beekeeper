@@ -5,12 +5,14 @@
 ### New Features
 
 **TensorBoard Log Retention Management**
-- Added `tb_logs_max_runs` setting to project configuration (default: 20)
+- Added `tb_logs_max_runs` setting to project configuration (default: 10, configurable in Project Info)
 - Auto-cleanup of old TensorBoard logs when starting training (keeps N most recent)
-- Manual cleanup UI: "Cleanup Old Logs" button in TensorBoard section with configurable keep count
+- Manual cleanup UI in TensorBoard section: one-off cleanup with custom keep count
+- Manual cleanup UI in Run History section: one-off cleanup with custom keep count
+- Both cleanup buttons default to the project's `tb_logs_max_runs` setting
 - API endpoint: `POST /api/v1/projects/{name}/tensorboard/cleanup` for automated cleanup
 - Cleanup can optionally remove old run history records from database
-- Prevents TensorBoard directories from growing indefinitely
+- Prevents TensorBoard directories and run history from growing indefinitely
 
 **Busy Status Endpoint**
 - Added `GET /api/v1/busy` endpoint to check if any training is running

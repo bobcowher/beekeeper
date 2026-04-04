@@ -105,6 +105,11 @@
     <h2 class="collapsible-header" data-target="history-body">Run History <span class="collapse-icon">▶</span></h2>
     <div class="collapsible-body" id="history-body" style="display:none">
         <div class="history-controls">
+            <form action="{{ url_for('project.cleanup_run_history', name=project.name) }}" method="POST" style="display: inline-flex; gap: 0.5rem; align-items: center; margin-right: 1rem;">
+                <label for="history-keep-count" style="margin: 0; font-size: 0.85rem;">Keep recent:</label>
+                <input type="number" id="history-keep-count" name="keep_count" min="1" value="{{ project.get('tb_logs_max_runs', 10) }}" style="width: 60px; padding: 4px 8px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 3px; color: var(--text-primary); font-size: 0.85rem;">
+                <button type="submit" class="btn btn-secondary btn-sm">Cleanup Old Runs</button>
+            </form>
             <button id="clear-history-btn" class="btn btn-danger btn-sm">Clear All History</button>
         </div>
         <div id="run-history-list">
@@ -136,7 +141,7 @@
         <div class="tb-controls">
             <form action="{{ url_for('project.cleanup_tb_logs', name=project.name) }}" method="POST" style="display: inline-flex; gap: 0.5rem; align-items: center; margin-right: 1rem;">
                 <label for="keep-count" style="margin: 0; font-size: 0.85rem;">Keep recent:</label>
-                <input type="number" id="keep-count" name="keep_count" min="1" value="{{ project.get('tb_logs_max_runs', 20) }}" style="width: 60px; padding: 4px 8px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 3px; color: var(--text-primary); font-size: 0.85rem;">
+                <input type="number" id="keep-count" name="keep_count" min="1" value="{{ project.get('tb_logs_max_runs', 10) }}" style="width: 60px; padding: 4px 8px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 3px; color: var(--text-primary); font-size: 0.85rem;">
                 <button type="submit" class="btn btn-secondary btn-sm">Cleanup Old Logs</button>
             </form>
             <form action="{{ url_for('project.clear_tb_logs', name=project.name) }}" method="POST" style="display: inline;"

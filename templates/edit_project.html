@@ -55,6 +55,20 @@
         </div>
     </div>
 
+    <div class="form-row">
+        <div class="form-group">
+            <label for="tb_logs_max_runs">
+                Max TensorBoard Runs
+                <span class="tooltip-icon" title="Maximum number of TensorBoard run directories to keep. Older runs are automatically deleted when starting new training. Set to 0 for unlimited.">?</span>
+            </label>
+            <input type="number" id="tb_logs_max_runs" name="tb_logs_max_runs" min="0" value="{{ project.get('tb_logs_max_runs', 10) }}">
+        </div>
+
+        <div class="form-group">
+            <!-- Placeholder for symmetry -->
+        </div>
+    </div>
+
     <div class="form-group">
         <label for="setup_script">
             Setup Script <span class="optional-tag">optional</span>

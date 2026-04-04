@@ -634,45 +634,85 @@ def cleanup_old_tb_logs(tb_logdir: str, keep_count: int) -> dict:
     """
     import shutil
 
+    log.info(f"cleanup_old_tb_logs called: tb_logdir={tb_logdir}, keep_count={keep_count}")
+
     if keep_count <= 0:
         return {'deleted': [], 'kept': [], 'message': 'No limit set, nothing deleted'}
 
     if not os.path.isdir(tb_logdir):
+        log.warning(f"TensorBoard log directory not found: {tb_logdir}")
         return {'deleted': [], 'kept': [], 'message': 'TensorBoard log directory not found'}
 
-    # Get all subdirectories (each run has a timestamp-named directory)
+    # Get all subdirectories and extract timestamps for sorting
+    # Handles both Beekeeper format (YYYYMMDD-HHMMSS) and training script format (YYYY-MM-DD_HH-MM-SS_*)
+    import re
+    from datetime import datetime as dt
+
+    def extract_timestamp(dirname):
+        """Extract timestamp from directory name for sorting."""
+        # Beekeeper format: 20260403-124635
+        bk_match = re.match(r'^(\d{8})-(\d{6})$', dirname)
+        if bk_match:
+            try:
+                return dt.strptime(f"{bk_match.group(1)}{bk_match.group(2)}", "%Y%m%d%H%M%S")
+            except:
+                pass
+
+        # Training script format: 2026-04-03_12-46-35_tag
+        ts_match = re.match(r'^(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})', dirname)
+        if ts_match:
+            try:
+                return dt.strptime(ts_match.group(1), "%Y-%m-%d_%H-%M-%S")
+            except:
+                pass
+
+        # Fallback: use directory mtime
+        return None
+
     subdirs = []
     for item in os.listdir(tb_logdir):
         path = os.path.join(tb_logdir, item)
         if os.path.isdir(path):
-            subdirs.append((item, path))
+            timestamp = extract_timestamp(item)
+            if timestamp:
+                subdirs.append((item, path, timestamp))
+                log.debug(f"Found TensorBoard dir: {item} -> {timestamp}")
+            else:
+                log.info(f"Skipping directory with unrecognized format: {item}")
+
+    log.info(f"Found {len(subdirs)} subdirectories: {[name for name, _, _ in subdirs]}")
 
     if len(subdirs) <= keep_count:
+        log.info(f"Only {len(subdirs)} runs found, nothing to delete (keep_count={keep_count})")
         return {
             'deleted': [],
-            'kept': [name for name, _ in subdirs],
+            'kept': [name for name, _, _ in subdirs],
             'message': f'Only {len(subdirs)} run(s) found, nothing to delete'
         }
 
-    # Sort by name (timestamps sort correctly - newest first)
-    subdirs.sort(reverse=True)
+    # Sort by timestamp (newest first)
+    subdirs.sort(key=lambda x: x[2], reverse=True)
+    log.info(f"Sorted subdirs (newest first): {[(name, ts.strftime('%Y-%m-%d %H:%M:%S')) for name, _, ts in subdirs]}")
 
     # Split into keep and delete lists
     to_keep = subdirs[:keep_count]
     to_delete = subdirs[keep_count:]
 
+    log.info(f"Will KEEP ({len(to_keep)}): {[name for name, _, _ in to_keep]}")
+    log.info(f"Will DELETE ({len(to_delete)}): {[name for name, _, _ in to_delete]}")
+
     deleted_names = []
-    for name, path in to_delete:
+    for name, path, _ in to_delete:
         try:
+            log.info(f"Deleting directory: {path}")
             shutil.rmtree(path)
             deleted_names.append(name)
-            log.info(f"Deleted old TensorBoard run: {name}")
         except Exception as e:
             log.error(f"Failed to delete {name}: {e}")
 
     return {
         'deleted': deleted_names,
-        'kept': [name for name, _ in to_keep],
+        'kept': [name for name, _, _ in to_keep],
         'message': f'Deleted {len(deleted_names)} old run(s), kept {len(to_keep)} recent run(s)'
     }
 

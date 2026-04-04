@@ -120,6 +120,7 @@ def update(name):
     project_data["tensorboard_log_dir"] = request.form.get("tensorboard_log_dir", project_data["tensorboard_log_dir"]).strip()
     project_data["requirements_file"] = request.form.get("requirements_file", project_data["requirements_file"]).strip()
     project_data["setup_script"] = request.form.get("setup_script", project_data.get("setup_script", "")).strip()
+    project_data["tb_logs_max_runs"] = request.form.get("tb_logs_max_runs", type=int) or project_data.get("tb_logs_max_runs", 10)
     data_dir_enabled = request.form.get("data_dir_enabled") == "1"
     data_dir_local = request.form.get("data_dir_local", project_data.get("data_dir_local", "data")).strip() or "data"
     data_dir_remote = request.form.get("data_dir_remote", project_data.get("data_dir_remote", "")).strip()
@@ -226,6 +227,39 @@ def cleanup_tb_logs(name):
         flash(result['message'], "success")
     else:
         flash(result['message'], "info")
+
+    return redirect(url_for("project.detail", name=name))
+
+
+@project_bp.route("/<name>/cleanup-run-history", methods=["POST"])
+def cleanup_run_history(name):
+    from services.db_service import get_db
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    config_path = os.path.join(projects_dir, name, "project.json")
+    if not os.path.isfile(config_path):
+        abort(404)
+
+    keep_count = request.form.get("keep_count", type=int)
+    if not keep_count or keep_count < 1:
+        flash("Please specify how many runs to keep (must be at least 1).", "error")
+        return redirect(url_for("project.detail", name=name))
+
+    db = get_db()
+    runs = db.get_training_runs(name, limit=1000)
+
+    # Sort by started_at descending (newest first)
+    runs.sort(key=lambda r: r['started_at'], reverse=True)
+
+    # Delete runs beyond keep_count
+    deleted_count = 0
+    for run in runs[keep_count:]:
+        db.delete_training_run(run['id'])
+        deleted_count += 1
+
+    if deleted_count > 0:
+        flash(f"Deleted {deleted_count} old run record(s), kept {min(len(runs), keep_count)} recent run(s).", "success")
+    else:
+        flash(f"Only {len(runs)} run(s) found, nothing to delete.", "info")
 
     return redirect(url_for("project.detail", name=name))
 
