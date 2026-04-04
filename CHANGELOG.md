@@ -53,7 +53,10 @@
 - Updates every 3 seconds during training
 
 ### Bug Fixes
-(Add bug fixes here as they're developed)
+
+**File Browser Timestamps**
+- Fixed file modification times displaying as NaN
+- Backend now properly sends mtime field in file listing API response
 
 ### Improvements
 

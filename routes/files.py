@@ -97,6 +97,7 @@ def browse(name, subpath=""):
             continue
         full = os.path.join(target, item)
         rel = os.path.join(subpath, item) if subpath else item
+        mtime = os.path.getmtime(full)
         if os.path.isdir(full):
             entries.append({
                 "name": item,
@@ -104,6 +105,7 @@ def browse(name, subpath=""):
                 "path": rel,
                 "size": None,
                 "size_h": None,
+                "mtime": mtime,
             })
         else:
             sz = os.path.getsize(full)
@@ -113,6 +115,7 @@ def browse(name, subpath=""):
                 "path": rel,
                 "size": sz,
                 "size_h": _fmt_size(sz),
+                "mtime": mtime,
             })
 
     # Sort: dirs first, then files
