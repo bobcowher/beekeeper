@@ -60,6 +60,12 @@
 
 ### Improvements
 
+**File Browser Enhancements**
+- Timestamps now display in consistent YYYY-MM-DD HH:MM format (no more relative times)
+- All columns (Name, Size, Modified) are now sortable - click headers to sort
+- Added "Copy curl download" option to file context menu
+- Sort indicators (▲/▼) show current sort column and direction
+
 **Clearer Agent Documentation Refresh Instructions**
 - Agent instructions now include a prominent section at the top explaining how to refresh the documentation
 - Explicitly tells agents to use the API endpoint, not local file operations (find, grep, cat)

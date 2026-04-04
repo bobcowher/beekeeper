@@ -12,6 +12,8 @@
 
     let currentPath = "";
     let loaded = false;
+    let currentEntries = [];
+    let currentSort = { column: 'name', direction: 'asc' };
 
     // Expose load function for collapsible trigger
     window.loadFiles = function () {
@@ -33,8 +35,9 @@
                 return;
             }
             const data = await resp.json();
+            currentEntries = data.entries;
             renderBreadcrumbs(data.path);
-            renderListing(data.entries, data.path);
+            renderListing(data.path);
         } catch (e) {
             listing.innerHTML = '<p class="muted">Error loading files.</p>';
         }
@@ -77,41 +80,77 @@
     }
 
     function formatTime(timestamp) {
-        const now = Date.now() / 1000;
-        const diff = now - timestamp;
-
-        if (diff < 60) return 'just now';
-        if (diff < 3600) {
-            const mins = Math.floor(diff / 60);
-            return `${mins} min${mins > 1 ? 's' : ''} ago`;
-        }
-        if (diff < 86400) {
-            const hours = Math.floor(diff / 3600);
-            return `${hours} hour${hours > 1 ? 's' : ''} ago`;
-        }
-        if (diff < 604800) {
-            const days = Math.floor(diff / 86400);
-            return `${days} day${days > 1 ? 's' : ''} ago`;
-        }
-
-        // For older files, show the actual date
         const date = new Date(timestamp * 1000);
         const year = date.getFullYear();
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        return `${year}-${month}-${day} ${hours}:${minutes}`;
     }
 
-    function renderListing(entries, dirPath) {
-        if (!entries.length) {
+    function sortEntries() {
+        const sorted = [...currentEntries];
+        sorted.sort((a, b) => {
+            // Directories always come first
+            if (a.type !== b.type) {
+                return a.type === "dir" ? -1 : 1;
+            }
+
+            let valA, valB;
+            if (currentSort.column === 'name') {
+                valA = a.name.toLowerCase();
+                valB = b.name.toLowerCase();
+            } else if (currentSort.column === 'size') {
+                valA = a.size || 0;
+                valB = b.size || 0;
+            } else if (currentSort.column === 'modified') {
+                valA = a.mtime;
+                valB = b.mtime;
+            }
+
+            if (valA < valB) return currentSort.direction === 'asc' ? -1 : 1;
+            if (valA > valB) return currentSort.direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+        return sorted;
+    }
+
+    function toggleSort(column) {
+        if (currentSort.column === column) {
+            currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            currentSort.column = column;
+            currentSort.direction = 'asc';
+        }
+        renderListing(currentPath);
+    }
+
+    function copyCurlCommand(filePath) {
+        const host = window.location.host;
+        const url = `http://${host}${baseUrl}/${filePath}`;
+        const command = `curl -O ${url}`;
+        navigator.clipboard.writeText(command).then(() => {
+            // Could add a toast notification here if desired
+        });
+    }
+
+    function renderListing(dirPath) {
+        if (!currentEntries.length) {
             listing.innerHTML = '<p class="muted">Empty directory.</p>';
             return;
         }
 
+        const entries = sortEntries();
+        const sortIcon = (col) => {
+            if (currentSort.column !== col) return '';
+            return currentSort.direction === 'asc' ? ' ▲' : ' ▼';
+        };
+
         let html = '<table class="fb-table"><thead><tr>';
-        html += '<th class="fb-col-name">Name</th>';
-        html += '<th class="fb-col-size">Size</th>';
-        html += '<th class="fb-col-modified">Modified</th>';
+        html += `<th class="fb-col-name fb-sortable" data-column="name">Name${sortIcon('name')}</th>`;
+        html += `<th class="fb-col-size fb-sortable" data-column="size">Size${sortIcon('size')}</th>`;
+        html += `<th class="fb-col-modified fb-sortable" data-column="modified">Modified${sortIcon('modified')}</th>`;
         html += '<th class="fb-col-actions"></th>';
         html += '</tr></thead><tbody>';
 
@@ -149,6 +188,7 @@
                         <div class="fb-menu-dropdown">
                             ${viewable ? `<button class="fb-menu-item fb-view" data-path="${entry.path}" data-name="${entry.name}">View</button>` : ""}
                             <a href="${baseUrl}/${entry.path}" class="fb-menu-item">Download</a>
+                            <button class="fb-menu-item fb-copy-curl" data-path="${entry.path}">Copy curl download</button>
                         </div>
                     </div>
                 </td>`;
@@ -167,6 +207,13 @@
 
         listing.innerHTML = html;
 
+        // Sortable column headers
+        listing.querySelectorAll(".fb-sortable").forEach(th => {
+            th.addEventListener("click", () => {
+                toggleSort(th.dataset.column);
+            });
+        });
+
         // Directory navigation
         listing.querySelectorAll(".fb-dir").forEach(el => {
             el.addEventListener("click", (e) => {
@@ -180,6 +227,16 @@
             el.addEventListener("click", (e) => {
                 e.preventDefault();
                 openViewer(el.dataset.path, el.dataset.name);
+            });
+        });
+
+        // Copy curl command
+        listing.querySelectorAll(".fb-copy-curl").forEach(el => {
+            el.addEventListener("click", (e) => {
+                e.preventDefault();
+                copyCurlCommand(el.dataset.path);
+                // Close the menu
+                el.closest(".fb-menu-dropdown").classList.remove("open");
             });
         });
 

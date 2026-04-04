@@ -796,6 +796,16 @@ label {
     border-bottom: 1px solid var(--border);
 }
 
+.fb-sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.fb-sortable:hover {
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+}
+
 .fb-row td {
     padding: 6px 8px;
     border-bottom: 1px solid var(--bg-input);
@@ -819,7 +829,7 @@ label {
 }
 
 .fb-col-modified {
-    width: 140px;
+    width: 160px;
     text-align: right;
     font-family: var(--font-mono);
     font-size: 12px;
