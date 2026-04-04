@@ -121,6 +121,7 @@ def update(name):
     project_data["requirements_file"] = request.form.get("requirements_file", project_data["requirements_file"]).strip()
     project_data["setup_script"] = request.form.get("setup_script", project_data.get("setup_script", "")).strip()
     project_data["tb_logs_max_runs"] = request.form.get("tb_logs_max_runs", type=int) or project_data.get("tb_logs_max_runs", 10)
+    project_data["run_history_max_runs"] = request.form.get("run_history_max_runs", type=int) or project_data.get("run_history_max_runs", 10)
     data_dir_enabled = request.form.get("data_dir_enabled") == "1"
     data_dir_local = request.form.get("data_dir_local", project_data.get("data_dir_local", "data")).strip() or "data"
     data_dir_remote = request.form.get("data_dir_remote", project_data.get("data_dir_remote", "")).strip()

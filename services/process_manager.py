@@ -557,6 +557,18 @@ def start_training(projects_dir, name):
                 if cleanup_result['deleted']:
                     log.info(f"Auto-cleanup: {cleanup_result['message']}")
 
+            # Auto-cleanup old run history if configured
+            run_history_max_runs = project.get('run_history_max_runs', 10)
+            if run_history_max_runs > 0:
+                runs = get_db().get_training_runs(name, limit=1000)
+                runs.sort(key=lambda r: r['started_at'], reverse=True)
+                deleted_count = 0
+                for run in runs[run_history_max_runs:]:
+                    get_db().delete_training_run(run['id'])
+                    deleted_count += 1
+                if deleted_count > 0:
+                    log.info(f"Auto-cleanup: Deleted {deleted_count} old run record(s), kept {min(len(runs), run_history_max_runs)} recent run(s)")
+
             # Launch Tensorboard pointing to the base directory (shows all runs)
             try:
                 tb_process = subprocess.Popen(

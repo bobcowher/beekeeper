@@ -37,22 +37,20 @@
         <input type="text" id="train_file" name="train_file" value="{{ project.train_file }}">
     </div>
 
-    <div class="form-row">
-        <div class="form-group">
-            <label for="tensorboard_log_dir">
-                Tensorboard Log Dir
-                <span class="tooltip-icon" title="Directory where your training script writes Tensorboard event files. Relative to the repository root.">?</span>
-            </label>
-            <input type="text" id="tensorboard_log_dir" name="tensorboard_log_dir" value="{{ project.tensorboard_log_dir }}">
-        </div>
+    <div class="form-group">
+        <label for="requirements_file">
+            Requirements File
+            <span class="tooltip-icon" title="Pip requirements file installed during project setup and before each training run.">?</span>
+        </label>
+        <input type="text" id="requirements_file" name="requirements_file" value="{{ project.requirements_file }}">
+    </div>
 
-        <div class="form-group">
-            <label for="requirements_file">
-                Requirements File
-                <span class="tooltip-icon" title="Pip requirements file installed during project setup and before each training run.">?</span>
-            </label>
-            <input type="text" id="requirements_file" name="requirements_file" value="{{ project.requirements_file }}">
-        </div>
+    <div class="form-group">
+        <label for="tensorboard_log_dir">
+            Tensorboard Log Dir
+            <span class="tooltip-icon" title="Directory where your training script writes Tensorboard event files. Relative to the repository root.">?</span>
+        </label>
+        <input type="text" id="tensorboard_log_dir" name="tensorboard_log_dir" value="{{ project.tensorboard_log_dir }}">
     </div>
 
     <div class="form-row">
@@ -65,7 +63,11 @@
         </div>
 
         <div class="form-group">
-            <!-- Placeholder for symmetry -->
+            <label for="run_history_max_runs">
+                Max Run History Records
+                <span class="tooltip-icon" title="Maximum number of run records to keep in database. Older records are automatically deleted when starting new training. Set to 0 for unlimited.">?</span>
+            </label>
+            <input type="number" id="run_history_max_runs" name="run_history_max_runs" min="0" value="{{ project.get('run_history_max_runs', 10) }}">
         </div>
     </div>
 
