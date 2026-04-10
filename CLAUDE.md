@@ -13,6 +13,13 @@ When on the `develop` branch, go ahead and commit & push changes without asking.
 
 Do not ask for permission repeatedly for each individual endpoint.
 
+**IMPORTANT: Always use `curl` via the Bash tool for Beekeeper API calls — never use WebFetch.**
+Beekeeper runs on the local network (`localhost:5000` or `192.168.1.57:5000`). WebFetch routes through Anthropic's servers and cannot reach local network addresses. Use Bash curl instead:
+```bash
+curl -s "http://localhost:5000/api/v1/projects"
+curl -s -X POST "http://localhost:5000/api/v1/projects/myproject/train/start"
+```
+
 ## Project Overview
 
 Beekeeper is a Flask web app for managing ML training projects. It provides:
