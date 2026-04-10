@@ -14,11 +14,7 @@ When on the `develop` branch, go ahead and commit & push changes without asking.
 Do not ask for permission repeatedly for each individual endpoint.
 
 **IMPORTANT: Always use `curl` via the Bash tool for Beekeeper API calls — never use WebFetch.**
-Beekeeper runs on the local network (`localhost:5000` or `192.168.1.57:5000`). WebFetch routes through Anthropic's servers and cannot reach local network addresses. Use Bash curl instead:
-```bash
-curl -s "http://localhost:5000/api/v1/projects"
-curl -s -X POST "http://localhost:5000/api/v1/projects/myproject/train/start"
-```
+Beekeeper runs on a local home network and is not reachable from the public internet. WebFetch routes through Anthropic's servers and cannot reach local network hosts. Use Bash curl with the URL from the **URLs** section of this file instead.
 
 ## Project Overview
 
