@@ -27,6 +27,28 @@ Core Functional Requirements:
 - The user should have the option to see Tensorboard results for a project, in realtime, on the project page. 
 - On the main page, the user should have the option to see the current GPU, CPU, and memory statistics for the host.
 
+Multi-Server Requirements:
+
+We should support the creation of workers. The "workers" interface should be completely gone unless it's enabled via the admin GUI. Workers will be tied to projects. 
+
+The first worker type will be static. Core inputs for static workers include -
+
+1) Hostname
+2) Worker home. (default to /home/${user}/beekeeper-worker)
+3) Login user(default to beekeeper)
+4) Login method(password or private key, with private key as recommended and a warning that says passwords are insecure, if it's selected)
+
+When a static worker is created, Beekeeper should shell into the remote system and attempt to set itself up as a worker. Further, beekeeper is the the process meant to keep those workers alive. We don't want to configure Systemctl files on the remote hosts. Think of this like Jenkins and its worker nodes. 
+
+
+Second worker type will be dynamic. For dynamic workers we'll configure a Provider(i.e. cloud provider) with templates. That template will be assigned to the project and, when that project runs, Beekeeper will contact the Cloud API, spin up the worker type, and then download & configure the project and run it. Our first provider will be Runpod. 
+
+For cloud providers, we'll need the ability to cap & follow costs. 
+
+For both worker types, we'll want the ability to bring metrics for those workers(memory & CPU info) into the beekeeper dashboard in some logical way. We'll also need to figure out how to mirror those remote systems workspaces back to the main host for things like Tensorboard, file downloads, etc. The user experience will need to be the same for someone using a single node v.s. multi-node system. 
+
+
+
 Things for later:
 - We'll eventually need to figure out logins and security. For V1, we don't care.
 - Auth to GitHub. For now, all GitHub projects used will be public.
