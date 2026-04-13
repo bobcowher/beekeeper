@@ -380,13 +380,31 @@ def training_status(name):
 @api_v1_bp.route("/projects/<name>/logs")
 @api_key_required
 def get_logs(name):
-    """Get log content. Use ?tail=N for last N lines."""
+    """Get log content. Use ?tail=N for last N lines, ?run_id=N for a specific run."""
     project, error = load_project(name)
     if error:
         return error
 
     projects_dir = current_app.config["PROJECTS_DIR"]
-    log_path = os.path.join(projects_dir, name, "train.log")
+    run_id = request.args.get("run_id", type=int)
+
+    if run_id is not None:
+        from services.db_service import get_db
+        run = get_db().get_training_run(run_id)
+        if not run or run['project_name'] != name:
+            return api_response(
+                error_code="NOT_FOUND",
+                error_message=f"Run {run_id} not found",
+                status_code=404
+            )
+        log_file_path = run.get('log_file_path')
+        if log_file_path:
+            log_path = os.path.join(projects_dir, name, log_file_path)
+        else:
+            # Active run — fall back to live log
+            log_path = os.path.join(projects_dir, name, "train.log")
+    else:
+        log_path = os.path.join(projects_dir, name, "train.log")
 
     if not os.path.isfile(log_path):
         return api_response(data={"content": "", "lines": 0})
@@ -485,6 +503,7 @@ def analyze_logs(name):
 
     Query params:
       ?tail=N - Only analyze last N lines (default: 500)
+      ?run_id=N - Analyze log for a specific historical run
     """
     import re
 
@@ -493,7 +512,24 @@ def analyze_logs(name):
         return error
 
     projects_dir = current_app.config["PROJECTS_DIR"]
-    log_path = os.path.join(projects_dir, name, "train.log")
+    run_id = request.args.get("run_id", type=int)
+
+    if run_id is not None:
+        from services.db_service import get_db
+        run = get_db().get_training_run(run_id)
+        if not run or run['project_name'] != name:
+            return api_response(
+                error_code="NOT_FOUND",
+                error_message=f"Run {run_id} not found",
+                status_code=404
+            )
+        log_file_path = run.get('log_file_path')
+        if log_file_path:
+            log_path = os.path.join(projects_dir, name, log_file_path)
+        else:
+            log_path = os.path.join(projects_dir, name, "train.log")
+    else:
+        log_path = os.path.join(projects_dir, name, "train.log")
 
     if not os.path.isfile(log_path):
         return api_response(
@@ -881,6 +917,7 @@ def get_latest_metrics(name):
     Query params:
       ?detail=low (default, summary only) | medium (+ samples) | high (all data)
       ?metrics=loss,accuracy (filter specific metrics)
+      ?run_id=N (analyze a specific run instead of auto-selecting latest)
     """
     from flask import request
     from services import tensorboard_service
@@ -903,39 +940,49 @@ def get_latest_metrics(name):
     if request.args.get('metrics'):
         metric_filter = [m.strip() for m in request.args.get('metrics').split(',')]
 
-    # Get runs and determine which one to analyze
     db = get_db()
-    runs = db.get_training_runs(name, limit=100)
+    requested_run_id = request.args.get('run_id', type=int)
 
-    if not runs:
-        return api_response(
-            error_code="NO_RUNS",
-            error_message="No training runs found",
-            status_code=404
-        )
-
-    # Prioritize: running > completed > canceled/crashed (may have partial data)
-    running_runs = [r for r in runs if r['status'] == 'running']
-    completed_runs = [r for r in runs if r['status'] == 'completed']
-    other_runs = [r for r in runs if r['status'] in ('canceled', 'crashed')]
-
-    if running_runs:
-        target_run = running_runs[0]
-        is_active = True
-    elif completed_runs:
-        target_run = completed_runs[0]
-        is_active = False
-    elif other_runs:
-        # Fall back to canceled/crashed runs - they may have valuable TB data
-        target_run = other_runs[0]
-        is_active = False
+    if requested_run_id is not None:
+        # Fetch the specific run requested
+        target_run = db.get_training_run(requested_run_id)
+        if not target_run or target_run['project_name'] != name:
+            return api_response(
+                error_code="NOT_FOUND",
+                error_message=f"Run {requested_run_id} not found",
+                status_code=404
+            )
+        is_active = target_run['status'] == 'running'
     else:
-        # No runs with any status we recognize
-        return api_response(
-            error_code="NO_USABLE_RUNS",
-            error_message="No training runs found with usable status",
-            status_code=404
-        )
+        # Auto-select: running > completed > canceled/crashed
+        runs = db.get_training_runs(name, limit=100)
+
+        if not runs:
+            return api_response(
+                error_code="NO_RUNS",
+                error_message="No training runs found",
+                status_code=404
+            )
+
+        running_runs = [r for r in runs if r['status'] == 'running']
+        completed_runs = [r for r in runs if r['status'] == 'completed']
+        other_runs = [r for r in runs if r['status'] in ('canceled', 'crashed')]
+
+        if running_runs:
+            target_run = running_runs[0]
+            is_active = True
+        elif completed_runs:
+            target_run = completed_runs[0]
+            is_active = False
+        elif other_runs:
+            target_run = other_runs[0]
+            is_active = False
+        else:
+            return api_response(
+                error_code="NO_USABLE_RUNS",
+                error_message="No training runs found with usable status",
+                status_code=404
+            )
 
     run_id = target_run['id']
 
