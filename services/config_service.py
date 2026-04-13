@@ -18,7 +18,7 @@ class ConfigService:
                 'auth.enabled': 'false',
                 'session.lifetime_days': '7',
                 'password.min_length': '8',
-                'api.rate_limit_per_minute': '10',
+                'api.rate_limit_per_minute': '100',
             }
             self.save()
             return

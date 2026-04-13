@@ -241,7 +241,7 @@ result = response.json()
 - Only shown once during creation
 - Last-used timestamp for auditing
 - Instant revocation capability
-- IP-based rate limiting (default: 10 requests/minute)
+- IP-based rate limiting (default: 100 requests/minute)
 - Failed authentication attempts logged with IP address
 
 ## Architecture
@@ -258,7 +258,7 @@ Settings stored in `config.properties`:
 auth.enabled=false                 # Toggle authentication
 session.lifetime_days=7            # Session expiration
 password.min_length=8              # Password requirements
-api.rate_limit_per_minute=10       # API rate limit per IP
+api.rate_limit_per_minute=100      # API rate limit per IP
 ```
 
 ### Backward Compatibility
@@ -294,7 +294,13 @@ Check that:
 
 ### API Returns 429 Rate Limit Exceeded
 
-Your IP has exceeded the rate limit (default: 10 requests/minute). This protects against brute force attacks. Wait a minute and try again, or increase `api.rate_limit_per_minute` in `config.properties`.
+Your IP has exceeded the rate limit (default: 100 requests/minute). This protects against brute force attacks. Wait a minute and try again, or adjust the limit using:
+
+```bash
+./admin.sh set-config api.rate_limit_per_minute 200
+```
+
+Or edit `api.rate_limit_per_minute` directly in `config.properties`.
 
 ### Can't Access Admin Panel
 

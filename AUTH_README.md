@@ -42,7 +42,7 @@ Edit settings via the Admin panel (stored in `config.properties`):
 auth.enabled=false                 # Enable/disable authentication
 session.lifetime_days=7            # How long users stay logged in
 password.min_length=8              # Minimum password length
-api.rate_limit_per_minute=10       # API rate limit per IP address
+api.rate_limit_per_minute=100      # API rate limit per IP address
 ```
 
 ## CLI Admin Tool
@@ -261,7 +261,13 @@ Check that:
 
 ### API Returns 429 (Rate Limit)
 
-Your IP exceeded the rate limit (default: 10 requests/minute). This is an anti-brute-force protection. Wait a minute or adjust `api.rate_limit_per_minute` in `config.properties`.
+Your IP exceeded the rate limit (default: 100 requests/minute). This is an anti-brute-force protection. Wait a minute or adjust the limit using:
+
+```bash
+./admin.sh set-config api.rate_limit_per_minute 200
+```
+
+Or edit `api.rate_limit_per_minute` in `config.properties`.
 
 ### Can't Access Admin Panel
 

@@ -324,8 +324,31 @@ def show_config(args):
     print(f"Authentication enabled: {config.get_bool('auth.enabled', False)}")
     print(f"Session lifetime (days): {config.get_int('session.lifetime_days', 7)}")
     print(f"Min password length: {config.get_int('password.min_length', 8)}")
-    print(f"API rate limit (req/min): {config.get_int('api.rate_limit_per_minute', 10)}")
+    print(f"API rate limit (req/min): {config.get_int('api.rate_limit_per_minute', 100)}")
     print()
+
+
+def set_config(args):
+    """Set a configuration value."""
+    _, config = init_services()
+
+    key = args.key
+    value = args.value
+
+    # Validate known config keys
+    if key == 'api.rate_limit_per_minute':
+        try:
+            int_value = int(value)
+            if int_value <= 0:
+                print("Error: Rate limit must be a positive integer", file=sys.stderr)
+                sys.exit(1)
+        except ValueError:
+            print("Error: Rate limit must be a valid integer", file=sys.stderr)
+            sys.exit(1)
+
+    config.set(key, value)
+    config.save()
+    print(f"✓ Configuration updated: {key} = {value}")
 
 
 def main():
@@ -342,6 +365,7 @@ Examples:
   %(prog)s list-api-keys admin@example.com
   %(prog)s enable-auth
   %(prog)s config
+  %(prog)s set-config api.rate_limit_per_minute 200
         """
     )
 
@@ -415,6 +439,12 @@ Examples:
     # config
     parser_config = subparsers.add_parser('config', help='Show current configuration')
     parser_config.set_defaults(func=show_config)
+
+    # set-config
+    parser_set_config = subparsers.add_parser('set-config', help='Set a configuration value')
+    parser_set_config.add_argument('key', help='Configuration key (e.g., api.rate_limit_per_minute)')
+    parser_set_config.add_argument('value', help='Configuration value')
+    parser_set_config.set_defaults(func=set_config)
 
     # Parse and execute
     args = parser.parse_args()

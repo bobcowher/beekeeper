@@ -19,6 +19,7 @@ def index():
         'auth_enabled': is_auth_enabled(),
         'session_lifetime_days': get_config_int('session.lifetime_days', 7),
         'password_min_length': get_config_int('password.min_length', 8),
+        'api_rate_limit': get_config_int('api.rate_limit_per_minute', 100),
     }
 
     users = db.list_all_users()
@@ -51,6 +52,18 @@ def update_settings():
                 set_config('password.min_length', str(min_len))
         except ValueError:
             flash('Invalid password minimum length', 'error')
+            return redirect(url_for('admin.index'))
+
+    if 'api_rate_limit' in request.form:
+        try:
+            rate_limit = int(request.form['api_rate_limit'])
+            if rate_limit > 0:
+                set_config('api.rate_limit_per_minute', str(rate_limit))
+            else:
+                flash('API rate limit must be greater than 0', 'error')
+                return redirect(url_for('admin.index'))
+        except ValueError:
+            flash('Invalid API rate limit', 'error')
             return redirect(url_for('admin.index'))
 
     save_config()

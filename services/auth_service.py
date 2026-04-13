@@ -91,7 +91,7 @@ def api_key_required(f):
 
         # Check rate limit
         rate_limiter = get_rate_limiter()
-        max_requests = get_config_int('api.rate_limit_per_minute', 10)
+        max_requests = get_config_int('api.rate_limit_per_minute', 100)
         is_allowed, request_count = rate_limiter.is_allowed(client_ip, max_requests)
 
         if not is_allowed:
