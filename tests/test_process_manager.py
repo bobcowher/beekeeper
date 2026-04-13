@@ -40,10 +40,11 @@ def _make_project(tmp_path, **overrides):
     return str(projects_dir)
 
 
-def _ok_run(returncode=0, stderr=""):
+def _ok_run(returncode=0, stderr="", stdout=""):
     m = MagicMock()
     m.returncode = returncode
     m.stderr = stderr
+    m.stdout = stdout
     return m
 
 
