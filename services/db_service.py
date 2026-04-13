@@ -501,7 +501,7 @@ class DatabaseService:
             )
             conn.commit()
 
-    def get_metric_analyses(self, run_id: int, metric_names: list = None) -> dict:
+    def get_metric_analyses(self, run_id: int, metric_names: list | None = None) -> dict:
         """Get cached analyses for a run."""
         import json
 

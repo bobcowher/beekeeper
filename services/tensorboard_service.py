@@ -377,7 +377,7 @@ def get_metric_analysis(
     projects_dir: str,
     project_name: str,
     run_id: int,
-    metric_filter: list = None,
+    metric_filter: list | None = None,
     detail: str = 'low'
 ) -> dict:
     """

@@ -9,7 +9,8 @@ All endpoints return JSON with a consistent envelope:
 import os
 import subprocess
 import time
-from flask import Blueprint, current_app, jsonify, request, Response
+from typing import NoReturn
+from flask import Blueprint, abort, current_app, jsonify, request, Response
 
 from models.project import Project
 from services.process_manager import start_training, stop_training, get_training_status
@@ -37,25 +38,23 @@ def api_response(data=None, error_code=None, error_message=None, status_code=200
     return jsonify({"success": True, "data": data}), status_code
 
 
-def load_project(name):
-    """Load a project by name, returning (Project, None) or (None, error_response)."""
+def _abort_json(status_code: int, error_code: str, error_message: str) -> NoReturn:
+    """Abort the request with a JSON error response."""
+    resp = jsonify({"success": False, "error": {"code": error_code, "message": error_message}})
+    resp.status_code = status_code
+    abort(resp)
+
+
+def load_project(name) -> Project:
+    """Load a project by name. Aborts with JSON 404/500 if not found or unreadable."""
     projects_dir = current_app.config["PROJECTS_DIR"]
     config_path = os.path.join(projects_dir, name, "project.json")
     if not os.path.isfile(config_path):
-        return None, api_response(
-            error_code="NOT_FOUND",
-            error_message=f"Project '{name}' not found",
-            status_code=404
-        )
+        _abort_json(404, "NOT_FOUND", f"Project '{name}' not found")
     try:
-        project = Project.load(config_path)
-        return project, None
+        return Project.load(config_path)
     except Exception as e:
-        return None, api_response(
-            error_code="LOAD_ERROR",
-            error_message=f"Failed to load project: {e}",
-            status_code=500
-        )
+        _abort_json(500, "LOAD_ERROR", f"Failed to load project: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -193,9 +192,7 @@ def create_project():
 @api_key_required
 def get_project(name):
     """Get detailed project info including training status."""
-    project, error = load_project(name)
-    if error:
-        return error
+    project = load_project(name)
 
     status = get_training_status(name)
 
@@ -215,9 +212,7 @@ def clone_project(name):
     from services.project_service import create_project as create_project_service
 
     # Load the source project
-    project, error = load_project(name)
-    if error:
-        return error
+    project = load_project(name)
 
     # Get the new name from request
     data = request.get_json() or {}
@@ -294,9 +289,7 @@ def clone_project(name):
 @api_key_required
 def training_start(name):
     """Start training for a project."""
-    project, error = load_project(name)
-    if error:
-        return error
+    project = load_project(name)
 
     if project.setup_status != "ready":
         return api_response(
@@ -335,9 +328,7 @@ def training_start(name):
 @api_key_required
 def training_stop(name):
     """Stop training for a project."""
-    project, error = load_project(name)
-    if error:
-        return error
+    load_project(name)
 
     # Check if running
     status = get_training_status(name)
@@ -365,9 +356,7 @@ def training_stop(name):
 @api_key_required
 def training_status(name):
     """Get training status for a project."""
-    project, error = load_project(name)
-    if error:
-        return error
+    load_project(name)
 
     status = get_training_status(name)
     return api_response(data=status)
@@ -381,9 +370,7 @@ def training_status(name):
 @api_key_required
 def get_logs(name):
     """Get log content. Use ?tail=N for last N lines, ?run_id=N for a specific run."""
-    project, error = load_project(name)
-    if error:
-        return error
+    load_project(name)
 
     projects_dir = current_app.config["PROJECTS_DIR"]
     run_id = request.args.get("run_id", type=int)
@@ -436,9 +423,7 @@ def get_logs(name):
 @api_key_required
 def stream_logs(name):
     """SSE stream of log content."""
-    project, error = load_project(name)
-    if error:
-        return error
+    load_project(name)
 
     projects_dir = current_app.config["PROJECTS_DIR"]
     log_path = os.path.join(projects_dir, name, "train.log")
@@ -507,9 +492,7 @@ def analyze_logs(name):
     """
     import re
 
-    project, error = load_project(name)
-    if error:
-        return error
+    load_project(name)
 
     projects_dir = current_app.config["PROJECTS_DIR"]
     run_id = request.args.get("run_id", type=int)
@@ -652,9 +635,7 @@ def analyze_logs(name):
 @api_key_required
 def browse_files(name, subpath=""):
     """List files in workspace root or subdir, or download a file."""
-    project, error = load_project(name)
-    if error:
-        return error
+    load_project(name)
 
     projects_dir = current_app.config["PROJECTS_DIR"]
     workspace_dir, target = _safe_path(projects_dir, name, subpath)
@@ -778,9 +759,7 @@ def check_busy():
 @api_key_required
 def list_runs(name):
     """List training run history."""
-    project, error = load_project(name)
-    if error:
-        return error
+    load_project(name)
 
     from services.db_service import get_db
     runs = get_db().get_training_runs(name, limit=20)
@@ -792,9 +771,7 @@ def list_runs(name):
 @api_key_required
 def get_run(name, run_id):
     """Get details for a specific run."""
-    project, error = load_project(name)
-    if error:
-        return error
+    load_project(name)
 
     from services.db_service import get_db
     run = get_db().get_training_run(run_id)
@@ -813,9 +790,7 @@ def get_run(name, run_id):
 @api_key_required
 def download_run_log(name, run_id):
     """Download archived log for a run."""
-    project, error = load_project(name)
-    if error:
-        return error
+    load_project(name)
 
     from services.db_service import get_db
     run = get_db().get_training_run(run_id)
@@ -852,9 +827,7 @@ def download_run_log(name, run_id):
 @api_key_required
 def clear_all_runs(name):
     """Clear all run history."""
-    project, error = load_project(name)
-    if error:
-        return error
+    load_project(name)
 
     # Delegate to training route handler logic
     from routes.training import clear_history
@@ -870,9 +843,7 @@ def cleanup_orphaned_runs(name):
     Orphaned runs are those stuck in 'running' status but the process
     is no longer active (e.g., after a server restart).
     """
-    project, error = load_project(name)
-    if error:
-        return error
+    load_project(name)
 
     from services.db_service import get_db
     from services.process_manager import get_training_status
@@ -923,9 +894,7 @@ def get_latest_metrics(name):
     from services import tensorboard_service
     from services.db_service import get_db
 
-    project, error = load_project(name)
-    if error:
-        return error
+    load_project(name)
 
     # Get query parameters
     detail = request.args.get('detail', 'low')
@@ -936,9 +905,8 @@ def get_latest_metrics(name):
             status_code=400
         )
 
-    metric_filter = None
-    if request.args.get('metrics'):
-        metric_filter = [m.strip() for m in request.args.get('metrics').split(',')]
+    metrics_param = request.args.get('metrics')
+    metric_filter = [m.strip() for m in metrics_param.split(',')] if metrics_param else None
 
     db = get_db()
     requested_run_id = request.args.get('run_id', type=int)
@@ -1029,9 +997,7 @@ def cleanup_tensorboard_logs(name):
     """
     from services.tensorboard_service import cleanup_old_tb_logs
 
-    project, error = load_project(name)
-    if error:
-        return error
+    project = load_project(name)
 
     data = request.get_json() or {}
     keep_count = data.get("keep_count")
@@ -1104,9 +1070,7 @@ def get_agent_instructions(name):
     This file can be added to a project's CLAUDE.md or similar
     to give AI agents full access to Beekeeper functionality.
     """
-    project, error = load_project(name)
-    if error:
-        return error
+    load_project(name)
 
     host = request.host
 
@@ -1426,9 +1390,7 @@ Response: CPU, RAM, GPU usage and availability
 @api_key_required
 def list_branches(name):
     """List available branches from the remote repository."""
-    project, error = load_project(name)
-    if error:
-        return error
+    project = load_project(name)
 
     if not project.git_url:
         return api_response(
@@ -1488,9 +1450,7 @@ def list_branches(name):
 @api_key_required
 def switch_branch(name):
     """Switch to a different branch."""
-    project, error = load_project(name)
-    if error:
-        return error
+    project = load_project(name)
 
     # Check if training is running
     status = get_training_status(name)
@@ -1623,9 +1583,7 @@ def get_run_metrics(name, run_id):
     from services import tensorboard_service
     from services.db_service import get_db
 
-    project, error = load_project(name)
-    if error:
-        return error
+    load_project(name)
 
     # Get query parameters
     detail = request.args.get('detail', 'low')
@@ -1636,9 +1594,8 @@ def get_run_metrics(name, run_id):
             status_code=400
         )
 
-    metric_filter = None
-    if request.args.get('metrics'):
-        metric_filter = [m.strip() for m in request.args.get('metrics').split(',')]
+    metrics_param = request.args.get('metrics')
+    metric_filter = [m.strip() for m in metrics_param.split(',')] if metrics_param else None
 
     # Verify run exists
     db = get_db()
