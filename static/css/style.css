@@ -100,6 +100,21 @@ body {
     letter-spacing: 0.5px;
 }
 
+.sidebar-nav .nav-collapsible {
+    cursor: pointer;
+    user-select: none;
+}
+
+.sidebar-nav .nav-collapsible:hover {
+    color: var(--text-primary);
+}
+
+.nav-collapse-icon {
+    font-size: 9px;
+    display: inline-block;
+    margin-right: 4px;
+}
+
 .sidebar-nav .nav-sub a {
     padding-left: 32px;
 }

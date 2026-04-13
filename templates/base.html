@@ -19,8 +19,12 @@
                 {% if not auth_enabled or (user and user.is_admin) %}
                 <li><a href="/admin" class="{% if request.path.startswith('/admin') %}active{% endif %}">Admin</a></li>
                 {% endif %}
-                <li class="nav-section">Documentation</li>
-                <li class="nav-sub"><a href="/api/v1/docs" class="{% if request.path == '/api/v1/docs' %}active{% endif %}">API</a></li>
+                <li class="nav-section nav-collapsible" id="docs-toggle">
+                    <span class="nav-collapse-icon">▶</span> Documentation
+                </li>
+                <li class="nav-sub nav-collapse-content" id="docs-content" style="display:none">
+                    <a href="/api/v1/docs" class="{% if request.path == '/api/v1/docs' %}active{% endif %}">API</a>
+                </li>
             </ul>
             {% if user %}
             <div class="sidebar-footer">
@@ -52,6 +56,22 @@
                 sidebar.classList.remove('open');
             }
         });
+
+        // Collapsible Documentation section (collapsed by default)
+        var docsToggle = document.getElementById('docs-toggle');
+        var docsContent = document.getElementById('docs-content');
+        var docsIcon = docsToggle.querySelector('.nav-collapse-icon');
+        var docsOpen = localStorage.getItem('docs-nav-open') === 'true';
+
+        function setDocsOpen(open) {
+            docsOpen = open;
+            docsContent.style.display = open ? '' : 'none';
+            docsIcon.textContent = open ? '▼' : '▶';
+            localStorage.setItem('docs-nav-open', open);
+        }
+
+        setDocsOpen(docsOpen);
+        docsToggle.addEventListener('click', function() { setDocsOpen(!docsOpen); });
     })();
     </script>
     {% block scripts %}{% endblock %}
