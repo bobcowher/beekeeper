@@ -1057,6 +1057,13 @@ def api_documentation():
     return render_template("api_docs.html")
 
 
+@api_v1_bp.route("/cli")
+def cli_documentation():
+    """Render the CLI documentation page."""
+    from flask import render_template
+    return render_template("cli.html")
+
+
 # ---------------------------------------------------------------------------
 # Agent Instructions
 # ---------------------------------------------------------------------------

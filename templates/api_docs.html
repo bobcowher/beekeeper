@@ -8,6 +8,19 @@
     <span class="muted" style="font-size: 0.9rem;">Version 1.0</span>
 </div>
 
+<section class="card" style="border-left: 3px solid var(--accent);">
+    <h2 style="color: var(--accent);">Use the CLI First</h2>
+    <p>
+        For terminal and AI agent use, the <strong>Beekeeper CLI</strong> is the recommended interface.
+        It wraps these endpoints into simple commands and provides a <code>run analyze</code> command
+        for synthesized training insights.
+    </p>
+    <div style="margin-top: 0.75rem; display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
+        <a href="{{ url_for('api_v1.cli_documentation') }}" class="btn btn-primary">CLI Reference</a>
+        <code style="font-size: 0.85rem;">curl -o beekeeper http://{{ request.host }}/static/bin/beekeeper && chmod +x beekeeper</code>
+    </div>
+</section>
+
 <section class="card">
     <h2>Overview</h2>
     <p>
