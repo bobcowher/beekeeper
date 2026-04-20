@@ -1103,20 +1103,26 @@ information and avoids confusion with outdated local copies.
 ---
 
 > **IMPORTANT: USE THE BEEKEEPER CLI FIRST**
-> For the best experience, use the `beekeeper` CLI tool. It provides a "Synthesized View" 
-> of training progress by aggregating multiple API sources (TensorBoard trends, log 
+> For the best experience, use the `beekeeper` CLI tool. It provides a "Synthesized View"
+> of training progress by aggregating multiple API sources (TensorBoard trends, log
 > analysis, and status) into a single, high-signal verdict.
 >
 > ```bash
 > # Download and install the beekeeper CLI
 > curl -o beekeeper http://{host}/static/bin/beekeeper && chmod +x beekeeper
+>
+> # Configure credentials (required)
+> export BEEKEEPER_HOST="http://{host}"
+> export BEEKEEPER_API_KEY="your-api-key-here"
 > ```
 >
 > ```bash
 > # Get a complete "Synthesized View" of current training
 > ./beekeeper run analyze {name}
 > ```
-> 
+>
+> Full CLI reference: http://{host}/api/v1/cli
+>
 > **Fallback to API:**
 > If the CLI is unavailable, use the raw API endpoints below.
 
@@ -1191,9 +1197,7 @@ When asked to "check logs", "look at tensorboard", "see how training is going", 
 | Stop training | `beekeeper training stop {name}` | `POST /training/stop` |
 | List files | (use `ls` in workspace) | `GET /files` |
 | Download file | (use `cp` in workspace) | `GET /files/<path>` |
-| System stats | `beekeeper stats` | `GET /api/v1/stats` |
-
-*(Note: `beekeeper stats` is a planned command for the next version)*
+| System stats | (API only) | `GET /api/v1/stats` |
 
 ## Response Format
 
