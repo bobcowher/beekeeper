@@ -1103,29 +1103,29 @@ information and avoids confusion with outdated local copies.
 ---
 
 > **IMPORTANT: USE THE BEEKEEPER CLI FIRST**
-> For the best experience, use the `beekeeper` CLI tool. It provides a "Synthesized View"
-> of training progress by aggregating multiple API sources (TensorBoard trends, log
-> analysis, and status) into a single, high-signal verdict.
+> The `beekeeper` CLI provides a synthesized view of training progress in one command.
 >
+> **Step 1 — Check if already installed:**
 > ```bash
-> # Download and install the beekeeper CLI
+> beekeeper --help
+> ```
+> If this prints usage info, skip to Step 3. If you get "command not found", continue to Step 2.
+>
+> **Step 2 — Download (only if not installed):**
+> ```bash
 > curl -o beekeeper http://{host}/static/bin/beekeeper && chmod +x beekeeper
->
-# Set env vars so the CLI binary knows where to connect.
-# BEEKEEPER_API_KEY only required if auth is enabled.
-export BEEKEEPER_HOST="http://{host}"
-export BEEKEEPER_API_KEY="your-api-key-here"
 > ```
 >
+> **Step 3 — Run analysis:**
 > ```bash
-> # Get a complete "Synthesized View" of current training
-> ./beekeeper run analyze {name}
+> BEEKEEPER_HOST="http://{host}" beekeeper run analyze {name}
 > ```
+> If you downloaded in Step 2, prefix with `./`: `BEEKEEPER_HOST="http://{host}" ./beekeeper run analyze {name}`
 >
 > Full CLI reference: http://{host}/api/v1/cli
 >
-> **Fallback to API:**
-> If the CLI is unavailable, use the raw API endpoints below.
+> **Fallback to raw API:**
+> If the CLI is unavailable, use the endpoints below.
 
 Base URL: http://{host}
 
