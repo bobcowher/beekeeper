@@ -473,10 +473,14 @@ def get_metric_analysis(
     for metric_name, analysis in cached.items():
         metric_data = {
             'trend': analysis['trend'],
+            'recent_trend': analysis.get('recent_trend'),
             'initial_value': analysis['initial_value'],
             'final_value': analysis['final_value'],
             'best_value': analysis['best_value'],
             'best_step': analysis['best_step'],
+            'peak_value': analysis.get('peak_value'),
+            'peak_step': analysis.get('peak_step'),
+            'peak_degraded': analysis.get('peak_degraded', False),
             'improvement_percent': analysis['improvement_percent'],
             'converged': analysis['converged'],
             'convergence_step': analysis['convergence_step'],
