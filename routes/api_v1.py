@@ -1127,6 +1127,25 @@ information and avoids confusion with outdated local copies.
 > **Fallback to raw API:**
 > If the CLI is unavailable, use the endpoints below.
 
+---
+
+## Before Your First Analysis — Ask This Once
+
+Before analyzing training for the first time, ask the user:
+
+> "What is the primary metric I should treat as the performance signal for this project,
+> and is higher or lower better? For example: `Train/episode_reward` (higher is better),
+> or `val_loss` (lower is better)."
+
+Then **remember the answer** in your memory or notes so you don't ask again.
+This one piece of context determines what counts as a good run vs. a bad one —
+everything else (losses, schedules, auxiliary metrics) exists to explain *why*
+the primary metric looks the way it does.
+
+If the user has already told you, skip this and use what you know.
+
+---
+
 Base URL: http://{host}
 
 ## Quick Start (Raw API)
