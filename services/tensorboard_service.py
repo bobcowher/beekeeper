@@ -149,6 +149,24 @@ def analyze_metric(metric_name: str, data: list) -> dict:
     # Trend detection
     trend = detect_trend(values, metric_name)
 
+    # Recent trend: compare last 20% of run vs overall trend
+    recent_n = max(5, len(values) // 5)
+    recent_trend = detect_trend(values[-recent_n:], metric_name) if len(values) >= recent_n * 2 else trend
+
+    # Peak degradation: did the metric peak then reverse significantly?
+    lower_better = _is_lower_better(metric_name)
+    if lower_better:
+        peak_value = min(values)
+        peak_step = steps[values.index(peak_value)]
+        # Degraded if final is significantly worse than peak (>10% of value range)
+        value_range = max(values) - min(values) if max(values) != min(values) else 1
+        peak_degraded = (final_value - peak_value) / value_range > 0.10
+    else:
+        peak_value = max(values)
+        peak_step = steps[values.index(peak_value)]
+        value_range = max(values) - min(values) if max(values) != min(values) else 1
+        peak_degraded = (peak_value - final_value) / value_range > 0.10
+
     # Convergence detection
     convergence = detect_convergence(data)
 
@@ -166,6 +184,10 @@ def analyze_metric(metric_name: str, data: list) -> dict:
 
     return {
         'trend': trend,
+        'recent_trend': recent_trend,
+        'peak_value': float(peak_value),
+        'peak_step': int(peak_step),
+        'peak_degraded': peak_degraded,
         'initial_value': float(initial_value),
         'final_value': float(final_value),
         'best_value': float(best_value),
