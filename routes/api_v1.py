@@ -1239,8 +1239,12 @@ The `/tensorboard/latest` endpoint analyzes TensorBoard data and returns insight
 
 | Field | Meaning |
 |-------|---------|
-| `trend` | `improving`, `stable`, `worsening`, or `unstable` |
-| `improvement_percent` | How much the metric improved from start to end |
+| `trend` | Overall trend: `improving`, `stable`, `worsening`, or `unstable` |
+| `recent_trend` | Trend of the last 20% of steps — may differ from overall trend |
+| `improvement_percent` | How much the metric changed from start to end |
+| `peak_value` | Best value reached at any point during the run |
+| `peak_step` | Step at which the peak occurred |
+| `peak_reversal_pct` | How far the metric moved away from its peak, as % of total value range |
 | `converged` | Boolean - has the metric stabilized? |
 | `convergence_step` | Step number where convergence was detected |
 | `anomaly_count` | Number of unusual spikes or drops |
@@ -1248,10 +1252,42 @@ The `/tensorboard/latest` endpoint analyzes TensorBoard data and returns insight
 | `summary` | Human-readable interpretation of this metric |
 
 **Interpreting trends:**
-- `improving`: Metric is moving in the expected direction (loss decreasing, accuracy increasing)
+- `improving`: Metric is moving in the expected direction (loss decreasing, reward increasing)
 - `stable`: Metric has leveled off - may indicate convergence or plateau
-- `worsening`: Metric is degrading - may need intervention
+- `worsening`: Metric is confidently moving the wrong direction - needs attention
 - `unstable`: High variance, no clear direction - training may be struggling
+
+## In-Depth Analysis Guide
+
+When asked to analyze training performance, follow this approach regardless of project type:
+
+**1. Identify the primary performance metric first.**
+Look for metrics with names containing: `reward`, `score`, `return`, `accuracy`, `success_rate`, `win_rate`.
+This is the headline. Everything else explains *why* it looks the way it does.
+
+**2. Scan for critical signals before summarizing anything.**
+These warrant immediate attention, in priority order:
+- `trend: worsening` on any metric — actively degrading
+- `peak_reversal_pct > 50` on a reward/performance metric — peaked and significantly reversed
+- `recent_trend` differs from `trend` — the run changed direction in the final stretch
+- `peak_step` very early relative to total steps — performance peaked early and never recovered
+- High `anomaly_count` — spikes or instability
+
+**3. Separate metric categories before drawing conclusions.**
+- **Performance metrics** (`reward`, `score`, `accuracy`): answer "is the agent improving?"
+- **Loss metrics** (`q_loss`, `td_error`, `reconstruction_loss`): answer "is the model learning correctly?"
+- **Schedule metrics** (`epsilon`, `lr`, `temperature`): intentional decays — ignore as performance signals
+- ⚠️ Improving losses with a declining reward signal is a warning: the model may be optimizing the wrong objective.
+
+**4. Use `peak_reversal_pct` and `peak_step` to tell the full story.**
+A metric labeled `improving` overall can still have degraded significantly from its peak:
+- `peak_reversal_pct > 20%`: worth mentioning
+- `peak_reversal_pct > 50%`: red flag — report peak value, peak step, and current value
+- `peak_reversal_pct > 80%`: the run largely reversed — this is likely the primary finding
+
+**5. Lead with the performance verdict, use losses to explain it.**
+Don't open with "reconstruction loss improved 99%." Open with where the reward/score stands,
+then use the losses to explain why — or why it degraded despite good losses.
 
 **Example response:**
 ```json
