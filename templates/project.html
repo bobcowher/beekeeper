@@ -214,10 +214,10 @@ curl http://{{ host }}/api/v1/stats</pre>
                     Download and add to your project's CLAUDE.md (or paste into agent context)
                 </p>
                 <div style="margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
-                    <a href="{{ url_for('api_v1.download_agent_sdk', name=project.name) }}"
+                    <a href="/static/bin/beekeeper"
                        class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem;"
                        download>
-                        📥 Download Python SDK
+                        📥 Download beekeeper CLI (Linux)
                     </a>
                     <a href="{{ url_for('api_v1.get_agent_instructions', name=project.name) }}"
                        class="btn btn-secondary" style="display: inline-flex; align-items: center; gap: 0.5rem;">
@@ -225,7 +225,8 @@ curl http://{{ host }}/api/v1/stats</pre>
                     </a>
                     </div>
                     <pre class="api-examples"
- style="font-size: 0.85rem; margin-bottom: 1rem;">curl -o BEEKEEPER_{{ project.name }}.md http://{{ host }}/api/v1/projects/{{ project.name }}/agent/instructions</pre>
+ style="font-size: 0.85rem; margin-bottom: 1rem;"># To install CLI via terminal:
+curl -o beekeeper http://{{ host }}/static/bin/beekeeper && chmod +x beekeeper</pre>
                 <details>
                     <summary style="cursor: pointer; color: var(--text-secondary); font-size: 0.9rem;">Preview endpoints</summary>
                     <pre class="api-examples" style="margin-top: 0.5rem; font-size: 0.8rem;">| Action         | Method | Endpoint                                          |
