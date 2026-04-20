@@ -73,7 +73,7 @@ class DatabaseService:
                         best_step INTEGER,
                         peak_value REAL,
                         peak_step INTEGER,
-                        peak_degraded BOOLEAN DEFAULT 0,
+                        peak_reversal_pct REAL DEFAULT 0,
                         improvement_percent REAL,
                         converged BOOLEAN DEFAULT 0,
                         convergence_step INTEGER,
@@ -96,7 +96,7 @@ class DatabaseService:
                 ('recent_trend', 'TEXT'),
                 ('peak_value', 'REAL'),
                 ('peak_step', 'INTEGER'),
-                ('peak_degraded', 'BOOLEAN DEFAULT 0'),
+                ('peak_reversal_pct', 'REAL DEFAULT 0'),
             ]:
                 try:
                     conn.execute(f'ALTER TABLE metric_analyses ADD COLUMN {col} {typedef}')
@@ -494,7 +494,7 @@ class DatabaseService:
             conn.execute(
                 '''INSERT OR REPLACE INTO metric_analyses
                    (run_id, metric_name, trend, recent_trend, initial_value, final_value,
-                    best_value, best_step, peak_value, peak_step, peak_degraded,
+                    best_value, best_step, peak_value, peak_step, peak_reversal_pct,
                     improvement_percent, converged, convergence_step,
                     anomaly_count, anomaly_details, summary, sampled_points, total_points)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
@@ -509,7 +509,7 @@ class DatabaseService:
                     analysis_data.get('best_step'),
                     analysis_data.get('peak_value'),
                     analysis_data.get('peak_step'),
-                    analysis_data.get('peak_degraded', False),
+                    analysis_data.get('peak_reversal_pct', 0.0),
                     analysis_data.get('improvement_percent'),
                     analysis_data.get('converged', False),
                     analysis_data.get('convergence_step'),
@@ -550,7 +550,7 @@ class DatabaseService:
                     'best_step': row['best_step'],
                     'peak_value': row['peak_value'],
                     'peak_step': row['peak_step'],
-                    'peak_degraded': bool(row['peak_degraded']) if row['peak_degraded'] is not None else False,
+                    'peak_reversal_pct': row['peak_reversal_pct'] if row['peak_reversal_pct'] is not None else 0.0,
                     'improvement_percent': row['improvement_percent'],
                     'converged': bool(row['converged']),
                     'convergence_step': row['convergence_step'],

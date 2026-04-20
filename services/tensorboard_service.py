@@ -161,11 +161,11 @@ def analyze_metric(metric_name: str, data: list) -> dict:
     if lower_better:
         peak_value = min(values)
         peak_step = steps[values.index(peak_value)]
-        peak_degraded = not is_scheduled and (final_value - peak_value) / value_range > 0.10
+        peak_reversal_pct = 0.0 if is_scheduled else (final_value - peak_value) / value_range * 100
     else:
         peak_value = max(values)
         peak_step = steps[values.index(peak_value)]
-        peak_degraded = not is_scheduled and (peak_value - final_value) / value_range > 0.10
+        peak_reversal_pct = 0.0 if is_scheduled else (peak_value - final_value) / value_range * 100
 
     # Convergence detection
     convergence = detect_convergence(data)
@@ -187,7 +187,7 @@ def analyze_metric(metric_name: str, data: list) -> dict:
         'recent_trend': recent_trend,
         'peak_value': float(peak_value),
         'peak_step': int(peak_step),
-        'peak_degraded': peak_degraded,
+        'peak_reversal_pct': round(float(peak_reversal_pct), 1),
         'initial_value': float(initial_value),
         'final_value': float(final_value),
         'best_value': float(best_value),
@@ -480,7 +480,7 @@ def get_metric_analysis(
             'best_step': analysis['best_step'],
             'peak_value': analysis.get('peak_value'),
             'peak_step': analysis.get('peak_step'),
-            'peak_degraded': analysis.get('peak_degraded', False),
+            'peak_reversal_pct': analysis.get('peak_reversal_pct', 0.0),
             'improvement_percent': analysis['improvement_percent'],
             'converged': analysis['converged'],
             'convergence_step': analysis['convergence_step'],
