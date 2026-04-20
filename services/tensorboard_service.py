@@ -154,18 +154,18 @@ def analyze_metric(metric_name: str, data: list) -> dict:
     recent_trend = detect_trend(values[-recent_n:], metric_name) if len(values) >= recent_n * 2 else trend
 
     # Peak degradation: did the metric peak then reverse significantly?
+    # Scheduled metrics (epsilon, lr) intentionally decay — skip peak degradation check.
     lower_better = _is_lower_better(metric_name)
+    is_scheduled = _is_scheduled_metric(metric_name)
+    value_range = max(values) - min(values) if max(values) != min(values) else 1
     if lower_better:
         peak_value = min(values)
         peak_step = steps[values.index(peak_value)]
-        # Degraded if final is significantly worse than peak (>10% of value range)
-        value_range = max(values) - min(values) if max(values) != min(values) else 1
-        peak_degraded = (final_value - peak_value) / value_range > 0.10
+        peak_degraded = not is_scheduled and (final_value - peak_value) / value_range > 0.10
     else:
         peak_value = max(values)
         peak_step = steps[values.index(peak_value)]
-        value_range = max(values) - min(values) if max(values) != min(values) else 1
-        peak_degraded = (peak_value - final_value) / value_range > 0.10
+        peak_degraded = not is_scheduled and (peak_value - final_value) / value_range > 0.10
 
     # Convergence detection
     convergence = detect_convergence(data)
