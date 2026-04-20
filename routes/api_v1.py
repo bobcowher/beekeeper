@@ -1111,16 +1111,16 @@ information and avoids confusion with outdated local copies.
 > ```
 > If this prints usage info, skip to Step 3. If you get "command not found", continue to Step 2.
 >
-> **Step 2 — Download (only if not installed):**
+> **Step 2 — Install to PATH (only if not installed):**
 > ```bash
-> curl -o beekeeper http://{host}/static/bin/beekeeper && chmod +x beekeeper
+> curl -o /usr/local/bin/beekeeper http://{host}/static/bin/beekeeper && chmod +x /usr/local/bin/beekeeper
 > ```
+> This installs `beekeeper` as a global utility. Always invoke it as `beekeeper`, never `./beekeeper`.
 >
 > **Step 3 — Run analysis:**
 > ```bash
 > BEEKEEPER_HOST="http://{host}" beekeeper run analyze {name}
 > ```
-> If you downloaded in Step 2, prefix with `./`: `BEEKEEPER_HOST="http://{host}" ./beekeeper run analyze {name}`
 >
 > Full CLI reference: http://{host}/api/v1/cli
 >
