@@ -218,7 +218,7 @@ curl http://{{ host }}/api/v1/stats</pre>
                 <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1rem;">curl -o beekeeper http://{{ host }}/static/bin/beekeeper && chmod +x beekeeper
 sudo mv beekeeper /usr/local/bin/beekeeper  # optional: add to PATH</pre>
 
-                <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 2 — Set credentials in the agent's environment:</strong></p>
+                <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 2 — Set env vars so the CLI binary knows where to connect:</strong></p>
                 <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1rem;">export BEEKEEPER_HOST="http://{{ host }}"
 export BEEKEEPER_API_KEY="your-api-key-here"  # only required if auth is enabled</pre>
 

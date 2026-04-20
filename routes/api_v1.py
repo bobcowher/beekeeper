@@ -1111,9 +1111,10 @@ information and avoids confusion with outdated local copies.
 > # Download and install the beekeeper CLI
 > curl -o beekeeper http://{host}/static/bin/beekeeper && chmod +x beekeeper
 >
-> # Configure (BEEKEEPER_API_KEY only required if auth is enabled)
-> export BEEKEEPER_HOST="http://{host}"
-> export BEEKEEPER_API_KEY="your-api-key-here"
+# Set env vars so the CLI binary knows where to connect.
+# BEEKEEPER_API_KEY only required if auth is enabled.
+export BEEKEEPER_HOST="http://{host}"
+export BEEKEEPER_API_KEY="your-api-key-here"
 > ```
 >
 > ```bash
