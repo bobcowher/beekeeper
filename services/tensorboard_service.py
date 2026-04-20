@@ -184,8 +184,8 @@ def analyze_metric(metric_name: str, data: list) -> dict:
 def detect_trend(values: list, metric_name: str) -> str:
     """
     Detect trend in values, ignoring initial spikes and being sensitive to RL noise.
-    
-    Returns: 'improving', 'stable', 'unstable', 'insufficient_data'
+
+    Returns: 'improving', 'stable', 'worsening', 'unstable', 'insufficient_data'
     """
     if len(values) < 10:
         return 'insufficient_data'
@@ -232,18 +232,24 @@ def detect_trend(values: list, metric_name: str) -> str:
 
     # Thresholds
     SLOPE_THRESHOLD = 0.05  # 5% change over the run is significant
-    STABILITY_THRESHOLD = 0.4 # R² threshold for "stable" trend
+    STABILITY_THRESHOLD = 0.4  # R² threshold for "consistent" trend
 
     if normalized_slope < SLOPE_THRESHOLD:
         return 'stable'
 
+    # Scheduled metrics (epsilon, lr, etc.) are following a deliberate decay — label as stable
+    if _is_scheduled_metric(metric_name):
+        return 'stable'
+
     # Check if slope direction matches desired improvement
     if (is_lower_better and slope < 0) or (not is_lower_better and slope > 0):
-        # Even if R² is low, if the direction is right and slope is significant, it's improving
+        # Right direction with significant slope → improving (regardless of R²)
         return 'improving'
     else:
-        # If it's moving in the "wrong" direction but with very low R², it's unstable
-        return 'unstable' if r_squared < STABILITY_THRESHOLD else 'stable'
+        # Wrong direction: distinguish consistent worsening from noisy instability
+        if r_squared >= STABILITY_THRESHOLD:
+            return 'worsening'
+        return 'unstable'
 
 
 def detect_convergence(data: list) -> dict:
@@ -579,6 +585,13 @@ def _is_lower_better(metric_name: str) -> bool:
     return any(keyword in metric_lower for keyword in lower_better_keywords)
 
 
+def _is_scheduled_metric(metric_name: str) -> bool:
+    """Metrics that follow a deliberate schedule (e.g. epsilon decay) — neither better nor worse."""
+    scheduled_keywords = ['epsilon', 'lr', 'learning_rate', 'temperature', 'alpha']
+    metric_lower = metric_name.lower()
+    return any(keyword in metric_lower for keyword in scheduled_keywords)
+
+
 def _generate_summary(
     metric_name: str,
     trend: str,
@@ -597,6 +610,8 @@ def _generate_summary(
         desc = "improving"
     elif trend == 'stable':
         desc = "stable"
+    elif trend == 'worsening':
+        desc = "worsening"
     elif trend == 'unstable':
         desc = "unstable"
     else:
