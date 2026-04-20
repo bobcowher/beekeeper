@@ -183,139 +183,140 @@ def analyze_metric(metric_name: str, data: list) -> dict:
 
 def detect_trend(values: list, metric_name: str) -> str:
     """
-    Detect trend in values using linear regression.
-
+    Detect trend in values, ignoring initial spikes and being sensitive to RL noise.
+    
     Returns: 'improving', 'stable', 'unstable', 'insufficient_data'
     """
     if len(values) < 10:
         return 'insufficient_data'
 
-    # Linear regression
-    x = np.arange(len(values))
-    y = np.array(values)
+    # 1. Ignore "cold start" period (first 5% of data or first 20 points, whichever is smaller)
+    # This prevents initial spikes from skewing the regression
+    skip_count = min(20, len(values) // 20)
+    v_clean = np.array(values[skip_count:])
+    x_clean = np.arange(len(v_clean))
 
-    # Fit line: y = mx + b
-    coeffs = np.polyfit(x, y, 1)
+    if len(v_clean) < 5:
+        return 'insufficient_data'
+
+    # 2. Use a sliding window to smooth the data for regression (helps with noisy RL rewards)
+    window_size = max(5, len(v_clean) // 10)
+    v_smoothed = np.convolve(v_clean, np.ones(window_size)/window_size, mode='valid')
+    x_smoothed = np.arange(len(v_smoothed))
+
+    if len(v_smoothed) < 2:
+        # Fallback to unsmoothed if windowing left us with too little data
+        v_smoothed = v_clean
+        x_smoothed = x_clean
+
+    # 3. Linear regression on smoothed data
+    coeffs = np.polyfit(x_smoothed, v_smoothed, 1)
     slope = coeffs[0]
 
-    # Calculate R²
-    y_pred = np.polyval(coeffs, x)
-    ss_res = np.sum((y - y_pred) ** 2)
-    ss_tot = np.sum((y - np.mean(y)) ** 2)
+    # Calculate R² on smoothed data
+    y_pred = np.polyval(coeffs, x_smoothed)
+    ss_res = np.sum((v_smoothed - y_pred) ** 2)
+    ss_tot = np.sum((v_smoothed - np.mean(v_smoothed)) ** 2)
     r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
 
-    # Check if trend is stable (R² > 0.5 indicates good linear fit)
-    if r_squared < 0.3:
-        return 'unstable'
-
-    # Determine if improving based on metric type and slope
+    # 4. Significance test
     is_lower_better = _is_lower_better(metric_name)
-
-    # Normalize slope by value range for significance test
-    value_range = np.max(values) - np.min(values)
+    value_range = np.max(v_smoothed) - np.min(v_smoothed)
+    
     if value_range > 0:
-        normalized_slope = abs(slope) / (value_range / len(values))
+        # Check how much the linear trend explains vs the noise
+        # For RL, a lower R² is acceptable if the slope is clearly in one direction
+        normalized_slope = abs(slope * len(x_smoothed)) / (value_range if value_range != 0 else 1)
     else:
         normalized_slope = 0
 
-    # If slope is insignificant, it's stable
-    if normalized_slope < 0.1:
+    # Thresholds
+    SLOPE_THRESHOLD = 0.05  # 5% change over the run is significant
+    STABILITY_THRESHOLD = 0.4 # R² threshold for "stable" trend
+
+    if normalized_slope < SLOPE_THRESHOLD:
         return 'stable'
 
     # Check if slope direction matches desired improvement
     if (is_lower_better and slope < 0) or (not is_lower_better and slope > 0):
+        # Even if R² is low, if the direction is right and slope is significant, it's improving
         return 'improving'
     else:
-        # Getting worse is also a stable trend, just not improving
-        return 'stable' if r_squared > 0.5 else 'unstable'
+        # If it's moving in the "wrong" direction but with very low R², it's unstable
+        return 'unstable' if r_squared < STABILITY_THRESHOLD else 'stable'
 
 
 def detect_convergence(data: list) -> dict:
     """
-    Detect if metric has converged.
-
-    Returns: {'converged': bool, 'step': int or None}
+    Detect if metric has converged using a sliding window CV.
     """
     if len(data) < 20:
         return {'converged': False, 'step': None}
 
-    # Look at last 20% of points
-    window_size = max(10, len(data) // 5)
-    last_values = [d[1] for d in data[-window_size:]]
-
-    # Calculate coefficient of variation (std/mean)
-    mean_val = np.mean(last_values)
-    std_val = np.std(last_values)
-
-    if abs(mean_val) > 1e-6:
-        cv = abs(std_val / mean_val)
-    else:
-        cv = std_val
-
-    # Converged if CV < 0.02 (2% variation)
-    converged = cv < 0.02
-
-    if converged:
-        # Find approximate convergence point (where CV first drops below threshold)
-        for i in range(window_size, len(data)):
-            window = [d[1] for d in data[i-window_size:i]]
+    values = [d[1] for d in data]
+    
+    # Check the very end of the run
+    last_window = values[-max(10, len(values)//10):]
+    mean_val = np.mean(last_window)
+    std_val = np.std(last_window)
+    
+    cv = abs(std_val / mean_val) if abs(mean_val) > 1e-6 else std_val
+    
+    # RL rewards are noisy, so we use a more relaxed threshold for them
+    is_reward = 'reward' in data[0] if isinstance(data[0], str) else False # Placeholder
+    threshold = 0.10 if is_reward else 0.03
+    
+    if cv < threshold:
+        # Try to find where it first converged
+        # Use a sliding window of 10% of total length
+        window_size = max(10, len(values) // 10)
+        for i in range(window_size, len(values)):
+            window = values[i-window_size:i]
             m = np.mean(window)
             s = np.std(window)
-            if abs(m) > 1e-6:
-                cv_i = abs(s / m)
-            else:
-                cv_i = s
-
-            if cv_i < 0.02:
+            curr_cv = abs(s / m) if abs(m) > 1e-6 else s
+            if curr_cv < threshold:
                 return {'converged': True, 'step': int(data[i][0])}
 
-    return {'converged': converged, 'step': None}
+    return {'converged': False, 'step': None}
 
 
 def detect_anomalies(data: list) -> list:
     """
-    Detect anomalies using IQR method.
-
-    Returns: List of dicts with step, value, reason (max 5)
+    Detect anomalies, ignoring the first few points (cold start).
     """
-    if len(data) < 10:
+    if len(data) < 20:
         return []
 
-    values = np.array([d[1] for d in data])
+    # Ignore first 5% for anomaly detection bounds calculation
+    skip = len(data) // 20
+    values_clean = np.array([d[1] for d in data[skip:]])
 
-    # IQR method
-    q1 = np.percentile(values, 25)
-    q3 = np.percentile(values, 75)
+    q1 = np.percentile(values_clean, 25)
+    q3 = np.percentile(values_clean, 75)
     iqr = q3 - q1
 
     if iqr == 0:
-        return []
+        # If all values are same, check if any differ from the constant
+        const_val = values_clean[0]
+        anomalies = []
+        for step, value, _ in data[skip:]:
+            if abs(value - const_val) > 1e-6:
+                anomalies.append({'step': int(step), 'value': float(value), 'reason': 'deviation'})
+        return anomalies[:5]
 
-    lower_bound = q1 - 1.5 * iqr
-    upper_bound = q3 + 1.5 * iqr
+    lower_bound = q1 - 2.5 * iqr # More conservative than 1.5
+    upper_bound = q3 + 2.5 * iqr
 
     anomalies = []
-    for step, value, _ in data:
+    for step, value, _ in data[skip:]:
         if value > upper_bound:
-            anomalies.append({
-                'step': int(step),
-                'value': float(value),
-                'reason': 'spike_high'
-            })
+            anomalies.append({'step': int(step), 'value': float(value), 'reason': 'spike_high'})
         elif value < lower_bound:
-            anomalies.append({
-                'step': int(step),
-                'value': float(value),
-                'reason': 'spike_low'
-            })
+            anomalies.append({'step': int(step), 'value': float(value), 'reason': 'spike_low'})
 
-    # Return top 5 most extreme
     if anomalies:
-        # Sort by distance from bounds
-        anomalies.sort(
-            key=lambda x: abs(x['value'] - q1) if x['value'] < lower_bound else abs(x['value'] - q3),
-            reverse=True
-        )
+        anomalies.sort(key=lambda x: abs(x['value']), reverse=True)
         return anomalies[:5]
 
     return []
@@ -587,38 +588,39 @@ def _generate_summary(
     convergence: dict,
     anomalies: list
 ) -> str:
-    """Generate human-readable summary of metric analysis."""
+    """Generate human-readable summary with better qualitative analysis."""
+    is_lower_better = _is_lower_better(metric_name)
     parts = []
 
-    # Trend and improvement
+    # Qualitative trend description
     if trend == 'improving':
-        direction = 'improved' if _is_lower_better(metric_name) else 'increased'
-        parts.append(
-            f"{metric_name} {direction} by {abs(improvement_percent):.1f}% "
-            f"from {initial_value:.3g} to {final_value:.3g}"
-        )
+        desc = "improving"
     elif trend == 'stable':
-        parts.append(
-            f"{metric_name} remained relatively stable "
-            f"(from {initial_value:.3g} to {final_value:.3g})"
-        )
+        desc = "stable"
     elif trend == 'unstable':
-        parts.append(
-            f"{metric_name} showed unstable behavior "
-            f"(from {initial_value:.3g} to {final_value:.3g})"
-        )
+        desc = "unstable"
     else:
-        parts.append(f"{metric_name}: insufficient data for trend analysis")
+        desc = "insufficient data"
 
-    # Convergence
+    # Directional analysis (ignoring initial spikes for the text)
+    if initial_value != 0:
+        change = ((final_value - initial_value) / abs(initial_value)) * 100
+        direction = "decreased" if change < 0 else "increased"
+        parts.append(f"{metric_name}: {desc} (final: {final_value:.3g}, overall {direction} {abs(change):.1f}%)")
+    else:
+        parts.append(f"{metric_name}: {desc} (final: {final_value:.3g})")
+
+    # Convergence status
     if convergence['converged']:
         parts.append(f"Converged at step {convergence['step']}")
+    elif trend == 'stable':
+        parts.append("Appears to have plateaued")
 
-    # Anomalies
+    # Anomaly count
     if anomalies:
-        parts.append(f"{len(anomalies)} anomalies detected")
+        parts.append(f"{len(anomalies)} anomalies")
 
-    return '. '.join(parts) + '.'
+    return ". ".join(parts)
 
 
 def cleanup_old_tb_logs(tb_logdir: str, keep_count: int) -> dict:

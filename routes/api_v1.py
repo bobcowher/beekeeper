@@ -1095,28 +1095,37 @@ information and avoids confusion with outdated local copies.
 
 ---
 
-> **IMPORTANT: USE THIS API FIRST**
-> When asked about training status, logs, metrics, progress, or anything related to this ML project,
-> use the Beekeeper API below. Do NOT read tensorboard files directly or parse logs manually.
-> The API provides structured data and trend analysis.
+> **IMPORTANT: USE THE BEEKEEPER CLI FIRST**
+> For the best experience, use the `beekeeper` CLI tool. It provides a "Synthesized View" 
+> of training progress by aggregating multiple API sources (TensorBoard trends, log 
+> analysis, and status) into a single, high-signal verdict.
+>
+> ```bash
+> # Download and install the beekeeper CLI
+> curl -o beekeeper http://{host}/static/bin/beekeeper && chmod +x beekeeper
+> ```
+>
+> ```bash
+> # Get a complete "Synthesized View" of current training
+> ./beekeeper run analyze {name}
+> ```
+> 
+> **Fallback to API:**
+> If the CLI is unavailable, use the raw API endpoints below.
 
 Base URL: http://{host}
 
-## Quick Start
+## Quick Start (Raw API)
 
 ```bash
 # Check if training is running
 curl http://{host}/api/v1/projects/{name}/training/status
 
-# Get training progress and trends (WORKS FOR ACTIVE RUNS)
-curl http://{host}/api/v1/projects/{name}/logs/analysis
+# Get training progress and trends (Synthesized View)
+curl http://{host}/api/v1/projects/{name}/tensorboard/latest
 
 # Get recent log output
 curl "http://{host}/api/v1/projects/{name}/logs?tail=50"
-
-# Start/stop training
-curl -X POST http://{host}/api/v1/projects/{name}/training/start
-curl -X POST http://{host}/api/v1/projects/{name}/training/stop
 ```
 
 ## Checking Training Progress
@@ -1166,19 +1175,18 @@ When asked to "check logs", "look at tensorboard", "see how training is going", 
 
 ## Quick Reference
 
-| Action | Method | Endpoint |
-|--------|--------|----------|
-| Check status | GET | `/api/v1/projects/{name}/training/status` |
-| **Get trends** | GET | `/api/v1/projects/{name}/logs/analysis` |
-| Get logs | GET | `/api/v1/projects/{name}/logs?tail=100` |
-| Get metrics | GET | `/api/v1/projects/{name}/tensorboard/latest` |
-| Start training | POST | `/api/v1/projects/{name}/training/start` |
-| Stop training | POST | `/api/v1/projects/{name}/training/stop` |
-| List branches | GET | `/api/v1/projects/{name}/branches` |
-| Switch branch | POST | `/api/v1/projects/{name}/branch` |
-| List files | GET | `/api/v1/projects/{name}/files` |
-| Download file | GET | `/api/v1/projects/{name}/files/<path>` |
-| System stats | GET | `/api/v1/stats` |
+| Action | CLI Command | API Endpoint |
+|--------|-------------|--------------|
+| **Analyze Run** | `beekeeper run analyze {name}` | `GET /tensorboard/latest` |
+| Check status | `beekeeper training status {name}` | `GET /training/status` |
+| Get logs | `beekeeper logs get {name}` | `GET /logs?tail=100` |
+| Start training | `beekeeper training start {name}` | `POST /training/start` |
+| Stop training | `beekeeper training stop {name}` | `POST /training/stop` |
+| List files | (use `ls` in workspace) | `GET /files` |
+| Download file | (use `cp` in workspace) | `GET /files/<path>` |
+| System stats | `beekeeper stats` | `GET /api/v1/stats` |
+
+*(Note: `beekeeper stats` is a planned command for the next version)*
 
 ## Response Format
 
@@ -1641,3 +1649,30 @@ def get_run_metrics(name, run_id):
     }
 
     return api_response(data=response_data)
+
+
+@api_v1_bp.route("/projects/<name>/agent/sdk")
+@api_key_required
+def download_agent_sdk(name):
+    """Generate and download Python SDK for AI agent integration."""
+    from services.agent_sdk_generator import generate_sdk
+    from flask import Response
+
+    project = load_project(name)
+
+    # Generate SDK content
+    sdk_content = generate_sdk(
+        project_name=name,
+        base_url=request.url_root.rstrip('/'),
+        project=project
+    )
+
+    # Return as downloadable file
+    filename = f"beekeeper_client_{name.replace('-', '_')}.py"
+    return Response(
+        sdk_content,
+        mimetype='text/x-python',
+        headers={
+            'Content-Disposition': f'attachment; filename="{filename}"'
+        }
+    )

@@ -213,13 +213,19 @@ curl http://{{ host }}/api/v1/stats</pre>
                 <p style="color: var(--text-secondary); margin-bottom: 0.75rem; font-size: 0.9rem;">
                     Download and add to your project's CLAUDE.md (or paste into agent context)
                 </p>
-                <div style="margin-bottom: 1rem;">
+                <div style="margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                    <a href="{{ url_for('api_v1.download_agent_sdk', name=project.name) }}"
+                       class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem;"
+                       download>
+                        📥 Download Python SDK
+                    </a>
                     <a href="{{ url_for('api_v1.get_agent_instructions', name=project.name) }}"
                        class="btn btn-secondary" style="display: inline-flex; align-items: center; gap: 0.5rem;">
                         <span style="font-size: 1.1rem;">&#8615;</span> Download BEEKEEPER_{{ project.name }}.md
                     </a>
-                </div>
-                <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1rem;">curl -o BEEKEEPER_{{ project.name }}.md http://{{ host }}/api/v1/projects/{{ project.name }}/agent/instructions</pre>
+                    </div>
+                    <pre class="api-examples"
+ style="font-size: 0.85rem; margin-bottom: 1rem;">curl -o BEEKEEPER_{{ project.name }}.md http://{{ host }}/api/v1/projects/{{ project.name }}/agent/instructions</pre>
                 <details>
                     <summary style="cursor: pointer; color: var(--text-secondary); font-size: 0.9rem;">Preview endpoints</summary>
                     <pre class="api-examples" style="margin-top: 0.5rem; font-size: 0.8rem;">| Action         | Method | Endpoint                                          |
