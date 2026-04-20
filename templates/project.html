@@ -179,28 +179,52 @@
             </h3>
             <div class="collapsible-body" id="human-api-body" style="display:none;">
                 <p style="color: var(--text-secondary); margin-bottom: 0.75rem; font-size: 0.9rem;">
-                    curl examples for command-line use
+                    Use the Beekeeper CLI for the best terminal experience.
+                    <a href="{{ url_for('api_v1.cli_documentation') }}" style="color: var(--accent);">Full CLI reference →</a>
                 </p>
-                <pre class="api-examples" id="api-examples"># Training
-curl -X POST http://{{ host }}/api/v1/projects/{{ project.name }}/training/start
-curl -X POST http://{{ host }}/api/v1/projects/{{ project.name }}/training/stop
-curl http://{{ host }}/api/v1/projects/{{ project.name }}/training/status
+
+                <div style="margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                    <a href="/static/bin/beekeeper"
+                       class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem;"
+                       download>
+                        &#8659; Download beekeeper CLI (Linux)
+                    </a>
+                </div>
+
+                <pre class="api-examples" style="margin-bottom: 1rem;"># 1. Install
+curl -o beekeeper http://{{ host }}/static/bin/beekeeper && chmod +x beekeeper
+
+# 2. Configure
+export BEEKEEPER_HOST="http://{{ host }}"
+export BEEKEEPER_API_KEY="your-api-key-here"
+
+# 3. Use
+./beekeeper projects list
+./beekeeper training status {{ project.name }}
+./beekeeper logs get {{ project.name }} 100
+./beekeeper run analyze {{ project.name }}
+./beekeeper training start {{ project.name }}
+./beekeeper training stop {{ project.name }}</pre>
+
+                <details style="margin-top: 0.5rem;">
+                    <summary style="cursor: pointer; color: var(--text-secondary); font-size: 0.9rem;">Raw API (curl)</summary>
+                    <pre class="api-examples" style="margin-top: 0.5rem;"># Training
+curl -H "X-API-Key: $BEEKEEPER_API_KEY" -X POST http://{{ host }}/api/v1/projects/{{ project.name }}/training/start
+curl -H "X-API-Key: $BEEKEEPER_API_KEY" -X POST http://{{ host }}/api/v1/projects/{{ project.name }}/training/stop
+curl -H "X-API-Key: $BEEKEEPER_API_KEY" http://{{ host }}/api/v1/projects/{{ project.name }}/training/status
 
 # Logs
-curl "http://{{ host }}/api/v1/projects/{{ project.name }}/logs?tail=50"
-curl -N http://{{ host }}/api/v1/projects/{{ project.name }}/logs/stream
+curl -H "X-API-Key: $BEEKEEPER_API_KEY" "http://{{ host }}/api/v1/projects/{{ project.name }}/logs?tail=50"
 
 # Files
-curl http://{{ host }}/api/v1/projects/{{ project.name }}/files
-curl -O http://{{ host }}/api/v1/projects/{{ project.name }}/files/&lt;filepath&gt;
-curl -o workspace.zip "http://{{ host }}/api/v1/projects/{{ project.name }}/files?zip=1"
+curl -H "X-API-Key: $BEEKEEPER_API_KEY" http://{{ host }}/api/v1/projects/{{ project.name }}/files
 
 # TensorBoard Metrics
-curl http://{{ host }}/api/v1/projects/{{ project.name }}/tensorboard/latest
-curl "http://{{ host }}/api/v1/projects/{{ project.name }}/tensorboard/latest?detail=medium"
+curl -H "X-API-Key: $BEEKEEPER_API_KEY" http://{{ host }}/api/v1/projects/{{ project.name }}/tensorboard/latest
 
 # System Stats
-curl http://{{ host }}/api/v1/stats</pre>
+curl -H "X-API-Key: $BEEKEEPER_API_KEY" http://{{ host }}/api/v1/stats</pre>
+                </details>
             </div>
         </div>
 
