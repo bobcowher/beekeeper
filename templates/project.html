@@ -179,52 +179,28 @@
             </h3>
             <div class="collapsible-body" id="human-api-body" style="display:none;">
                 <p style="color: var(--text-secondary); margin-bottom: 0.75rem; font-size: 0.9rem;">
-                    Use the Beekeeper CLI for the best terminal experience.
-                    <a href="{{ url_for('api_v1.cli_documentation') }}" style="color: var(--accent);">Full CLI reference →</a>
+                    curl examples for command-line use
                 </p>
-
-                <div style="margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
-                    <a href="/static/bin/beekeeper"
-                       class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem;"
-                       download>
-                        &#8659; Download beekeeper CLI (Linux)
-                    </a>
-                </div>
-
-                <pre class="api-examples" style="margin-bottom: 1rem;"># 1. Install
-curl -o beekeeper http://{{ host }}/static/bin/beekeeper && chmod +x beekeeper
-
-# 2. Configure
-export BEEKEEPER_HOST="http://{{ host }}"
-export BEEKEEPER_API_KEY="your-api-key-here"
-
-# 3. Use
-./beekeeper projects list
-./beekeeper training status {{ project.name }}
-./beekeeper logs get {{ project.name }} 100
-./beekeeper run analyze {{ project.name }}
-./beekeeper training start {{ project.name }}
-./beekeeper training stop {{ project.name }}</pre>
-
-                <details style="margin-top: 0.5rem;">
-                    <summary style="cursor: pointer; color: var(--text-secondary); font-size: 0.9rem;">Raw API (curl)</summary>
-                    <pre class="api-examples" style="margin-top: 0.5rem;"># Training
-curl -H "X-API-Key: $BEEKEEPER_API_KEY" -X POST http://{{ host }}/api/v1/projects/{{ project.name }}/training/start
-curl -H "X-API-Key: $BEEKEEPER_API_KEY" -X POST http://{{ host }}/api/v1/projects/{{ project.name }}/training/stop
-curl -H "X-API-Key: $BEEKEEPER_API_KEY" http://{{ host }}/api/v1/projects/{{ project.name }}/training/status
+                <pre class="api-examples" id="api-examples"># Training
+curl -X POST http://{{ host }}/api/v1/projects/{{ project.name }}/training/start
+curl -X POST http://{{ host }}/api/v1/projects/{{ project.name }}/training/stop
+curl http://{{ host }}/api/v1/projects/{{ project.name }}/training/status
 
 # Logs
-curl -H "X-API-Key: $BEEKEEPER_API_KEY" "http://{{ host }}/api/v1/projects/{{ project.name }}/logs?tail=50"
+curl "http://{{ host }}/api/v1/projects/{{ project.name }}/logs?tail=50"
+curl -N http://{{ host }}/api/v1/projects/{{ project.name }}/logs/stream
 
 # Files
-curl -H "X-API-Key: $BEEKEEPER_API_KEY" http://{{ host }}/api/v1/projects/{{ project.name }}/files
+curl http://{{ host }}/api/v1/projects/{{ project.name }}/files
+curl -O http://{{ host }}/api/v1/projects/{{ project.name }}/files/&lt;filepath&gt;
+curl -o workspace.zip "http://{{ host }}/api/v1/projects/{{ project.name }}/files?zip=1"
 
 # TensorBoard Metrics
-curl -H "X-API-Key: $BEEKEEPER_API_KEY" http://{{ host }}/api/v1/projects/{{ project.name }}/tensorboard/latest
+curl http://{{ host }}/api/v1/projects/{{ project.name }}/tensorboard/latest
+curl "http://{{ host }}/api/v1/projects/{{ project.name }}/tensorboard/latest?detail=medium"
 
 # System Stats
-curl -H "X-API-Key: $BEEKEEPER_API_KEY" http://{{ host }}/api/v1/stats</pre>
-                </details>
+curl http://{{ host }}/api/v1/stats</pre>
             </div>
         </div>
 
@@ -235,22 +211,29 @@ curl -H "X-API-Key: $BEEKEEPER_API_KEY" http://{{ host }}/api/v1/stats</pre>
             </h3>
             <div class="collapsible-body" id="agent-api-body" style="display:none;">
                 <p style="color: var(--text-secondary); margin-bottom: 0.75rem; font-size: 0.9rem;">
-                    Download and add to your project's CLAUDE.md (or paste into agent context)
+                    Give your agent the CLI binary and its project instructions. The CLI provides a Synthesized View of training progress — the recommended interface for AI agents.
                 </p>
-                <div style="margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
-                    <a href="/static/bin/beekeeper"
-                       class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem;"
-                       download>
-                        📥 Download beekeeper CLI (Linux)
-                    </a>
+
+                <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 1 — Install the CLI on the agent's machine:</strong></p>
+                <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1rem;">curl -o beekeeper http://{{ host }}/static/bin/beekeeper && chmod +x beekeeper</pre>
+
+                <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 2 — Set credentials in the agent's environment:</strong></p>
+                <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1rem;">export BEEKEEPER_HOST="http://{{ host }}"
+export BEEKEEPER_API_KEY="your-api-key-here"</pre>
+
+                <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 3 — Download the project instructions and add to agent context:</strong></p>
+                <div style="margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
                     <a href="{{ url_for('api_v1.get_agent_instructions', name=project.name) }}"
-                       class="btn btn-secondary" style="display: inline-flex; align-items: center; gap: 0.5rem;">
-                        <span style="font-size: 1.1rem;">&#8615;</span> Download BEEKEEPER_{{ project.name }}.md
+                       class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem;">
+                        &#8659; Download BEEKEEPER_{{ project.name }}.md
                     </a>
-                    </div>
-                    <pre class="api-examples"
- style="font-size: 0.85rem; margin-bottom: 1rem;"># To install CLI via terminal:
-curl -o beekeeper http://{{ host }}/static/bin/beekeeper && chmod +x beekeeper</pre>
+                    <span style="color: var(--text-secondary); font-size: 0.85rem;">Add to CLAUDE.md or paste into agent context</span>
+                </div>
+
+                <p style="font-size: 0.85rem; color: var(--text-secondary);">
+                    Also available: <a href="/static/bin/beekeeper" download style="color: var(--accent);">Download CLI binary</a> &nbsp;·&nbsp;
+                    <a href="{{ url_for('api_v1.cli_documentation') }}" style="color: var(--accent);">CLI reference →</a>
+                </p>
                 <details>
                     <summary style="cursor: pointer; color: var(--text-secondary); font-size: 0.9rem;">Preview endpoints</summary>
                     <pre class="api-examples" style="margin-top: 0.5rem; font-size: 0.8rem;">| Action         | Method | Endpoint                                          |
