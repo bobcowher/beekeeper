@@ -66,10 +66,14 @@ class DatabaseService:
                         run_id INTEGER NOT NULL,
                         metric_name TEXT NOT NULL,
                         trend TEXT,
+                        recent_trend TEXT,
                         initial_value REAL,
                         final_value REAL,
                         best_value REAL,
                         best_step INTEGER,
+                        peak_value REAL,
+                        peak_step INTEGER,
+                        peak_degraded BOOLEAN DEFAULT 0,
                         improvement_percent REAL,
                         converged BOOLEAN DEFAULT 0,
                         convergence_step INTEGER,
@@ -86,6 +90,18 @@ class DatabaseService:
                 conn.execute(
                     'CREATE INDEX IF NOT EXISTS idx_metric_analyses_run ON metric_analyses(run_id)'
                 )
+
+            # Migrate existing databases: add new columns if missing
+            for col, typedef in [
+                ('recent_trend', 'TEXT'),
+                ('peak_value', 'REAL'),
+                ('peak_step', 'INTEGER'),
+                ('peak_degraded', 'BOOLEAN DEFAULT 0'),
+            ]:
+                try:
+                    conn.execute(f'ALTER TABLE metric_analyses ADD COLUMN {col} {typedef}')
+                except Exception:
+                    pass  # column already exists
 
             conn.commit()
 
@@ -477,18 +493,23 @@ class DatabaseService:
         with self._get_connection() as conn:
             conn.execute(
                 '''INSERT OR REPLACE INTO metric_analyses
-                   (run_id, metric_name, trend, initial_value, final_value, best_value,
-                    best_step, improvement_percent, converged, convergence_step,
+                   (run_id, metric_name, trend, recent_trend, initial_value, final_value,
+                    best_value, best_step, peak_value, peak_step, peak_degraded,
+                    improvement_percent, converged, convergence_step,
                     anomaly_count, anomaly_details, summary, sampled_points, total_points)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (
                     run_id,
                     metric_name,
                     analysis_data.get('trend'),
+                    analysis_data.get('recent_trend'),
                     analysis_data.get('initial_value'),
                     analysis_data.get('final_value'),
                     analysis_data.get('best_value'),
                     analysis_data.get('best_step'),
+                    analysis_data.get('peak_value'),
+                    analysis_data.get('peak_step'),
+                    analysis_data.get('peak_degraded', False),
                     analysis_data.get('improvement_percent'),
                     analysis_data.get('converged', False),
                     analysis_data.get('convergence_step'),
@@ -522,10 +543,14 @@ class DatabaseService:
             for row in rows:
                 result[row['metric_name']] = {
                     'trend': row['trend'],
+                    'recent_trend': row['recent_trend'],
                     'initial_value': row['initial_value'],
                     'final_value': row['final_value'],
                     'best_value': row['best_value'],
                     'best_step': row['best_step'],
+                    'peak_value': row['peak_value'],
+                    'peak_step': row['peak_step'],
+                    'peak_degraded': bool(row['peak_degraded']) if row['peak_degraded'] is not None else False,
                     'improvement_percent': row['improvement_percent'],
                     'converged': bool(row['converged']),
                     'convergence_step': row['convergence_step'],
