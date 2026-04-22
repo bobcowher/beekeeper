@@ -396,7 +396,7 @@ def start_training(projects_dir, name):
     branch = project.get("branch", "main")
     try:
         result = subprocess.run(
-            ["git", "pull", "origin", branch],
+            ["git", "pull", "--ff-only", "origin", branch],
             cwd=workspace_dir,
             capture_output=True, text=True, timeout=60,
         )
