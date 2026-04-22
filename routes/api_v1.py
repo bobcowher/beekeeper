@@ -1621,6 +1621,21 @@ def switch_branch(name):
                 status_code=500
             )
 
+        # Hard-reset to remote — remote is always authoritative
+        reset_result = subprocess.run(
+            ["git", "reset", "--hard", f"origin/{new_branch}"],
+            cwd=workspace_dir,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if reset_result.returncode != 0:
+            return api_response(
+                error_code="RESET_FAILED",
+                error_message=f"Failed to reset to remote: {reset_result.stderr.strip()}",
+                status_code=500
+            )
+
         # Update project.json with new branch
         project.branch = new_branch
         project.save(projects_dir)

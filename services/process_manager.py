@@ -392,20 +392,27 @@ def start_training(projects_dir, name):
 
     workspace_dir = os.path.join(projects_dir, name, "workspace")
 
-    # Pull latest code before running
+    # Sync to remote — remote is always authoritative
     branch = project.get("branch", "main")
     try:
-        result = subprocess.run(
-            ["git", "pull", "--ff-only", "origin", branch],
+        fetch = subprocess.run(
+            ["git", "fetch", "origin"],
             cwd=workspace_dir,
             capture_output=True, text=True, timeout=60,
         )
-        if result.returncode != 0:
-            return {"error": f"Git pull failed: {result.stderr.strip()[-500:]}"}
+        if fetch.returncode != 0:
+            return {"error": f"Git fetch failed: {fetch.stderr.strip()[-500:]}"}
+        reset = subprocess.run(
+            ["git", "reset", "--hard", f"origin/{branch}"],
+            cwd=workspace_dir,
+            capture_output=True, text=True, timeout=30,
+        )
+        if reset.returncode != 0:
+            return {"error": f"Git reset failed: {reset.stderr.strip()[-500:]}"}
     except subprocess.TimeoutExpired:
-        return {"error": "Git pull timed out (60s)"}
+        return {"error": "Git sync timed out (60s)"}
     except Exception as e:
-        return {"error": f"Git pull failed: {e}"}
+        return {"error": f"Git sync failed: {e}"}
 
     run_meta = _collect_run_metadata(workspace_dir, python_bin, branch)
 
