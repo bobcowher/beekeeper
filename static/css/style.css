@@ -476,7 +476,7 @@ label {
     color: var(--success);
 }
 
-.status-pending, .status-cloning, .status-creating_venv, .status-creating_env, .status-installing_deps {
+.status-pending, .status-cloning, .status-creating_venv, .status-creating_env, .status-installing_deps, .status-starting {
     background: rgba(232, 185, 49, 0.15);
     color: var(--accent);
 }

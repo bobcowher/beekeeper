@@ -1,6 +1,10 @@
 """
 Tests for start_training() in process_manager.
-Focuses on the pre-launch sequence: git pull → pip install → subprocess start.
+Focuses on the pre-launch sequence: git sync → pip install → subprocess start.
+
+start_training() is now async: it validates, reserves the slot, and launches
+_execute_training() in a background thread. Tests use _inline_thread() to run
+the background work synchronously so assertions can inspect the final state.
 """
 import json
 import os
@@ -48,6 +52,18 @@ def _ok_run(returncode=0, stderr="", stdout=""):
     return m
 
 
+def _inline_thread(**kwargs):
+    """Thread mock that runs target synchronously when start() is called."""
+    target = kwargs.get("target") or (lambda: None)
+    args = kwargs.get("args", ())
+
+    class _T:
+        def start(self):
+            target(*args)
+
+    return _T()
+
+
 # --- pip install called ---
 
 def test_pip_install_called_with_requirements_file(tmp_path):
@@ -58,7 +74,8 @@ def test_pip_install_called_with_requirements_file(tmp_path):
          patch("services.process_manager.subprocess.run", return_value=_ok_run()) as mock_run, \
          patch("services.process_manager.subprocess.Popen") as mock_popen, \
          patch("services.process_manager._update_project_json"), \
-         patch("services.process_manager.threading.Thread"):
+         patch("services.process_manager._monitor_process"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread):
 
         mock_proc = MagicMock()
         mock_proc.pid = 9999
@@ -79,14 +96,14 @@ def test_pip_install_called_with_requirements_file(tmp_path):
 def test_pip_install_skipped_when_no_requirements_file(tmp_path):
     """If requirements.txt doesn't exist, pip install is silently skipped."""
     projects_dir = _make_project(tmp_path)
-    # Remove the requirements file
     os.remove(os.path.join(projects_dir, "myproject", "workspace", "requirements.txt"))
 
     with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
          patch("services.process_manager.subprocess.run", return_value=_ok_run()) as mock_run, \
          patch("services.process_manager.subprocess.Popen") as mock_popen, \
          patch("services.process_manager._update_project_json"), \
-         patch("services.process_manager.threading.Thread"):
+         patch("services.process_manager._monitor_process"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread):
 
         mock_proc = MagicMock()
         mock_proc.pid = 9999
@@ -102,60 +119,56 @@ def test_pip_install_skipped_when_no_requirements_file(tmp_path):
 # --- pip install failure ---
 
 def test_pip_install_failure_blocks_training(tmp_path):
-    """A non-zero pip exit code must return an error and not launch the process."""
+    """A non-zero pip exit code must not launch the process."""
     projects_dir = _make_project(tmp_path)
 
     def fake_run(cmd, **kwargs):
-        if "pull" in cmd:
-            return _ok_run()
         if "pip" in cmd:
             return _ok_run(returncode=1, stderr="ERROR: Could not find a version that satisfies the requirement fakepkg")
         return _ok_run()
 
     with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
          patch("services.process_manager.subprocess.run", side_effect=fake_run), \
-         patch("services.process_manager.subprocess.Popen") as mock_popen:
+         patch("services.process_manager.subprocess.Popen") as mock_popen, \
+         patch("services.process_manager._update_project_json"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread):
 
-        result = start_training(projects_dir, "myproject")
+        start_training(projects_dir, "myproject")
 
-    assert "error" in result
-    assert "Pip install failed" in result["error"]
     mock_popen.assert_not_called()
 
 
 def test_pip_install_timeout_blocks_training(tmp_path):
-    """A pip install timeout must return an error and not launch the process."""
+    """A pip install timeout must not launch the process."""
     import subprocess as _subprocess
     projects_dir = _make_project(tmp_path)
 
     def fake_run(cmd, **kwargs):
-        if "pull" in cmd:
-            return _ok_run()
         if "pip" in cmd:
             raise _subprocess.TimeoutExpired(cmd, 300)
         return _ok_run()
 
     with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
          patch("services.process_manager.subprocess.run", side_effect=fake_run), \
-         patch("services.process_manager.subprocess.Popen") as mock_popen:
+         patch("services.process_manager.subprocess.Popen") as mock_popen, \
+         patch("services.process_manager._update_project_json"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread):
 
-        result = start_training(projects_dir, "myproject")
+        start_training(projects_dir, "myproject")
 
-    assert "error" in result
-    assert "timed out" in result["error"].lower()
     mock_popen.assert_not_called()
 
 
-# --- pip runs after git pull ---
+# --- pip runs after git sync ---
 
 def test_pip_install_runs_after_git_pull(tmp_path):
-    """pip install must happen after git pull, not before."""
+    """pip install must happen after git sync, not before."""
     projects_dir = _make_project(tmp_path)
     call_order = []
 
     def fake_run(cmd, **kwargs):
-        if "pull" in cmd:
-            call_order.append("git_pull")
+        if "fetch" in cmd or "reset" in cmd:
+            call_order.append("git_sync")
         elif "pip" in cmd:
             call_order.append("pip_install")
         return _ok_run()
@@ -164,7 +177,8 @@ def test_pip_install_runs_after_git_pull(tmp_path):
          patch("services.process_manager.subprocess.run", side_effect=fake_run), \
          patch("services.process_manager.subprocess.Popen") as mock_popen, \
          patch("services.process_manager._update_project_json"), \
-         patch("services.process_manager.threading.Thread"):
+         patch("services.process_manager._monitor_process"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread):
 
         mock_proc = MagicMock()
         mock_proc.pid = 9999
@@ -172,4 +186,6 @@ def test_pip_install_runs_after_git_pull(tmp_path):
 
         start_training(projects_dir, "myproject")
 
-    assert call_order == ["git_pull", "pip_install"]
+    assert call_order[0] == "git_sync"
+    assert "pip_install" in call_order
+    assert call_order.index("git_sync") < call_order.index("pip_install")

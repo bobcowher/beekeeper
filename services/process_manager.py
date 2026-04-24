@@ -367,28 +367,63 @@ def _prune_old_runs(projects_dir: str, project_name: str, keep_last: int = 20):
 
 
 def start_training(projects_dir, name):
-    """Start the training subprocess for a project."""
+    """Validate, reserve the training slot, and launch the pre-launch sequence in background."""
     with _lock:
         if name in _running:
             return {"error": "Training is already running"}
+        # Reserve slot immediately to prevent concurrent double-starts
+        _running[name] = {"process": None, "starting": True}
 
     config_path = os.path.join(projects_dir, name, "project.json")
     if not os.path.isfile(config_path):
+        with _lock:
+            _running.pop(name, None)
         return {"error": "Project not found"}
 
     with open(config_path) as f:
         project = json.load(f)
 
     if project.get("setup_status") != "ready":
+        with _lock:
+            _running.pop(name, None)
         return {"error": "Project setup is not complete"}
 
     python_bin = _resolve_python_binary(projects_dir, project)
     if not python_bin:
+        with _lock:
+            _running.pop(name, None)
         if project.get("env_type") == "conda":
             hint = f"conda env beekeeper-{name}"
         else:
             hint = os.path.join(projects_dir, name, "venv", "bin")
         return {"error": f"Could not find Python binary (checked {hint})"}
+
+    _update_project_json(projects_dir, name, train_status="starting")
+
+    thread = threading.Thread(
+        target=_execute_training,
+        args=(projects_dir, name, project, python_bin),
+        daemon=True,
+    )
+    thread.start()
+
+    return {"status": "starting"}
+
+
+def _execute_training(projects_dir, name, project, python_bin):
+    """Run the full pre-launch sequence and start the training subprocess (runs in background thread)."""
+    log_path = os.path.join(projects_dir, name, "train.log")
+
+    def _abort(msg):
+        log.error("Pre-launch failed for %s: %s", name, msg)
+        try:
+            with open(log_path, "w") as lf:
+                lf.write(f"[beekeeper] Pre-launch failed: {msg}\n")
+        except Exception:
+            pass
+        _update_project_json(projects_dir, name, train_status="stopped")
+        with _lock:
+            _running.pop(name, None)
 
     workspace_dir = os.path.join(projects_dir, name, "workspace")
 
@@ -401,18 +436,18 @@ def start_training(projects_dir, name):
             capture_output=True, text=True, timeout=60,
         )
         if fetch.returncode != 0:
-            return {"error": f"Git fetch failed: {fetch.stderr.strip()[-500:]}"}
+            return _abort(f"Git fetch failed: {fetch.stderr.strip()[-500:]}")
         reset = subprocess.run(
             ["git", "reset", "--hard", f"origin/{branch}"],
             cwd=workspace_dir,
             capture_output=True, text=True, timeout=30,
         )
         if reset.returncode != 0:
-            return {"error": f"Git reset failed: {reset.stderr.strip()[-500:]}"}
+            return _abort(f"Git reset failed: {reset.stderr.strip()[-500:]}")
     except subprocess.TimeoutExpired:
-        return {"error": "Git sync timed out (60s)"}
+        return _abort("Git sync timed out (60s)")
     except Exception as e:
-        return {"error": f"Git sync failed: {e}"}
+        return _abort(f"Git sync failed: {e}")
 
     run_meta = _collect_run_metadata(workspace_dir, python_bin, branch)
 
@@ -442,14 +477,14 @@ def start_training(projects_dir, name):
                 os.unlink(local_path)
                 os.symlink(data_dir_remote, local_path)
         elif os.path.exists(local_path):
-            return {
-                "error": f"'{data_dir_local}' already exists in the repository and is not a symlink. "
-                         f"Remove it from the repo or disable the data directory in project settings."
-            }
+            return _abort(
+                f"'{data_dir_local}' already exists in the repository and is not a symlink. "
+                f"Remove it from the repo or disable the data directory in project settings."
+            )
         elif os.path.isdir(data_dir_remote):
             os.symlink(data_dir_remote, local_path)
         else:
-            return {"error": f"Data directory '{data_dir_remote}' does not exist on this server."}
+            return _abort(f"Data directory '{data_dir_remote}' does not exist on this server.")
 
     # Run setup script if configured and present (in activated environment)
     setup_script = project.get("setup_script", "")
@@ -480,11 +515,11 @@ def start_training(projects_dir, name):
                     capture_output=True, text=True, timeout=300,
                 )
                 if result.returncode != 0:
-                    return {"error": f"Setup script failed: {result.stderr.strip()[-500:]}"}
+                    return _abort(f"Setup script failed: {result.stderr.strip()[-500:]}")
             except subprocess.TimeoutExpired:
-                return {"error": "Setup script timed out (300s)"}
+                return _abort("Setup script timed out (300s)")
             except Exception as e:
-                return {"error": f"Setup script failed: {e}"}
+                return _abort(f"Setup script failed: {e}")
 
     # Install/update dependencies so newly added packages are always present
     req_file = project.get("requirements_file", "requirements.txt")
@@ -496,20 +531,19 @@ def start_training(projects_dir, name):
                 capture_output=True, text=True, timeout=300,
             )
             if result.returncode != 0:
-                return {"error": f"Pip install failed: {result.stderr.strip()[-500:]}"}
+                return _abort(f"Pip install failed: {result.stderr.strip()[-500:]}")
         except subprocess.TimeoutExpired:
-            return {"error": "Pip install timed out (300s)"}
+            return _abort("Pip install timed out (300s)")
         except Exception as e:
-            return {"error": f"Pip install failed: {e}"}
+            return _abort(f"Pip install failed: {e}")
 
     train_file = project.get("train_file", "train.py")
     train_path = os.path.join(workspace_dir, train_file)
 
     if not os.path.isfile(train_path):
-        return {"error": f"Training file not found: {train_file}"}
+        return _abort(f"Training file not found: {train_file}")
 
-    # Open log file — truncate previous run's log on new start
-    log_path = os.path.join(projects_dir, name, "train.log")
+    # Open log file — truncate previous run's log on new start (log_path defined in _abort closure)
     log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
     _write_run_header(log_fd, run_meta, project)
 
@@ -529,7 +563,7 @@ def start_training(projects_dir, name):
         )
     except Exception as e:
         os.close(log_fd)
-        return {"error": f"Failed to start training: {e}"}
+        return _abort(f"Failed to start training: {e}")
 
     # Close our copy of the fd — the child process has its own
     os.close(log_fd)
@@ -613,9 +647,6 @@ def start_training(projects_dir, name):
     )
     thread.start()
 
-    return {"status": "started", "pid": proc.pid, "tb_port": tb_port}
-
-
 def stop_training(projects_dir, name):
     """Stop the training subprocess for a project."""
     with _lock:
@@ -685,6 +716,16 @@ def get_training_status(name):
     with _lock:
         info = _running.get(name)
         if info:
+            if info.get("starting"):
+                return {
+                    "status": "starting",
+                    "pid": None,
+                    "run_id": None,
+                    "started_at": None,
+                    "tb_port": None,
+                    "elapsed": None,
+                    "resources": None,
+                }
             proc = info["process"]
             pid = proc.pid
 

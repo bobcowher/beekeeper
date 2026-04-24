@@ -298,9 +298,9 @@ def training_start(name):
             status_code=400
         )
 
-    # Check if already running
+    # Check if already running or starting
     status = get_training_status(name)
-    if status["status"] == "running":
+    if status["status"] in ("running", "starting"):
         return api_response(
             error_code="ALREADY_RUNNING",
             error_message="Training is already running",
@@ -317,11 +317,10 @@ def training_start(name):
             status_code=400
         )
 
-    return api_response(data={
-        "status": "started",
-        "pid": result.get("pid"),
-        "tb_port": result.get("tb_port"),
-    })
+    return api_response(
+        data={"status": "starting"},
+        status_code=202
+    )
 
 
 @api_v1_bp.route("/projects/<name>/training/stop", methods=["POST"])
