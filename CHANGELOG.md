@@ -4,6 +4,13 @@
 
 ### New Features
 
+**EMA-Smoothed Metric Analysis**
+- `GET /api/v1/projects/{name}/tensorboard/latest?detail=medium` now returns `smoothed_points` — the full training curve with EMA alpha=0.9 smoothing applied (matches TensorBoard's heavy smoothing)
+- Peak detection (`peak_value`, `peak_step`, `peak_reversal_pct`) now uses the EMA-smoothed signal, not raw values — prevents single outlier episodes from masking the true peak
+- Added `smoothed_final_value` field: the EMA value at the end of training (more stable than raw final value)
+- Added `ema_alpha` field so agents know the smoothing factor applied
+- Active training runs: cache is now invalidated on every `/tensorboard/latest` request so agents always see current data (was: cached forever after first parse)
+
 **TensorBoard Log Retention Management**
 - Added `tb_logs_max_runs` setting to project configuration (default: 10, configurable in Project Info)
 - Auto-cleanup of old TensorBoard logs when starting training (keeps N most recent)

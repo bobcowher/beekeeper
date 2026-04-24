@@ -97,6 +97,9 @@ class DatabaseService:
                 ('peak_value', 'REAL'),
                 ('peak_step', 'INTEGER'),
                 ('peak_reversal_pct', 'REAL DEFAULT 0'),
+                ('smoothed_points', 'TEXT'),
+                ('smoothed_final_value', 'REAL'),
+                ('ema_alpha', 'REAL'),
             ]:
                 try:
                     conn.execute(f'ALTER TABLE metric_analyses ADD COLUMN {col} {typedef}')
@@ -496,8 +499,9 @@ class DatabaseService:
                    (run_id, metric_name, trend, recent_trend, initial_value, final_value,
                     best_value, best_step, peak_value, peak_step, peak_reversal_pct,
                     improvement_percent, converged, convergence_step,
-                    anomaly_count, anomaly_details, summary, sampled_points, total_points)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    anomaly_count, anomaly_details, summary, sampled_points, total_points,
+                    smoothed_points, smoothed_final_value, ema_alpha)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (
                     run_id,
                     metric_name,
@@ -518,6 +522,9 @@ class DatabaseService:
                     analysis_data.get('summary'),
                     json.dumps(analysis_data.get('sampled_points', [])),
                     analysis_data.get('total_points'),
+                    json.dumps(analysis_data.get('smoothed_points', [])),
+                    analysis_data.get('smoothed_final_value'),
+                    analysis_data.get('ema_alpha'),
                 )
             )
             conn.commit()
@@ -559,6 +566,9 @@ class DatabaseService:
                     'summary': row['summary'],
                     'sampled_points': json.loads(row['sampled_points']) if row['sampled_points'] else [],
                     'total_points': row['total_points'],
+                    'smoothed_points': json.loads(row['smoothed_points']) if row.get('smoothed_points') else [],
+                    'smoothed_final_value': row['smoothed_final_value'] if row.get('smoothed_final_value') is not None else None,
+                    'ema_alpha': row['ema_alpha'] if row.get('ema_alpha') is not None else None,
                 }
 
             return result

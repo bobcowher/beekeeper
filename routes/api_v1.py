@@ -953,6 +953,10 @@ def get_latest_metrics(name):
 
     run_id = target_run['id']
 
+    # Active runs: always re-parse — TFEvents grow as training progresses
+    if is_active:
+        db.delete_metric_analyses(run_id)
+
     # Get metrics analysis
     projects_dir = current_app.config["PROJECTS_DIR"]
     result = tensorboard_service.get_metric_analysis(

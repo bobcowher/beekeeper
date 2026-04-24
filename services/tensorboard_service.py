@@ -112,6 +112,21 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> dict
         return {'success': False, 'reason': 'unexpected_error', 'error': str(e)}
 
 
+def ema_smooth(values: list, alpha: float = 0.9) -> list:
+    """
+    Exponential moving average smoothing, TensorBoard-style.
+
+    alpha=0.9 means each point retains 90% of the previous smoothed value.
+    Matches TensorBoard's smoothing slider behavior.
+    """
+    if not values:
+        return []
+    smoothed = [values[0]]
+    for v in values[1:]:
+        smoothed.append(alpha * smoothed[-1] + (1 - alpha) * v)
+    return smoothed
+
+
 def analyze_metric(metric_name: str, data: list) -> dict:
     """
     Analyze time series data for a metric.
@@ -128,49 +143,54 @@ def analyze_metric(metric_name: str, data: list) -> dict:
             'trend': 'insufficient_data',
             'total_points': len(data),
             'summary': 'Insufficient data for analysis (need at least 2 points)',
-            'sampled_points': [{'step': d[0], 'value': d[1], 'wall_time': d[2]} for d in data]
+            'sampled_points': [{'step': d[0], 'value': d[1], 'wall_time': d[2]} for d in data],
+            'smoothed_points': [{'step': d[0], 'value': d[1], 'wall_time': d[2]} for d in data],
         }
 
     steps = [d[0] for d in data]
     values = [d[1] for d in data]
 
-    # Basic statistics
+    # EMA-smoothed values (alpha=0.9 matches TensorBoard heavy smoothing)
+    EMA_ALPHA = 0.9
+    smoothed_values = ema_smooth(values, alpha=EMA_ALPHA)
+
+    # Basic statistics (raw)
     initial_value = values[0]
     final_value = values[-1]
-    best_value = min(values) if _is_lower_better(metric_name) else max(values)
+    lower_better = _is_lower_better(metric_name)
+    best_value = min(values) if lower_better else max(values)
     best_step = steps[values.index(best_value)]
 
-    # Improvement percentage
+    # Improvement percentage (raw start → raw end)
     if initial_value != 0:
         improvement_percent = ((final_value - initial_value) / abs(initial_value)) * 100
     else:
         improvement_percent = 0.0
 
-    # Trend detection
+    # Trend detection (uses internal smoothing already)
     trend = detect_trend(values, metric_name)
 
-    # Recent trend: compare last 20% of run vs overall trend
+    # Recent trend: last 20% of run
     recent_n = max(5, len(values) // 5)
     recent_trend = detect_trend(values[-recent_n:], metric_name) if len(values) >= recent_n * 2 else trend
 
-    # Peak degradation: did the metric peak then reverse significantly?
-    # Scheduled metrics (epsilon, lr) intentionally decay — skip peak degradation check.
-    lower_better = _is_lower_better(metric_name)
+    # Peak detection on EMA-smoothed values — avoids one-episode outlier spikes
+    # Scheduled metrics (epsilon, lr) intentionally decay — skip peak reversal.
     is_scheduled = _is_scheduled_metric(metric_name)
-    value_range = max(values) - min(values) if max(values) != min(values) else 1
+    smoothed_range = max(smoothed_values) - min(smoothed_values) if max(smoothed_values) != min(smoothed_values) else 1
+    smoothed_final = smoothed_values[-1]
+
     if lower_better:
-        peak_value = min(values)
-        peak_step = steps[values.index(peak_value)]
-        peak_reversal_pct = 0.0 if is_scheduled else (final_value - peak_value) / value_range * 100
+        peak_value = min(smoothed_values)
+        peak_step = steps[smoothed_values.index(peak_value)]
+        peak_reversal_pct = 0.0 if is_scheduled else (smoothed_final - peak_value) / smoothed_range * 100
     else:
-        peak_value = max(values)
-        peak_step = steps[values.index(peak_value)]
-        peak_reversal_pct = 0.0 if is_scheduled else (peak_value - final_value) / value_range * 100
+        peak_value = max(smoothed_values)
+        peak_step = steps[smoothed_values.index(peak_value)]
+        peak_reversal_pct = 0.0 if is_scheduled else (peak_value - smoothed_final) / smoothed_range * 100
 
-    # Convergence detection
+    # Convergence and anomaly detection
     convergence = detect_convergence(data)
-
-    # Anomaly detection
     anomalies = detect_anomalies(data)
 
     # Generate summary
@@ -179,26 +199,33 @@ def analyze_metric(metric_name: str, data: list) -> dict:
         improvement_percent, convergence, anomalies
     )
 
-    # Smart sampling
+    # Raw sampled points (for debugging / high-detail view)
     sampled_points = smart_sample(data)
+
+    # Smoothed points: EMA applied to full series, then smart-sampled
+    smoothed_data = [(steps[i], smoothed_values[i], data[i][2]) for i in range(len(data))]
+    smoothed_points = smart_sample(smoothed_data)
 
     return {
         'trend': trend,
         'recent_trend': recent_trend,
-        'peak_value': float(peak_value),
+        'peak_value': round(float(peak_value), 4),
         'peak_step': int(peak_step),
         'peak_reversal_pct': round(float(peak_reversal_pct), 1),
         'initial_value': float(initial_value),
         'final_value': float(final_value),
+        'smoothed_final_value': round(float(smoothed_final), 4),
         'best_value': float(best_value),
         'best_step': int(best_step),
         'improvement_percent': float(improvement_percent),
+        'ema_alpha': EMA_ALPHA,
         'converged': convergence['converged'],
         'convergence_step': convergence.get('step'),
         'anomaly_count': len(anomalies),
         'anomalies': anomalies,
         'summary': summary,
         'sampled_points': sampled_points,
+        'smoothed_points': smoothed_points,
         'total_points': len(data)
     }
 
@@ -476,11 +503,13 @@ def get_metric_analysis(
             'recent_trend': analysis.get('recent_trend'),
             'initial_value': analysis['initial_value'],
             'final_value': analysis['final_value'],
+            'smoothed_final_value': analysis.get('smoothed_final_value'),
             'best_value': analysis['best_value'],
             'best_step': analysis['best_step'],
             'peak_value': analysis.get('peak_value'),
             'peak_step': analysis.get('peak_step'),
             'peak_reversal_pct': analysis.get('peak_reversal_pct', 0.0),
+            'ema_alpha': analysis.get('ema_alpha'),
             'improvement_percent': analysis['improvement_percent'],
             'converged': analysis['converged'],
             'convergence_step': analysis['convergence_step'],
@@ -490,15 +519,10 @@ def get_metric_analysis(
             'total_points': analysis['total_points']
         }
 
-        # Add sampled points for medium detail
+        # Add smoothed + raw sampled points for medium/high detail
         if detail in ['medium', 'high']:
+            metric_data['smoothed_points'] = analysis.get('smoothed_points', [])
             metric_data['sampled_points'] = analysis['sampled_points']
-
-        # For high detail, include full raw data
-        if detail == 'high':
-            # Would need to re-parse from TFEvents - skip for now since it's expensive
-            # This is intentionally left as sampled_points for performance
-            pass
 
         result[metric_name] = metric_data
 
