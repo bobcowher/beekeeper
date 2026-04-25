@@ -1173,15 +1173,15 @@ def get_global_agent_instructions():
     else:
         project_table = "(no projects found)"
 
-    content = f"""# Beekeeper — Global Agent Instructions
+    content = f"""# Beekeeper — Agent Instructions
+
+**Use the CLI for everything. Do not call the REST API directly unless a task is explicitly listed under "CLI Gaps" at the bottom of this file.**
 
 Base URL: http://{host}
 
 ## What is Beekeeper?
 
-Beekeeper is an ML training manager. It handles project setup (git clone, venv/conda,
-pip install), training controls (start/stop), log streaming, and TensorBoard integration.
-You interact with it via the CLI or REST API to monitor and manage training runs.
+Beekeeper is an ML training manager — git clone, venv setup, training controls, log streaming, and TensorBoard. You manage it exclusively through the `beekeeper` CLI.
 
 ## Step 1 — Install the CLI
 
@@ -1213,97 +1213,93 @@ Current projects on this instance:
 {project_table}
 ```
 
-List via API:
+For more detail on any project:
 ```bash
-curl http://{host}/api/v1/projects
-```
-
-Check if anything is busy (safe to restart?):
-```bash
-curl http://{host}/api/v1/busy
-```
-
-System stats (GPU, CPU, RAM):
-```bash
-curl http://{host}/api/v1/stats
+beekeeper projects info <name>
 ```
 
 ## Step 4 — Get Project-Specific Instructions
 
-Once you know which project to work with, fetch its full instructions:
+Before working with a project, run analyze to get context and current state:
 
 ```bash
-# Via CLI
-BEEKEEPER_HOST="http://{host}" beekeeper run analyze <project-name>
-
-# Download project instructions as markdown (add to your context/CLAUDE.md)
-curl -o BEEKEEPER_<project-name>.md http://{host}/api/v1/projects/<project-name>/agent/instructions
+beekeeper run analyze <project-name>
 ```
 
-Project instructions cover: training controls, log analysis, TensorBoard metrics,
-branch switching, file browsing, and a complete endpoint reference for that project.
+This returns a synthesized view of metrics, trends, and training status. Read it before taking any action.
 
-## Key Workflows
+## CLI Reference
 
-### Start a project from scratch
 ```
-POST /api/v1/projects                     # create project
-GET  /api/v1/projects/<name>              # poll setup_status until "ready"
-POST /api/v1/projects/<name>/training/start
-```
-
-### Resume after setup failure
-```
-POST /api/v1/projects/<name>/setup/retry  # 202 async — poll setup_status
-```
-
-### Check training progress
-```
-GET /api/v1/projects/<name>/tensorboard/latest?detail=medium   # EMA-smoothed metrics
-GET /api/v1/projects/<name>/logs/analysis                      # episode trends
-GET /api/v1/projects/<name>/logs?tail=50                       # raw log tail
+beekeeper projects list              List all projects and status
+beekeeper projects info <name>       Detailed project info
+beekeeper projects retry <name>      Retry failed setup (polls until done)
+beekeeper projects delete <name>     Delete a project and all its data
+beekeeper training start <name>      Start training
+beekeeper training stop <name>       Stop training
+beekeeper training status <name>     Current training status
+beekeeper logs get <name> [tail]     Fetch log output (default: last 100 lines)
+beekeeper run analyze <name>         Synthesized metrics + trend analysis
 ```
 
-### Clean up a broken project
+## Common Workflows
+
+### Check what's running
+```bash
+beekeeper projects list
+beekeeper training status <name>
 ```
-POST /api/v1/projects/<name>/training/stop   # stop if running
-DELETE /api/v1/projects/<name>               # delete project and all data
+
+### Analyze a training run
+```bash
+beekeeper run analyze <name>
 ```
 
-## API Reference
-
-Full interactive docs: http://{host}/api/v1/docs
-CLI reference: http://{host}/api/v1/cli
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/projects` | GET | List all projects |
-| `/api/v1/projects` | POST | Create a project |
-| `/api/v1/projects/<name>` | GET | Project detail + training status |
-| `/api/v1/projects/<name>` | DELETE | Delete project |
-| `/api/v1/projects/<name>/setup/retry` | POST | Retry failed setup |
-| `/api/v1/projects/<name>/training/start` | POST | Start training |
-| `/api/v1/projects/<name>/training/stop` | POST | Stop training |
-| `/api/v1/projects/<name>/training/status` | GET | Training status |
-| `/api/v1/projects/<name>/tensorboard/latest` | GET | EMA-smoothed metric analysis |
-| `/api/v1/projects/<name>/logs` | GET | Log content (?tail=N) |
-| `/api/v1/projects/<name>/logs/analysis` | GET | Episode trend analysis |
-| `/api/v1/projects/<name>/branches` | GET | List branches |
-| `/api/v1/projects/<name>/branch` | POST | Switch branch |
-| `/api/v1/projects/<name>/runs` | GET | Run history |
-| `/api/v1/projects/<name>/files` | GET | Browse workspace files |
-| `/api/v1/busy` | GET | Check if any training is running |
-| `/api/v1/stats` | GET | System stats (CPU/RAM/GPU) |
-| `/api/v1/agent/instructions` | GET | This file |
-| `/api/v1/projects/<name>/agent/instructions` | GET | Project-specific instructions |
-
-## Response Format
-
-All endpoints return:
-```json
-{{"success": true, "data": {{...}}}}
-{{"success": false, "error": {{"code": "...", "message": "..."}}}}
+### Start / stop training
+```bash
+beekeeper training start <name>
+beekeeper training stop <name>
 ```
+
+### Inspect logs
+```bash
+beekeeper logs get <name> 100
+```
+
+### Retry a failed setup
+```bash
+beekeeper projects retry <name>
+# polls automatically until setup completes or fails
+```
+
+### Remove a project
+```bash
+beekeeper projects delete <name>
+```
+
+## CLI Gaps
+
+These tasks have no CLI command yet. Use curl only for these:
+
+```bash
+# Check if any training is running (before starting something new)
+curl http://{host}/api/v1/busy
+
+# System stats (GPU util, VRAM, CPU, RAM)
+curl http://{host}/api/v1/stats
+
+# Switch branch (check for uncommitted changes first)
+curl -X POST http://{host}/api/v1/projects/<name>/branch \\
+  -H "Content-Type: application/json" \\
+  -d '{{"branch": "<branch-name>"}}'
+
+# Create a new project
+curl -X POST http://{host}/api/v1/projects \\
+  -H "Content-Type: application/json" \\
+  -d '{{"name":"<name>","git_url":"<url>","branch":"main","python_version":"3.10","train_file":"train.py","env_type":"venv"}}'
+```
+
+If auth is enabled, add `-H "Authorization: Bearer $BEEKEEPER_API_KEY"` to all curl calls.
 """
 
     return Response(
