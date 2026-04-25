@@ -454,6 +454,11 @@ def get_metric_analysis(
     # Check cache
     cached = db.get_metric_analyses(run_id, metric_filter)
 
+    # Evict stale cache entries that predate the smoothed_points feature
+    if cached and not any(v.get('ema_alpha') for v in cached.values()):
+        db.delete_metric_analyses(run_id)
+        cached = None
+
     # If not cached, try to parse
     if not cached:
         result = parse_run_metrics(projects_dir, project_name, run_id)
