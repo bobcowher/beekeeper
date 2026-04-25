@@ -652,6 +652,12 @@ def stop_training(projects_dir, name):
     with _lock:
         info = _running.get(name)
         if not info:
+            config_path = os.path.join(projects_dir, name, "project.json")
+            project = Project.load(config_path)
+            if project and project.train_status == 'running':
+                project.train_status = 'stopped'
+                project.save(projects_dir)
+                return {"stopped": True}
             return {"error": "Training is not running"}
         proc = info["process"]
 
