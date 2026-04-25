@@ -89,6 +89,16 @@ def detail(name):
 
     from routes.api_v1 import CLI_VERSION, CLI_RELEASE_BASE
     training = get_training_status(name)
+
+    # Reconcile stale state: server restarted, _running cleared, but JSON still says 'running'
+    if training['status'] == 'idle' and project.get('train_status') == 'running':
+        projects_dir = current_app.config["PROJECTS_DIR"]
+        p = Project.load(config_path)
+        if p:
+            p.train_status = 'stopped'
+            p.save(projects_dir)
+        project['train_status'] = 'stopped'
+
     return render_template("project.html", project=project, training=training,
                            cli_version=CLI_VERSION, cli_release_base=CLI_RELEASE_BASE)
 

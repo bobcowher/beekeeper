@@ -83,11 +83,6 @@
             <span class="status-badge status-running">Starting...</span>
         </div>
         <button class="btn btn-secondary" disabled>Starting...</button>
-        {% elif project.get('train_status') == 'running' %}
-        <div class="training-info">
-            <span class="status-badge status-running">Running</span>
-        </div>
-        <button class="btn btn-danger" id="btn-stop">Stop Training</button>
         {% else %}
         <div class="training-info">
             <span class="status-badge status-{{ project.get('train_status', 'idle') }}">
