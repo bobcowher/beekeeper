@@ -1128,6 +1128,193 @@ def cli_documentation():
 # Agent Instructions
 # ---------------------------------------------------------------------------
 
+@api_v1_bp.route("/agent/instructions")
+@api_key_required
+def get_global_agent_instructions():
+    """
+    Global agent instructions — orientation for an agent that doesn't yet know
+    which project to work with. Lists all projects, explains how to install
+    the CLI, and links to project-specific instructions.
+
+    Intended to be fetched once at the start of a session and added to context.
+    """
+    host = request.host
+
+    # Fetch live project list to embed current state
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    projects = []
+    if os.path.isdir(projects_dir):
+        for pname in sorted(os.listdir(projects_dir)):
+            config_path = os.path.join(projects_dir, pname, "project.json")
+            if os.path.isfile(config_path):
+                try:
+                    p = Project.load(config_path)
+                    status = get_training_status(pname)
+                    projects.append({
+                        "name": p.name,
+                        "branch": p.branch,
+                        "setup_status": p.setup_status,
+                        "train_status": status["status"],
+                        "pinned": p.pinned,
+                        "last_run_at": p.last_run_at,
+                    })
+                except Exception:
+                    continue
+
+    # Build project table
+    if projects:
+        project_lines = []
+        for p in projects:
+            indicator = "▶" if p["train_status"] == "running" else " "
+            project_lines.append(
+                f"{indicator} {p['name']:<30} setup={p['setup_status']:<8} train={p['train_status']:<10} branch={p['branch']}"
+            )
+        project_table = "\n".join(project_lines)
+    else:
+        project_table = "(no projects found)"
+
+    content = f"""# Beekeeper — Global Agent Instructions
+
+Base URL: http://{host}
+
+## What is Beekeeper?
+
+Beekeeper is an ML training manager. It handles project setup (git clone, venv/conda,
+pip install), training controls (start/stop), log streaming, and TensorBoard integration.
+You interact with it via the CLI or REST API to monitor and manage training runs.
+
+## Step 1 — Install the CLI
+
+```bash
+# Check if already installed
+beekeeper --help
+
+# Install if not present (Linux)
+curl -L -o /usr/local/bin/beekeeper {CLI_RELEASE_BASE}/v{CLI_VERSION}/beekeeper && chmod +x /usr/local/bin/beekeeper
+
+# Windows
+curl -L -o beekeeper.exe {CLI_RELEASE_BASE}/v{CLI_VERSION}/beekeeper.exe
+```
+
+CLI version: {CLI_VERSION}
+
+## Step 2 — Configure
+
+```bash
+export BEEKEEPER_HOST="http://{host}"
+export BEEKEEPER_API_KEY="your-api-key"   # omit if auth is disabled
+```
+
+## Step 3 — Orient Yourself
+
+Current projects on this instance:
+
+```
+{project_table}
+```
+
+List via API:
+```bash
+curl http://{host}/api/v1/projects
+```
+
+Check if anything is busy (safe to restart?):
+```bash
+curl http://{host}/api/v1/busy
+```
+
+System stats (GPU, CPU, RAM):
+```bash
+curl http://{host}/api/v1/stats
+```
+
+## Step 4 — Get Project-Specific Instructions
+
+Once you know which project to work with, fetch its full instructions:
+
+```bash
+# Via CLI
+BEEKEEPER_HOST="http://{host}" beekeeper run analyze <project-name>
+
+# Download project instructions as markdown (add to your context/CLAUDE.md)
+curl -o BEEKEEPER_<project-name>.md http://{host}/api/v1/projects/<project-name>/agent/instructions
+```
+
+Project instructions cover: training controls, log analysis, TensorBoard metrics,
+branch switching, file browsing, and a complete endpoint reference for that project.
+
+## Key Workflows
+
+### Start a project from scratch
+```
+POST /api/v1/projects                     # create project
+GET  /api/v1/projects/<name>              # poll setup_status until "ready"
+POST /api/v1/projects/<name>/training/start
+```
+
+### Resume after setup failure
+```
+POST /api/v1/projects/<name>/setup/retry  # 202 async — poll setup_status
+```
+
+### Check training progress
+```
+GET /api/v1/projects/<name>/tensorboard/latest?detail=medium   # EMA-smoothed metrics
+GET /api/v1/projects/<name>/logs/analysis                      # episode trends
+GET /api/v1/projects/<name>/logs?tail=50                       # raw log tail
+```
+
+### Clean up a broken project
+```
+POST /api/v1/projects/<name>/training/stop   # stop if running
+DELETE /api/v1/projects/<name>               # delete project and all data
+```
+
+## API Reference
+
+Full interactive docs: http://{host}/api/v1/docs
+CLI reference: http://{host}/api/v1/cli
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/projects` | GET | List all projects |
+| `/api/v1/projects` | POST | Create a project |
+| `/api/v1/projects/<name>` | GET | Project detail + training status |
+| `/api/v1/projects/<name>` | DELETE | Delete project |
+| `/api/v1/projects/<name>/setup/retry` | POST | Retry failed setup |
+| `/api/v1/projects/<name>/training/start` | POST | Start training |
+| `/api/v1/projects/<name>/training/stop` | POST | Stop training |
+| `/api/v1/projects/<name>/training/status` | GET | Training status |
+| `/api/v1/projects/<name>/tensorboard/latest` | GET | EMA-smoothed metric analysis |
+| `/api/v1/projects/<name>/logs` | GET | Log content (?tail=N) |
+| `/api/v1/projects/<name>/logs/analysis` | GET | Episode trend analysis |
+| `/api/v1/projects/<name>/branches` | GET | List branches |
+| `/api/v1/projects/<name>/branch` | POST | Switch branch |
+| `/api/v1/projects/<name>/runs` | GET | Run history |
+| `/api/v1/projects/<name>/files` | GET | Browse workspace files |
+| `/api/v1/busy` | GET | Check if any training is running |
+| `/api/v1/stats` | GET | System stats (CPU/RAM/GPU) |
+| `/api/v1/agent/instructions` | GET | This file |
+| `/api/v1/projects/<name>/agent/instructions` | GET | Project-specific instructions |
+
+## Response Format
+
+All endpoints return:
+```json
+{{"success": true, "data": {{...}}}}
+{{"success": false, "error": {{"code": "...", "message": "..."}}}}
+```
+"""
+
+    return Response(
+        content,
+        mimetype="text/markdown",
+        headers={
+            "Content-Disposition": "attachment; filename=BEEKEEPER.md"
+        }
+    )
+
+
 @api_v1_bp.route("/projects/<name>/agent/instructions")
 @api_key_required
 def get_agent_instructions(name):
