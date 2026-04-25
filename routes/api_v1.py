@@ -284,6 +284,60 @@ def clone_project(name):
     )
 
 
+@api_v1_bp.route("/projects/<name>/setup/retry", methods=["POST"])
+@api_key_required
+def retry_project_setup(name):
+    """
+    Retry setup for a project that failed.
+
+    Safe to call when setup_status is 'error'. Skips steps already completed
+    (clone if workspace/ exists, env creation if venv/conda env exists).
+    Runs asynchronously — poll GET /projects/<name> for setup_status.
+    """
+    project = load_project(name)
+
+    if project.setup_status == "ready":
+        return api_response(
+            error_code="ALREADY_READY",
+            error_message="Project setup is already complete",
+            status_code=409
+        )
+
+    from services.project_service import retry_setup
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    retry_setup(projects_dir, name)
+
+    return api_response(data={"status": "retrying"}, status_code=202)
+
+
+@api_v1_bp.route("/projects/<name>", methods=["DELETE"])
+@api_key_required
+def delete_project_api(name):
+    """
+    Delete a project and all its data.
+
+    Stops TensorBoard if running. Cannot delete while training is running —
+    stop training first.
+    """
+    load_project(name)
+
+    status = get_training_status(name)
+    if status["status"] == "running":
+        return api_response(
+            error_code="TRAINING_RUNNING",
+            error_message="Cannot delete project while training is running — stop training first",
+            status_code=409
+        )
+
+    from services.process_manager import stop_tensorboard
+    from services.project_service import delete_project
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    stop_tensorboard(name)
+    delete_project(projects_dir, name)
+
+    return api_response(data={"deleted": name})
+
+
 # ---------------------------------------------------------------------------
 # Training
 # ---------------------------------------------------------------------------
@@ -1421,6 +1475,23 @@ GET /api/v1/projects/{name}/runs
 GET /api/v1/projects/{name}/runs/<run_id>
 GET /api/v1/projects/{name}/runs/<run_id>/metrics
 ```
+
+### Project Setup & Lifecycle
+
+**Retry Failed Setup**
+```
+POST /api/v1/projects/{name}/setup/retry
+Response: {{"success": true, "data": {{"status": "retrying"}}}}  (202 Accepted)
+```
+Call when `setup_status` is `error`. Skips completed steps (won't re-clone if workspace exists).
+Poll `GET /projects/{name}` for `setup_status` until it becomes `ready` or `error` again.
+
+**Delete Project**
+```
+DELETE /api/v1/projects/{name}
+Response: {{"success": true, "data": {{"deleted": "{name}"}}}}
+```
+Deletes project and all data. Stop training first — returns 409 if training is running.
 
 ### Branch Management
 

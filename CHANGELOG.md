@@ -4,6 +4,11 @@
 
 ### New Features
 
+**Setup Retry & Delete endpoints for AI agents**
+- `POST /api/v1/projects/{name}/setup/retry` — retry failed project setup; skips completed steps; returns 202, poll for `setup_status`
+- `DELETE /api/v1/projects/{name}` — delete project and all data; guards against deletion while training is running
+- Both endpoints documented in agent instructions (`/agent/instructions`)
+
 **CLI served from GitHub Releases**
 - CLI binary removed from beekeeper git repo (was 3MB ELF committed directly)
 - `CLI_VERSION` and `CLI_RELEASE_BASE` constants in `api_v1.py` control which release agents download
