@@ -566,9 +566,9 @@ class DatabaseService:
                     'summary': row['summary'],
                     'sampled_points': json.loads(row['sampled_points']) if row['sampled_points'] else [],
                     'total_points': row['total_points'],
-                    'smoothed_points': json.loads(row['smoothed_points']) if row.get('smoothed_points') else [],
-                    'smoothed_final_value': row['smoothed_final_value'] if row.get('smoothed_final_value') is not None else None,
-                    'ema_alpha': row['ema_alpha'] if row.get('ema_alpha') is not None else None,
+                    'smoothed_points': json.loads(row['smoothed_points']) if 'smoothed_points' in row.keys() and row['smoothed_points'] else [],
+                    'smoothed_final_value': row['smoothed_final_value'] if 'smoothed_final_value' in row.keys() and row['smoothed_final_value'] is not None else None,
+                    'ema_alpha': row['ema_alpha'] if 'ema_alpha' in row.keys() and row['ema_alpha'] is not None else None,
                 }
 
             return result
