@@ -23,7 +23,7 @@ from routes.files import _safe_path, _fmt_size, _zip_directory
 
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
-CLI_VERSION = "1.0.2"
+CLI_VERSION = "1.1.0"
 CLI_RELEASE_BASE = "https://github.com/bobcowher/beekeeper-cli/releases/download"
 
 
@@ -1175,21 +1175,24 @@ def get_global_agent_instructions():
 
     content = f"""# Beekeeper — Agent Instructions
 
-**Use the CLI for everything. Do not call the REST API directly unless a task is explicitly listed under "CLI Gaps" at the bottom of this file.**
+**Use the `beekeeper` CLI for all operations. Do not call the REST API directly.**
 
 Base URL: http://{host}
 
 ## What is Beekeeper?
 
-Beekeeper is an ML training manager — git clone, venv setup, training controls, log streaming, and TensorBoard. You manage it exclusively through the `beekeeper` CLI.
+Beekeeper is an ML training manager — git clone, venv setup, training controls, log streaming, and TensorBoard. You manage it through the `beekeeper` CLI.
 
-## Step 1 — Install the CLI
+## Step 1 — Verify the CLI is installed
 
 ```bash
-# Check if already installed
 beekeeper --help
+```
 
-# Install if not present (Linux)
+If this prints usage info, skip to Step 2. If you get "command not found", **stop and tell the user** the CLI needs to be installed. Do not install it yourself. Give them this command to run:
+
+```bash
+# Linux
 curl -L -o /usr/local/bin/beekeeper {CLI_RELEASE_BASE}/v{CLI_VERSION}/beekeeper && chmod +x /usr/local/bin/beekeeper
 
 # Windows
@@ -1213,58 +1216,96 @@ Current projects on this instance:
 {project_table}
 ```
 
+If the list is empty, see "Starting from Scratch" below.
+
 For more detail on any project:
 ```bash
 beekeeper projects info <name>
 ```
 
-## Step 4 — Get Project-Specific Instructions
+## Step 4 — Load Project Context
 
-Before working with a project, run analyze to get context and current state:
+Before working with a project, fetch its instructions and run an analysis:
 
 ```bash
-beekeeper run analyze <project-name>
+beekeeper projects instructions <name>   # full project context and endpoint reference
+beekeeper run analyze <name>             # synthesized metrics + trend analysis
 ```
 
-This returns a synthesized view of metrics, trends, and training status. Read it before taking any action.
+Read both before taking any action.
 
 ## CLI Reference
 
 ```
-beekeeper projects list              List all projects and status
-beekeeper projects info <name>       Detailed project info
-beekeeper projects retry <name>      Retry failed setup (polls until done)
-beekeeper projects delete <name>     Delete a project and all its data
-beekeeper training start <name>      Start training
-beekeeper training stop <name>       Stop training
-beekeeper training status <name>     Current training status
-beekeeper logs get <name> [tail]     Fetch log output (default: last 100 lines)
-beekeeper run analyze <name>         Synthesized metrics + trend analysis
+beekeeper projects list                         List all projects and status
+beekeeper projects info <name>                  Detailed project info
+beekeeper projects create <name> <git_url>      Create a new project
+                       [branch] [python]        Optional: branch (default: main), python version
+                       [train_file] [env_type]  Optional: train file, env type (venv|conda)
+beekeeper projects instructions <name>          Fetch project-specific agent instructions
+beekeeper projects retry <name>                 Retry failed setup (polls until done)
+beekeeper projects delete <name>                Delete a project and all its data
+beekeeper training start <name>                 Start training
+beekeeper training stop <name>                  Stop training
+beekeeper training status <name>                Current training status
+beekeeper logs get <name> [tail]                Fetch log output (default: last 100 lines)
+beekeeper run analyze <name>                    Synthesized metrics + trend analysis
+beekeeper branch list <name>                    List available branches
+beekeeper branch switch <name> <branch>         Switch to a different branch
+beekeeper stats                                 System stats (GPU, CPU, RAM)
+beekeeper busy                                  Check if any training is running (exit 1 if busy)
 ```
 
 ## Common Workflows
 
-### Check what's running
+### Check system state before starting work
 ```bash
-beekeeper projects list
-beekeeper training status <name>
+beekeeper busy           # is anything running? (exit 1 = busy, exit 0 = idle)
+beekeeper stats          # GPU util, VRAM, CPU, RAM
+beekeeper projects list  # all projects and their status
 ```
 
-### Analyze a training run
+### Load context for a project
 ```bash
+beekeeper projects instructions <name>
 beekeeper run analyze <name>
+```
+
+### Analyze and monitor training
+```bash
+beekeeper training status <name>
+beekeeper run analyze <name>
+beekeeper logs get <name> 100
 ```
 
 ### Start / stop training
 ```bash
+beekeeper busy                        # confirm nothing else is running first
 beekeeper training start <name>
 beekeeper training stop <name>
 ```
 
-### Inspect logs
+### Switch branches
 ```bash
-beekeeper logs get <name> 100
+beekeeper branch list <name>          # see what's available
+beekeeper branch switch <name> <branch>
 ```
+
+### Starting from Scratch
+
+If there are no projects, ask the user for the details you need, then:
+
+```bash
+beekeeper projects create <name> <git_url>
+# Setup runs automatically in background. Poll until ready:
+beekeeper projects info <name>        # repeat until setup_status=ready
+# Or use retry which polls for you:
+beekeeper projects retry <name>
+# Then start training:
+beekeeper training start <name>
+```
+
+Minimum required: `name` and `git_url`. Defaults: branch=main, python=3.12, train_file=train.py, env_type=venv.
 
 ### Retry a failed setup
 ```bash
@@ -1276,30 +1317,6 @@ beekeeper projects retry <name>
 ```bash
 beekeeper projects delete <name>
 ```
-
-## CLI Gaps
-
-These tasks have no CLI command yet. Use curl only for these:
-
-```bash
-# Check if any training is running (before starting something new)
-curl http://{host}/api/v1/busy
-
-# System stats (GPU util, VRAM, CPU, RAM)
-curl http://{host}/api/v1/stats
-
-# Switch branch (check for uncommitted changes first)
-curl -X POST http://{host}/api/v1/projects/<name>/branch \\
-  -H "Content-Type: application/json" \\
-  -d '{{"branch": "<branch-name>"}}'
-
-# Create a new project
-curl -X POST http://{host}/api/v1/projects \\
-  -H "Content-Type: application/json" \\
-  -d '{{"name":"<name>","git_url":"<url>","branch":"main","python_version":"3.10","train_file":"train.py","env_type":"venv"}}'
-```
-
-If auth is enabled, add `-H "Authorization: Bearer $BEEKEEPER_API_KEY"` to all curl calls.
 """
 
     return Response(
@@ -1326,51 +1343,35 @@ def get_agent_instructions(name):
 
     content = f"""# Beekeeper: {name}
 
-## Documentation Resources
+**Use the `beekeeper` CLI for all operations.**
 
-**Project-Specific Instructions (this file):**
+Base URL: http://{host}
+
+## Step 1 — Verify CLI is installed
+
 ```bash
-curl -o BEEKEEPER_{name}.md http://{host}/api/v1/projects/{name}/agent/instructions
+beekeeper --help
 ```
 
-**Complete API Reference:**
-For comprehensive documentation covering ALL Beekeeper endpoints (including project creation, cloning, and other features), visit:
+If you get "command not found", **stop and tell the user** the CLI needs to be installed. Do not install it yourself. Installation command (for user to run):
+
+```bash
+curl -L -o /usr/local/bin/beekeeper {CLI_RELEASE_BASE}/v{CLI_VERSION}/beekeeper && chmod +x /usr/local/bin/beekeeper
 ```
-http://{host}/api/v1/docs
+
+## Step 2 — Configure
+
+```bash
+export BEEKEEPER_HOST="http://{host}"
+export BEEKEEPER_API_KEY="your-api-key"   # omit if auth is disabled
 ```
 
-**DO NOT use local file operations (find, grep, cat) to locate or read documentation.**
-Always fetch it fresh from the API endpoints above. This ensures you have the most up-to-date
-information and avoids confusion with outdated local copies.
+## Step 3 — Get current state
 
----
-
-> **IMPORTANT: USE THE BEEKEEPER CLI FIRST**
-> The `beekeeper` CLI provides a synthesized view of training progress in one command.
->
-> **Step 1 — Check if already installed:**
-> ```bash
-> beekeeper --help
-> ```
-> If this prints usage info, skip to Step 3. If you get "command not found", continue to Step 2.
->
-> **Step 2 — Install to PATH (only if not installed):**
-> ```bash
-> curl -L -o /usr/local/bin/beekeeper {CLI_RELEASE_BASE}/v{CLI_VERSION}/beekeeper && chmod +x /usr/local/bin/beekeeper
-> ```
-> This installs `beekeeper` as a global utility. Always invoke it as `beekeeper`, never `./beekeeper`.
->
-> **Step 3 — Run analysis:**
-> ```bash
-> BEEKEEPER_HOST="http://{host}" beekeeper run analyze {name}
-> ```
->
-> Full CLI reference: http://{host}/api/v1/cli
->
-> **Fallback to raw API:**
-> If the CLI is unavailable, use the endpoints below.
-
----
+```bash
+beekeeper training status {name}
+beekeeper run analyze {name}
+```
 
 ## Before Your First Analysis — Ask This Once
 
@@ -1380,122 +1381,63 @@ Before analyzing training for the first time, ask the user:
 > and is higher or lower better? For example: `Train/episode_reward` (higher is better),
 > or `val_loss` (lower is better)."
 
-Then **remember the answer** in your memory or notes so you don't ask again.
-This one piece of context determines what counts as a good run vs. a bad one —
-everything else (losses, schedules, auxiliary metrics) exists to explain *why*
-the primary metric looks the way it does.
-
-If the user has already told you, skip this and use what you know.
+Remember the answer so you don't ask again. This determines what counts as a good run —
+everything else explains *why* the primary metric looks the way it does.
 
 ---
 
-Base URL: http://{host}
-
-## Quick Start (Raw API)
+## CLI Commands for This Project
 
 ```bash
-# Check if training is running
-curl http://{host}/api/v1/projects/{name}/training/status
-
-# Get training progress and trends (Synthesized View)
-curl http://{host}/api/v1/projects/{name}/tensorboard/latest
-
-# Get recent log output
-curl "http://{host}/api/v1/projects/{name}/logs?tail=50"
+beekeeper training status {name}         Current training status
+beekeeper training start {name}          Start training
+beekeeper training stop {name}           Stop training
+beekeeper run analyze {name}             Synthesized metrics + trend analysis
+beekeeper logs get {name} [tail]         Fetch log output (default: 100 lines)
+beekeeper branch list {name}             List available branches
+beekeeper branch switch {name} <branch>  Switch branch (training must be stopped)
+beekeeper projects info {name}           Project config details
+beekeeper stats                          System stats (GPU, CPU, RAM)
+beekeeper busy                           Check if any training is running
 ```
 
-## Checking Training Progress
+## Workflows
 
-**IMPORTANT: Use BOTH endpoints for complete analysis!**
-
-1. **Get TensorBoard metrics** (works for both active and completed runs):
-```
-GET /api/v1/projects/{name}/tensorboard/latest
-```
-Returns: Full metric analysis (loss curves, trends, convergence, anomalies) for all TensorBoard metrics.
-
-2. **Get log-based analysis** (works when TensorBoard data isn't flushed yet):
-```
-GET /api/v1/projects/{name}/logs/analysis
-```
-Returns: Episode-based trends from log parsing (reward, epsilon, steps).
-
-**Why use both?**
-- TensorBoard provides rich metrics (multiple loss curves, world model performance, etc.)
-- Log analysis provides episode-level data even when TensorBoard hasn't flushed yet
-- If TensorBoard returns an error about unflushed data, log analysis still works
-
-**Recommended workflow:**
-1. Try `/tensorboard/latest` first - it has the most complete data
-2. If it fails (no data, not flushed), fall back to `/logs/analysis`
-3. For active runs, consider using both to get different perspectives
-
-## Before Starting or Stopping
-
-Always check status first:
-```
-GET /api/v1/projects/{name}/training/status
+### Analyze a running or completed training run
+```bash
+beekeeper run analyze {name}     # TensorBoard metrics + episode trends combined
+beekeeper logs get {name} 100    # raw log output for errors or debug messages
 ```
 
-- Before starting: verify status is `idle`
-- Before stopping: verify status is `running`
+`run analyze` uses both TensorBoard metrics and log-based episode analysis. If TensorBoard data isn't flushed yet, the log-based section still works.
 
-## Terminology
-
-When asked to "check logs", "look at tensorboard", "see how training is going", or "check progress":
-- Use `/tensorboard/latest` for **structured metric analysis** (loss curves, convergence, trends, anomalies)
-- Use `/logs/analysis` for **episode-based trends** (rewards, epsilon decay) - works even when TB isn't flushed
-- Use `/logs?tail=N` for **raw training output** (print statements, errors, warnings, debugging)
-
-**For a complete picture, use all three.** Each provides different information.
-
-## Quick Reference
-
-| Action | CLI Command | API Endpoint |
-|--------|-------------|--------------|
-| **Analyze Run** | `beekeeper run analyze {name}` | `GET /tensorboard/latest` |
-| Check status | `beekeeper training status {name}` | `GET /training/status` |
-| Get logs | `beekeeper logs get {name}` | `GET /logs?tail=100` |
-| Start training | `beekeeper training start {name}` | `POST /training/start` |
-| Stop training | `beekeeper training stop {name}` | `POST /training/stop` |
-| List files | (use `ls` in workspace) | `GET /files` |
-| Download file | (use `cp` in workspace) | `GET /files/<path>` |
-| System stats | (API only) | `GET /api/v1/stats` |
-
-## Response Format
-
-All endpoints return JSON:
-```json
-{{"success": true, "data": {{...}}}}
-{{"success": false, "error": {{"code": "...", "message": "..."}}}}
+### Start training
+```bash
+beekeeper busy                        # confirm nothing else is running
+beekeeper training status {name}      # verify status is idle
+beekeeper training start {name}
 ```
 
-## Understanding Metrics
+### Stop training
+```bash
+beekeeper training status {name}      # verify it's running
+beekeeper training stop {name}
+```
 
-The `/tensorboard/latest` endpoint analyzes TensorBoard data and returns insights.
+### Switch branches
+```bash
+beekeeper training status {name}      # must be idle before switching
+beekeeper branch list {name}
+beekeeper branch switch {name} <branch>
+```
+
+## Understanding `run analyze` Output
+
+`beekeeper run analyze {name}` returns two sections: TensorBoard metrics and episode log analysis.
 
 **Which run does it analyze?**
-- If training is **running**, it analyzes the current active run
-- If training is **idle**, it analyzes the most recent completed run
-- The response includes `is_active: true/false` to indicate which
-
-**To compare with past runs:**
-1. `GET /runs` - list all runs with their IDs
-2. `GET /runs/<id>/metrics` - get metrics for a specific past run
-
-**Detail levels** (`?detail=low|medium|high`):
-- `low` (default): Summary stats only
-- `medium`: Includes sampled data points for plotting
-- `high`: All raw data points
-
-**Key fields in response:**
-
-| Field | Meaning |
-|-------|---------|
-| `run_id` | The run being analyzed |
-| `is_active` | `true` if this is the currently running training |
-| `run_info` | Status, timestamps, duration of the run |
-| `metrics` | Object with analysis for each metric |
+- If training is **running** — current active run
+- If training is **idle** — most recent completed run
 
 **Key fields in each metric:**
 
@@ -1503,21 +1445,19 @@ The `/tensorboard/latest` endpoint analyzes TensorBoard data and returns insight
 |-------|---------|
 | `trend` | Overall trend: `improving`, `stable`, `worsening`, or `unstable` |
 | `recent_trend` | Trend of the last 20% of steps — may differ from overall trend |
-| `improvement_percent` | How much the metric changed from start to end |
-| `peak_value` | Best value reached at any point during the run |
+| `improvement_percent` | Change from start to end |
+| `peak_value` | Best value reached at any point |
 | `peak_step` | Step at which the peak occurred |
-| `peak_reversal_pct` | How far the metric moved away from its peak, as % of total value range |
-| `converged` | Boolean - has the metric stabilized? |
-| `convergence_step` | Step number where convergence was detected |
+| `peak_reversal_pct` | How far the metric moved away from its peak, as % of total range |
+| `converged` | Has the metric stabilized? |
+| `convergence_step` | Step where convergence was detected |
 | `anomaly_count` | Number of unusual spikes or drops |
-| `anomalies` | Array of {{step, value, type}} for each anomaly |
-| `summary` | Human-readable interpretation of this metric |
 
 **Interpreting trends:**
-- `improving`: Metric is moving in the expected direction (loss decreasing, reward increasing)
-- `stable`: Metric has leveled off - may indicate convergence or plateau
-- `worsening`: Metric is confidently moving the wrong direction - needs attention
-- `unstable`: High variance, no clear direction - training may be struggling
+- `improving`: Moving in the expected direction (loss ↓, reward ↑)
+- `stable`: Leveled off — convergence or plateau
+- `worsening`: Confidently moving the wrong direction — needs attention
+- `unstable`: High variance, no clear direction
 
 ## In-Depth Analysis Guide
 
@@ -1550,162 +1490,6 @@ A metric labeled `improving` overall can still have degraded significantly from 
 **5. Lead with the performance verdict, use losses to explain it.**
 Don't open with "reconstruction loss improved 99%." Open with where the reward/score stands,
 then use the losses to explain why — or why it degraded despite good losses.
-
-**Example response:**
-```json
-{{
-  "metrics": {{
-    "loss": {{
-      "trend": "improving",
-      "initial_value": 2.45,
-      "final_value": 0.34,
-      "improvement_percent": 86.1,
-      "converged": true,
-      "convergence_step": 8500,
-      "anomaly_count": 0,
-      "summary": "loss: improving by 86.1% (2.45 → 0.34). Converged at step 8500"
-    }}
-  }}
-}}
-```
-
-## Workflows
-
-### Start and Monitor Training
-1. `POST /api/v1/projects/{name}/training/start`
-2. `GET /api/v1/projects/{name}/training/status` - verify running
-3. `GET /api/v1/projects/{name}/logs?tail=50` - check for errors or progress messages
-
-### Analyze Training Progress
-1. `GET /api/v1/projects/{name}/tensorboard/latest?detail=medium`
-2. Check `trend` for each metric - are they improving?
-3. Check `converged` - has training stabilized?
-4. Check `anomalies` - any unexpected spikes or drops?
-5. Read `summary` for a quick interpretation
-
-### Download Outputs
-1. `GET /api/v1/projects/{name}/files` - list available files
-2. `GET /api/v1/projects/{name}/files/<path>` - download specific file
-3. Or: `GET /api/v1/projects/{name}/files?zip=1` - download all as zip
-
-## Endpoint Details
-
-### Training Control
-
-**Start Training**
-```
-POST /api/v1/projects/{name}/training/start
-Response: {{"success": true, "data": {{"status": "started", "pid": 12345, "tb_port": 6006}}}}
-```
-
-**Stop Training**
-```
-POST /api/v1/projects/{name}/training/stop
-Response: {{"success": true, "data": {{"status": "stopped"}}}}
-```
-
-**Get Status**
-```
-GET /api/v1/projects/{name}/training/status
-Response: {{"success": true, "data": {{"status": "running|idle", "run_id": 4, "pid": 12345}}}}
-```
-Note: `run_id` is included when training is running - use it to fetch metrics for the current run.
-
-### Logs
-
-**Get Recent Logs**
-```
-GET /api/v1/projects/{name}/logs?tail=100
-Response: {{"success": true, "data": {{"content": "...", "lines": 100}}}}
-```
-
-### TensorBoard Metrics
-
-**Get Latest Metrics** (see "Understanding Metrics" above for response details)
-```
-GET /api/v1/projects/{name}/tensorboard/latest
-GET /api/v1/projects/{name}/tensorboard/latest?detail=medium
-GET /api/v1/projects/{name}/tensorboard/latest?metrics=loss,accuracy
-```
-
-### Files
-
-**List Files**
-```
-GET /api/v1/projects/{name}/files
-GET /api/v1/projects/{name}/files/subdir
-```
-
-**Download File**
-```
-GET /api/v1/projects/{name}/files/path/to/file.pth
-```
-
-**Download All as Zip**
-```
-GET /api/v1/projects/{name}/files?zip=1
-```
-
-### Run History
-
-**List Past Runs**
-```
-GET /api/v1/projects/{name}/runs
-```
-
-**Get Run Details**
-```
-GET /api/v1/projects/{name}/runs/<run_id>
-GET /api/v1/projects/{name}/runs/<run_id>/metrics
-```
-
-### Project Setup & Lifecycle
-
-**Retry Failed Setup**
-```
-POST /api/v1/projects/{name}/setup/retry
-Response: {{"success": true, "data": {{"status": "retrying"}}}}  (202 Accepted)
-```
-Call when `setup_status` is `error`. Skips completed steps (won't re-clone if workspace exists).
-Poll `GET /projects/{name}` for `setup_status` until it becomes `ready` or `error` again.
-
-**Delete Project**
-```
-DELETE /api/v1/projects/{name}
-Response: {{"success": true, "data": {{"deleted": "{name}"}}}}
-```
-Deletes project and all data. Stop training first — returns 409 if training is running.
-
-### Branch Management
-
-**List Available Branches**
-```
-GET /api/v1/projects/{name}/branches
-Response: {{"success": true, "data": {{"branches": ["main", "develop", "feature-x"], "current": "main"}}}}
-```
-Returns all remote branches from the git repository and the currently active branch.
-
-**Switch Branch**
-```
-POST /api/v1/projects/{name}/branch
-Request: {{"branch": "develop"}}
-Response: {{"success": true, "data": {{"branch": "develop", "status": "switched"}}}}
-```
-Switches the project to a different git branch. This will:
-- Check for uncommitted changes (fails if any exist)
-- Fetch from remote
-- Checkout the requested branch
-- Update project.json with the new branch
-
-**IMPORTANT:** You cannot switch branches while training is running. Stop training first.
-
-### System
-
-**Get System Stats**
-```
-GET /api/v1/stats
-Response: CPU, RAM, GPU usage and availability
-```
 """
 
     return Response(
