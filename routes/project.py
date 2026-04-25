@@ -87,8 +87,10 @@ def detail(name):
     with open(config_path) as f:
         project = json.load(f)
 
+    from routes.api_v1 import CLI_VERSION, CLI_RELEASE_BASE
     training = get_training_status(name)
-    return render_template("project.html", project=project, training=training)
+    return render_template("project.html", project=project, training=training,
+                           cli_version=CLI_VERSION, cli_release_base=CLI_RELEASE_BASE)
 
 
 @project_bp.route("/<name>/edit")

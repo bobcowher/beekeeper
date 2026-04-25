@@ -17,7 +17,7 @@
     </p>
     <div style="margin-top: 0.75rem; display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
         <a href="{{ url_for('api_v1.cli_documentation') }}" class="btn btn-primary">CLI Reference</a>
-        <code style="font-size: 0.85rem;">curl -o beekeeper http://{{ request.host }}/static/bin/beekeeper && chmod +x beekeeper</code>
+        <code style="font-size: 0.85rem;">curl -L -o /usr/local/bin/beekeeper {{ cli_release_base }}/v{{ cli_version }}/beekeeper && chmod +x /usr/local/bin/beekeeper</code>
     </div>
 </section>
 

@@ -27,15 +27,18 @@
     <p>The CLI is a single statically-linked binary with no runtime dependencies.</p>
 
     <div style="margin: 1rem 0; display: flex; gap: 0.75rem; flex-wrap: wrap;">
-        <a href="/static/bin/beekeeper"
-           class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem;"
-           download>
-            &#8659; Download beekeeper (Linux x86-64)
+        <a href="{{ cli_release_base }}/v{{ cli_version }}/beekeeper"
+           class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem;">
+            &#8659; Download beekeeper {{ cli_version }} (Linux x86-64)
+        </a>
+        <a href="{{ cli_release_base }}/v{{ cli_version }}/beekeeper.exe"
+           class="btn" style="display: inline-flex; align-items: center; gap: 0.5rem;">
+            &#8659; Download beekeeper {{ cli_version }} (Windows x86-64)
         </a>
     </div>
 
     <p style="margin-bottom: 0.5rem;">Or install directly from the terminal:</p>
-    <pre class="api-examples">curl -o beekeeper http://{{ request.host }}/static/bin/beekeeper && chmod +x beekeeper</pre>
+    <pre class="api-examples">curl -L -o /usr/local/bin/beekeeper {{ cli_release_base }}/v{{ cli_version }}/beekeeper && chmod +x /usr/local/bin/beekeeper</pre>
 
     <p style="margin-top: 1rem; margin-bottom: 0.5rem;">Configure via environment variables:</p>
     <pre class="api-examples">export BEEKEEPER_HOST="http://{{ request.host }}"

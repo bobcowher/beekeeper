@@ -215,8 +215,7 @@ curl http://{{ host }}/api/v1/stats</pre>
                 </p>
 
                 <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 1 — Install the CLI on the agent's machine:</strong></p>
-                <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1rem;">curl -o beekeeper http://{{ host }}/static/bin/beekeeper && chmod +x beekeeper
-sudo mv beekeeper /usr/local/bin/beekeeper  # optional: add to PATH</pre>
+                <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1rem;">curl -L -o /usr/local/bin/beekeeper {{ cli_release_base }}/v{{ cli_version }}/beekeeper && chmod +x /usr/local/bin/beekeeper</pre>
 
                 <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 2 — Download the project instructions and add to agent context:</strong></p>
                 <div style="margin-bottom: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
@@ -229,7 +228,7 @@ sudo mv beekeeper /usr/local/bin/beekeeper  # optional: add to PATH</pre>
                 <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1rem;">curl -o BEEKEEPER_{{ project.name }}.md http://{{ host }}/api/v1/projects/{{ project.name }}/agent/instructions</pre>
 
                 <p style="font-size: 0.85rem; color: var(--text-secondary);">
-                    <a href="/static/bin/beekeeper" download style="color: var(--accent);">Download CLI binary</a> &nbsp;·&nbsp;
+                    <a href="{{ cli_release_base }}/v{{ cli_version }}/beekeeper" style="color: var(--accent);">Download CLI binary (Linux)</a> &nbsp;·&nbsp;
                     <a href="{{ url_for('api_v1.cli_documentation') }}" style="color: var(--accent);">CLI reference →</a>
                 </p>
                 <details>

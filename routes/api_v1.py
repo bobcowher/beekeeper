@@ -1114,14 +1114,14 @@ def cleanup_tensorboard_logs(name):
 def api_documentation():
     """Render the API documentation page."""
     from flask import render_template
-    return render_template("api_docs.html")
+    return render_template("api_docs.html", cli_version=CLI_VERSION, cli_release_base=CLI_RELEASE_BASE)
 
 
 @api_v1_bp.route("/cli")
 def cli_documentation():
     """Render the CLI documentation page."""
     from flask import render_template
-    return render_template("cli.html")
+    return render_template("cli.html", cli_version=CLI_VERSION, cli_release_base=CLI_RELEASE_BASE)
 
 
 # ---------------------------------------------------------------------------
