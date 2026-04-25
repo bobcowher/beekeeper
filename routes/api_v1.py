@@ -23,6 +23,9 @@ from routes.files import _safe_path, _fmt_size, _zip_directory
 
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
+CLI_VERSION = "1.0.0"
+CLI_RELEASE_BASE = "https://github.com/bobcowher/beekeeper-cli/releases/download"
+
 
 # ---------------------------------------------------------------------------
 # Response helpers
@@ -1116,7 +1119,7 @@ information and avoids confusion with outdated local copies.
 >
 > **Step 2 — Install to PATH (only if not installed):**
 > ```bash
-> curl -o /usr/local/bin/beekeeper http://{host}/static/bin/beekeeper && chmod +x /usr/local/bin/beekeeper
+> curl -L -o /usr/local/bin/beekeeper {CLI_RELEASE_BASE}/v{CLI_VERSION}/beekeeper && chmod +x /usr/local/bin/beekeeper
 > ```
 > This installs `beekeeper` as a global utility. Always invoke it as `beekeeper`, never `./beekeeper`.
 >

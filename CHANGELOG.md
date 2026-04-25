@@ -4,6 +4,13 @@
 
 ### New Features
 
+**CLI served from GitHub Releases**
+- CLI binary removed from beekeeper git repo (was 3MB ELF committed directly)
+- `CLI_VERSION` and `CLI_RELEASE_BASE` constants in `api_v1.py` control which release agents download
+- Agent install instructions now point to `https://github.com/bobcowher/beekeeper-cli/releases/download/v{version}/beekeeper`
+- Windows binary (`beekeeper.exe`) available alongside Linux binary on each release
+- Bump `CLI_VERSION` in `api_v1.py` to roll agents to a new CLI build
+
 **EMA-Smoothed Metric Analysis**
 - `GET /api/v1/projects/{name}/tensorboard/latest?detail=medium` now returns `smoothed_points` — the full training curve with EMA alpha=0.9 smoothing applied (matches TensorBoard's heavy smoothing)
 - Peak detection (`peak_value`, `peak_step`, `peak_reversal_pct`) now uses the EMA-smoothed signal, not raw values — prevents single outlier episodes from masking the true peak

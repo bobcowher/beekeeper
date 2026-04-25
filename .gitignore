@@ -5,3 +5,5 @@ __pycache__/
 deploy.sh
 config.properties
 data/beekeeper.db
+.claude/
+static/bin/
