@@ -23,7 +23,7 @@ from routes.files import _safe_path, _fmt_size, _zip_directory
 
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
-CLI_VERSION = "1.0.0"
+CLI_VERSION = "1.0.1"
 CLI_RELEASE_BASE = "https://github.com/bobcowher/beekeeper-cli/releases/download"
 
 
