@@ -1188,6 +1188,14 @@ def get_global_agent_instructions():
 
 **Use the `beekeeper` CLI for all operations. Do not call the REST API directly.**
 
+> **If anything in these instructions doesn't make sense or a command doesn't exist,
+> this file may be stale. Refresh it by re-fetching:**
+> ```bash
+> beekeeper version   # also confirms CLI is current
+> curl -s http://{host}/api/v1/agent/instructions
+> ```
+> Reload the output into your context before continuing.
+
 Base URL: http://{host}
 
 ## What is Beekeeper?
@@ -1360,6 +1368,13 @@ def get_agent_instructions(name):
     content = f"""# Beekeeper: {name}
 
 **Use the `beekeeper` CLI for all operations.**
+
+> **If anything in these instructions doesn't make sense or a command doesn't exist,
+> this file may be stale. Refresh it with:**
+> ```bash
+> beekeeper projects instructions {name}
+> ```
+> Reload the output into your context before continuing.
 
 Base URL: http://{host}
 
