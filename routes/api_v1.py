@@ -23,7 +23,7 @@ from routes.files import _safe_path, _fmt_size, _zip_directory
 
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
-CLI_VERSION = "1.1.0"
+CLI_VERSION = "1.1.1"
 CLI_RELEASE_BASE = "https://github.com/bobcowher/beekeeper-cli/releases/download"
 
 
@@ -770,6 +770,17 @@ def browse_files(name, subpath=""):
 # System Stats
 # ---------------------------------------------------------------------------
 
+@api_v1_bp.route("/cli/version")
+@api_key_required
+def cli_version():
+    """Return the CLI version this server expects and the download URL."""
+    return api_response(data={
+        "cli_version": CLI_VERSION,
+        "download_url": f"{CLI_RELEASE_BASE}/v{CLI_VERSION}/beekeeper",
+        "download_url_windows": f"{CLI_RELEASE_BASE}/v{CLI_VERSION}/beekeeper.exe",
+    })
+
+
 @api_v1_bp.route("/stats")
 @api_key_required
 def system_stats():
@@ -1183,13 +1194,17 @@ Base URL: http://{host}
 
 Beekeeper is an ML training manager — git clone, venv setup, training controls, log streaming, and TensorBoard. You manage it through the `beekeeper` CLI.
 
-## Step 1 — Verify the CLI is installed
+## Step 1 — Verify the CLI is installed and current
 
 ```bash
-beekeeper --help
+beekeeper version
 ```
 
-If this prints usage info, skip to Step 2. If you get "command not found", **stop and tell the user** the CLI needs to be installed. Do not install it yourself. Give them this command to run:
+- If "command not found" — **stop and tell the user** the CLI needs to be installed. Do not install it yourself. Give them this command to run:
+- If "UPDATE REQUIRED" — **stop and tell the user** their CLI is out of date and show them the update command printed in the output.
+- If "UP TO DATE" — proceed to Step 2.
+
+Installation command (for user to run if CLI is missing):
 
 ```bash
 # Linux
@@ -1254,6 +1269,7 @@ beekeeper branch list <name>                    List available branches
 beekeeper branch switch <name> <branch>         Switch to a different branch
 beekeeper stats                                 System stats (GPU, CPU, RAM)
 beekeeper busy                                  Check if any training is running (exit 1 if busy)
+beekeeper version                               Check CLI version against server
 ```
 
 ## Common Workflows
@@ -1347,13 +1363,17 @@ def get_agent_instructions(name):
 
 Base URL: http://{host}
 
-## Step 1 — Verify CLI is installed
+## Step 1 — Verify CLI is installed and current
 
 ```bash
-beekeeper --help
+beekeeper version
 ```
 
-If you get "command not found", **stop and tell the user** the CLI needs to be installed. Do not install it yourself. Installation command (for user to run):
+- If "command not found" — **stop and tell the user** the CLI needs to be installed. Do not install it yourself.
+- If "UPDATE REQUIRED" — **stop and tell the user** their CLI is out of date and show them the update command from the output.
+- If "UP TO DATE" — proceed to Step 2.
+
+Installation command (for user to run if CLI is missing):
 
 ```bash
 curl -L -o /usr/local/bin/beekeeper {CLI_RELEASE_BASE}/v{CLI_VERSION}/beekeeper && chmod +x /usr/local/bin/beekeeper
