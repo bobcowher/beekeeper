@@ -87,7 +87,6 @@ def detail(name):
     with open(config_path) as f:
         project = json.load(f)
 
-    from routes.api_v1 import CLI_VERSION, CLI_RELEASE_BASE
     training = get_training_status(name)
 
     # Reconcile stale state: server restarted, _running cleared, but JSON still says 'running'
@@ -99,8 +98,7 @@ def detail(name):
             p.save(projects_dir)
         project['train_status'] = 'stopped'
 
-    return render_template("project.html", project=project, training=training,
-                           cli_version=CLI_VERSION, cli_release_base=CLI_RELEASE_BASE)
+    return render_template("project.html", project=project, training=training)
 
 
 @project_bp.route("/<name>/edit")

@@ -9,15 +9,13 @@
 </div>
 
 <section class="card" style="border-left: 3px solid var(--accent);">
-    <h2 style="color: var(--accent);">Use the CLI First</h2>
+    <h2 style="color: var(--accent);">Use the MCP Server</h2>
     <p>
-        For terminal and AI agent use, the <strong>Beekeeper CLI</strong> is the recommended interface.
-        It wraps these endpoints into simple commands and provides a <code>run analyze</code> command
-        for synthesized training insights.
+        For AI agent use, the <strong>Beekeeper MCP server</strong> is the recommended interface.
+        It exposes all operations as MCP tools — no shell commands, no binary to install.
     </p>
-    <div style="margin-top: 0.75rem; display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
-        <a href="{{ url_for('api_v1.cli_documentation') }}" class="btn btn-primary">CLI Reference</a>
-        <code style="font-size: 0.85rem;">curl -L -o /usr/local/bin/beekeeper {{ cli_release_base }}/v{{ cli_version }}/beekeeper && chmod +x /usr/local/bin/beekeeper</code>
+    <div style="margin-top: 0.75rem;">
+        <a href="{{ url_for('api_v1.mcp_documentation') }}" class="btn btn-primary">MCP Setup Guide</a>
     </div>
 </section>
 

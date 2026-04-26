@@ -216,13 +216,10 @@ curl http://{{ host }}/api/v1/stats</pre>
             </h3>
             <div class="collapsible-body" id="agent-api-body" style="display:none;">
                 <p style="color: var(--text-secondary); margin-bottom: 0.75rem; font-size: 0.9rem;">
-                    Give your agent the CLI binary and its project instructions. The CLI provides a Synthesized View of training progress — the recommended interface for AI agents.
+                    Connect your agent via the Beekeeper MCP server. The MCP server exposes all operations as tools — no binary to install.
                 </p>
 
-                <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 1 — Install the CLI on the agent's machine:</strong></p>
-                <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1rem;">curl -L -o /usr/local/bin/beekeeper {{ cli_release_base }}/v{{ cli_version }}/beekeeper && chmod +x /usr/local/bin/beekeeper</pre>
-
-                <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 2 — Download the project instructions and add to agent context:</strong></p>
+                <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 1 — Add project instructions to agent context:</strong></p>
                 <div style="margin-bottom: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
                     <a href="{{ url_for('api_v1.get_agent_instructions', name=project.name) }}"
                        class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem;">
@@ -233,21 +230,20 @@ curl http://{{ host }}/api/v1/stats</pre>
                 <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1rem;">curl -o BEEKEEPER_{{ project.name }}.md http://{{ host }}/api/v1/projects/{{ project.name }}/agent/instructions</pre>
 
                 <p style="font-size: 0.85rem; color: var(--text-secondary);">
-                    <a href="{{ cli_release_base }}/v{{ cli_version }}/beekeeper" style="color: var(--accent);">Download CLI binary (Linux)</a> &nbsp;·&nbsp;
-                    <a href="{{ url_for('api_v1.cli_documentation') }}" style="color: var(--accent);">CLI reference →</a>
+                    <a href="{{ url_for('api_v1.mcp_documentation') }}" style="color: var(--accent);">MCP setup guide →</a>
                 </p>
                 <details>
-                    <summary style="cursor: pointer; color: var(--text-secondary); font-size: 0.9rem;">Preview endpoints</summary>
-                    <pre class="api-examples" style="margin-top: 0.5rem; font-size: 0.8rem;">| Action         | Method | Endpoint                                          |
-|----------------|--------|---------------------------------------------------|
-| Start training | POST   | /api/v1/projects/{{ project.name }}/training/start  |
-| Stop training  | POST   | /api/v1/projects/{{ project.name }}/training/stop   |
-| Check status   | GET    | /api/v1/projects/{{ project.name }}/training/status |
-| Get logs       | GET    | /api/v1/projects/{{ project.name }}/logs?tail=100   |
-| Get metrics    | GET    | /api/v1/projects/{{ project.name }}/tensorboard/latest |
-| List files     | GET    | /api/v1/projects/{{ project.name }}/files           |
-| Download file  | GET    | /api/v1/projects/{{ project.name }}/files/&lt;path&gt;    |
-| System stats   | GET    | /api/v1/stats                                     |</pre>
+                    <summary style="cursor: pointer; color: var(--text-secondary); font-size: 0.9rem;">MCP tools for this project</summary>
+                    <pre class="api-examples" style="margin-top: 0.5rem; font-size: 0.8rem;">training_status("{{ project.name }}")
+start_training("{{ project.name }}")
+stop_training("{{ project.name }}")
+analyze_run("{{ project.name }}")
+get_logs("{{ project.name }}", tail=100)
+list_branches("{{ project.name }}")
+switch_branch("{{ project.name }}", branch)
+get_project("{{ project.name }}")
+get_stats()
+check_busy()</pre>
                 </details>
             </div>
         </div>

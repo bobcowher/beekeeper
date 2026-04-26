@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+
+{% block title %}Beekeeper - MCP Server{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Beekeeper MCP Server</h1>
+    <span class="muted" style="font-size: 0.9rem;">Connect AI agents via the Model Context Protocol</span>
+</div>
+
+<section class="card">
+    <h2>Overview</h2>
+    <p>
+        The Beekeeper MCP server exposes all training management operations as MCP tools.
+        AI agents (Claude Code, Claude Desktop, and any MCP-compatible client) can control
+        training jobs, read logs, analyze metrics, and manage projects — no shell binary required.
+    </p>
+    <p style="margin-top: 0.75rem;">
+        <code>analyze_run()</code> provides a <strong>Synthesized View</strong> — TensorBoard trends
+        and log-based episode metrics combined into a single response, designed for agent consumption
+        without screenshots or manual parsing.
+    </p>
+</section>
+
+<section class="card">
+    <h2>Setup</h2>
+
+    <h3 style="margin-top: 1rem; margin-bottom: 0.5rem;">1. Install dependencies</h3>
+    <pre class="api-examples">pip install fastmcp requests</pre>
+
+    <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">2. Configure Claude Code / Claude Desktop</h3>
+    <p style="margin-bottom: 0.5rem;">Add to your MCP config (<code>~/.claude/claude_desktop_config.json</code> or <code>.claude/settings.json</code>):</p>
+    <pre class="api-examples">{
+  "mcpServers": {
+    "beekeeper": {
+      "command": "python",
+      "args": ["/path/to/beekeeper/mcp_server.py"],
+      "env": {
+        "BEEKEEPER_HOST": "http://{{ request.host }}",
+        "BEEKEEPER_API_KEY": "your-api-key"
+      }
+    }
+  }
+}</pre>
+    <p style="margin-top: 0.5rem; font-size: 0.9rem; color: var(--text-secondary);">
+        Omit <code>BEEKEEPER_API_KEY</code> if authentication is disabled.
+        Generate an API key from the <a href="{{ url_for('admin.index') }}">Admin Panel</a>.
+    </p>
+
+    <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">3. Load project context</h3>
+    <p style="margin-bottom: 0.5rem;">Tell the agent to fetch instructions before working on a project:</p>
+    <pre class="api-examples">get_project_instructions("my-project")</pre>
+    <p style="color: var(--text-secondary); font-size: 0.9rem;">
+        Or download and paste into your CLAUDE.md:
+    </p>
+    <pre class="api-examples">curl -o BEEKEEPER_my-project.md http://{{ request.host }}/api/v1/projects/my-project/agent/instructions</pre>
+</section>
+
+<section class="card">
+    <h2>Tool Reference</h2>
+
+    <h3 style="margin-top: 1.25rem; margin-bottom: 0.5rem; color: var(--accent);">Projects</h3>
+    <table style="width:100%; border-collapse: collapse; font-size: 0.9rem;">
+        <thead>
+            <tr style="border-bottom: 1px solid var(--border);">
+                <th style="text-align:left; padding: 0.4rem 0.75rem 0.4rem 0;">Tool</th>
+                <th style="text-align:left; padding: 0.4rem 0.75rem;">Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>list_projects()</code></td>
+                <td style="padding: 0.4rem 0.75rem;">All projects with name and status</td>
+            </tr>
+            <tr>
+                <td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>get_project(name)</code></td>
+                <td style="padding: 0.4rem 0.75rem;">Detailed project info: git URL, branch, setup status</td>
+            </tr>
+            <tr>
+                <td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>create_project(name, git_url, ...)</code></td>
+                <td style="padding: 0.4rem 0.75rem;">Create a project; setup runs in background</td>
+            </tr>
+            <tr>
+                <td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>retry_setup(name)</code></td>
+                <td style="padding: 0.4rem 0.75rem;">Retry failed setup, polls until done</td>
+            </tr>
+            <tr>
+                <td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>delete_project(name)</code></td>
+                <td style="padding: 0.4rem 0.75rem;">Delete project and all data</td>
+            </tr>
+            <tr>
+                <td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>get_project_instructions(name)</code></td>
+                <td style="padding: 0.4rem 0.75rem;">Full project-specific agent context as markdown</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h3 style="margin-top: 1.25rem; margin-bottom: 0.5rem; color: var(--accent);">Training</h3>
+    <table style="width:100%; border-collapse: collapse; font-size: 0.9rem;">
+        <thead>
+            <tr style="border-bottom: 1px solid var(--border);">
+                <th style="text-align:left; padding: 0.4rem 0.75rem 0.4rem 0;">Tool</th>
+                <th style="text-align:left; padding: 0.4rem 0.75rem;">Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>start_training(name)</code></td>
+                <td style="padding: 0.4rem 0.75rem;">Start training (pre-launch: git pull + pip install)</td>
+            </tr>
+            <tr>
+                <td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>stop_training(name)</code></td>
+                <td style="padding: 0.4rem 0.75rem;">Stop the active training process</td>
+            </tr>
+            <tr>
+                <td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>training_status(name)</code></td>
+                <td style="padding: 0.4rem 0.75rem;">Current training state</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h3 style="margin-top: 1.25rem; margin-bottom: 0.5rem; color: var(--accent);">Logs & Analysis</h3>
+    <table style="width:100%; border-collapse: collapse; font-size: 0.9rem;">
+        <thead>
+            <tr style="border-bottom: 1px solid var(--border);">
+                <th style="text-align:left; padding: 0.4rem 0.75rem 0.4rem 0;">Tool</th>
+                <th style="text-align:left; padding: 0.4rem 0.75rem;">Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>get_logs(name, tail=100)</code></td>
+                <td style="padding: 0.4rem 0.75rem;">Last N lines of training output</td>
+            </tr>
+            <tr>
+                <td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>analyze_run(name)</code></td>
+                <td style="padding: 0.4rem 0.75rem;">
+                    Synthesized View: TensorBoard trends + episode log metrics in one response.
+                    Works even when TensorBoard hasn't flushed yet.
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h3 style="margin-top: 1.25rem; margin-bottom: 0.5rem; color: var(--accent);">Branches</h3>
+    <table style="width:100%; border-collapse: collapse; font-size: 0.9rem;">
+        <thead>
+            <tr style="border-bottom: 1px solid var(--border);">
+                <th style="text-align:left; padding: 0.4rem 0.75rem 0.4rem 0;">Tool</th>
+                <th style="text-align:left; padding: 0.4rem 0.75rem;">Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>list_branches(name)</code></td>
+                <td style="padding: 0.4rem 0.75rem;">All remote branches; shows current branch</td>
+            </tr>
+            <tr>
+                <td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>switch_branch(name, branch)</code></td>
+                <td style="padding: 0.4rem 0.75rem;">Switch branch (training must be stopped)</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h3 style="margin-top: 1.25rem; margin-bottom: 0.5rem; color: var(--accent);">System</h3>
+    <table style="width:100%; border-collapse: collapse; font-size: 0.9rem;">
+        <thead>
+            <tr style="border-bottom: 1px solid var(--border);">
+                <th style="text-align:left; padding: 0.4rem 0.75rem 0.4rem 0;">Tool</th>
+                <th style="text-align:left; padding: 0.4rem 0.75rem;">Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>get_stats()</code></td>
+                <td style="padding: 0.4rem 0.75rem;">GPU utilization, VRAM, CPU, RAM</td>
+            </tr>
+            <tr>
+                <td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>check_busy()</code></td>
+                <td style="padding: 0.4rem 0.75rem;">Is any training currently running? Always call before starting a new run.</td>
+            </tr>
+        </tbody>
+    </table>
+</section>
+
+<section class="card">
+    <h2>Example Workflows</h2>
+
+    <h3 style="margin-top: 1rem; margin-bottom: 0.5rem;">Check system state</h3>
+    <pre class="api-examples">check_busy()
+get_stats()
+list_projects()</pre>
+
+    <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">Analyze a training run</h3>
+    <pre class="api-examples">analyze_run("my-project")
+get_logs("my-project", tail=100)</pre>
+
+    <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">Start training</h3>
+    <pre class="api-examples">check_busy()
+training_status("my-project")
+start_training("my-project")</pre>
+
+    <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">Create and start a new project</h3>
+    <pre class="api-examples">create_project("my-project", "https://github.com/user/repo.git")
+retry_setup("my-project")   # blocks until setup_status == ready
+start_training("my-project")</pre>
+</section>
+{% endblock %}

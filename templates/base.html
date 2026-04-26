@@ -25,8 +25,8 @@
                 <li class="nav-sub nav-collapse-content" id="docs-content" style="display:none">
                     <a href="/api/v1/docs" class="{% if request.path == '/api/v1/docs' %}active{% endif %}">API</a>
                 </li>
-                <li class="nav-sub nav-collapse-content" id="docs-content-cli" style="display:none">
-                    <a href="/api/v1/cli" class="{% if request.path == '/api/v1/cli' %}active{% endif %}">CLI</a>
+                <li class="nav-sub nav-collapse-content" id="docs-content-mcp" style="display:none">
+                    <a href="/api/v1/mcp" class="{% if request.path == '/api/v1/mcp' %}active{% endif %}">MCP</a>
                 </li>
             </ul>
             {% if user %}
@@ -63,14 +63,14 @@
         // Collapsible Documentation section (collapsed by default)
         var docsToggle = document.getElementById('docs-toggle');
         var docsContent = document.getElementById('docs-content');
-        var docsContentCli = document.getElementById('docs-content-cli');
+        var docsContentMcp = document.getElementById('docs-content-mcp');
         var docsIcon = docsToggle.querySelector('.nav-collapse-icon');
         var docsOpen = localStorage.getItem('docs-nav-open') === 'true';
 
         function setDocsOpen(open) {
             docsOpen = open;
             docsContent.style.display = open ? '' : 'none';
-            docsContentCli.style.display = open ? '' : 'none';
+            docsContentMcp.style.display = open ? '' : 'none';
             docsIcon.textContent = open ? '▼' : '▶';
             localStorage.setItem('docs-nav-open', open);
         }

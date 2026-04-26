@@ -23,10 +23,6 @@ from routes.files import _safe_path, _fmt_size, _zip_directory
 
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
-CLI_VERSION = "1.1.2"
-CLI_RELEASE_BASE = "https://github.com/bobcowher/beekeeper-cli/releases/download"
-
-
 # ---------------------------------------------------------------------------
 # Response helpers
 # ---------------------------------------------------------------------------
@@ -770,17 +766,6 @@ def browse_files(name, subpath=""):
 # System Stats
 # ---------------------------------------------------------------------------
 
-@api_v1_bp.route("/cli/version")
-@api_key_required
-def cli_version():
-    """Return the CLI version this server expects and the download URL."""
-    return api_response(data={
-        "cli_version": CLI_VERSION,
-        "download_url": f"{CLI_RELEASE_BASE}/v{CLI_VERSION}/beekeeper",
-        "download_url_windows": f"{CLI_RELEASE_BASE}/v{CLI_VERSION}/beekeeper.exe",
-    })
-
-
 @api_v1_bp.route("/stats")
 @api_key_required
 def system_stats():
@@ -1125,14 +1110,14 @@ def cleanup_tensorboard_logs(name):
 def api_documentation():
     """Render the API documentation page."""
     from flask import render_template
-    return render_template("api_docs.html", cli_version=CLI_VERSION, cli_release_base=CLI_RELEASE_BASE)
+    return render_template("api_docs.html")
 
 
-@api_v1_bp.route("/cli")
-def cli_documentation():
-    """Render the CLI documentation page."""
+@api_v1_bp.route("/mcp")
+def mcp_documentation():
+    """Render the MCP setup guide."""
     from flask import render_template
-    return render_template("cli.html", cli_version=CLI_VERSION, cli_release_base=CLI_RELEASE_BASE)
+    return render_template("mcp.html")
 
 
 # ---------------------------------------------------------------------------
@@ -1143,11 +1128,8 @@ def cli_documentation():
 @api_key_required
 def get_global_agent_instructions():
     """
-    Global agent instructions — orientation for an agent that doesn't yet know
-    which project to work with. Lists all projects, explains how to install
-    the CLI, and links to project-specific instructions.
-
-    Intended to be fetched once at the start of a session and added to context.
+    Global agent instructions — orientation for an agent using the Beekeeper MCP server.
+    Lists all current projects and explains how to get started.
     """
     host = request.host
 
@@ -1166,13 +1148,10 @@ def get_global_agent_instructions():
                         "branch": p.branch,
                         "setup_status": p.setup_status,
                         "train_status": status["status"],
-                        "pinned": p.pinned,
-                        "last_run_at": p.last_run_at,
                     })
                 except Exception:
                     continue
 
-    # Build project table
     if projects:
         project_lines = []
         for p in projects:
@@ -1186,61 +1165,18 @@ def get_global_agent_instructions():
 
     content = f"""# Beekeeper — Agent Instructions
 
-**Use the `beekeeper` CLI for all operations. Do not call the REST API directly.**
+You are connected to a Beekeeper ML training manager via the **Beekeeper MCP server**.
+Use the MCP tools below for all operations.
 
-> **If anything in these instructions doesn't make sense or a command doesn't exist,
-> this file may be stale. Refresh it by re-fetching:**
-> ```bash
-> beekeeper version   # also confirms CLI is current
-> curl -s http://{host}/api/v1/agent/instructions
-> ```
-> Reload the output into your context before continuing.
-
-Base URL: http://{host}
+> **If anything here seems stale, re-fetch this document:**
+> `GET http://{host}/api/v1/agent/instructions`
 
 ## What is Beekeeper?
 
-Beekeeper is an ML training manager — git clone, venv setup, training controls, log streaming, and TensorBoard. You manage it through the `beekeeper` CLI.
+Beekeeper manages long-running ML training jobs: git clone, environment setup,
+training controls, log streaming, and TensorBoard. Everything runs on a remote GPU server.
 
-## Step 1 — Verify the CLI is installed and current
-
-```bash
-beekeeper version
-```
-
-- If "command not found" — **stop and tell the user** the CLI needs to be installed. Do not install it yourself. Give them this command to run:
-- If "UPDATE REQUIRED" — **stop and tell the user** their CLI is out of date and show them the update command printed in the output.
-- If "UP TO DATE" — proceed to Step 2.
-
-Installation command (for user to run if CLI is missing):
-
-```bash
-# Linux
-curl -L -o /usr/local/bin/beekeeper {CLI_RELEASE_BASE}/v{CLI_VERSION}/beekeeper && chmod +x /usr/local/bin/beekeeper
-
-# Windows
-curl -L -o beekeeper.exe {CLI_RELEASE_BASE}/v{CLI_VERSION}/beekeeper.exe
-```
-
-CLI version: {CLI_VERSION}
-
-## Step 2 — Configure and verify connectivity
-
-```bash
-export BEEKEEPER_HOST="http://{host}"
-export BEEKEEPER_API_KEY="your-api-key"   # omit if auth is disabled
-```
-
-Then immediately verify the connection:
-
-```bash
-beekeeper busy
-```
-
-- If this succeeds — proceed to Step 3.
-- If "Server unreachable" — **stop and ask the user for the correct server URL** before doing anything else. Do not retry. The URL above (`{host}`) is where these instructions were fetched from, but it may not be reachable from your machine (e.g. hostname doesn't resolve, VPN not connected). The user knows the right address.
-
-## Step 3 — Orient Yourself
+## Step 1 — Orient Yourself
 
 Current projects on this instance:
 
@@ -1248,108 +1184,79 @@ Current projects on this instance:
 {project_table}
 ```
 
-If the list is empty, see "Starting from Scratch" below.
+Use `get_project(<name>)` for detail on any project.
+Use `get_project_instructions(<name>)` to load full project context before working with it.
 
-For more detail on any project:
-```bash
-beekeeper projects info <name>
-```
+## Step 2 — Load Project Context
 
-## Step 4 — Load Project Context
-
-Before working with a project, fetch its instructions and run an analysis:
-
-```bash
-beekeeper projects instructions <name>   # full project context and endpoint reference
-beekeeper run analyze <name>             # synthesized metrics + trend analysis
-```
-
-Read both before taking any action.
-
-## CLI Reference
+Before analyzing or managing a project, call both:
 
 ```
-beekeeper projects list                         List all projects and status
-beekeeper projects info <name>                  Detailed project info
-beekeeper projects create <name> <git_url>      Create a new project
-                       [branch] [python]        Optional: branch (default: main), python version
-                       [train_file] [env_type]  Optional: train file, env type (venv|conda)
-beekeeper projects instructions <name>          Fetch project-specific agent instructions
-beekeeper projects retry <name>                 Retry failed setup (polls until done)
-beekeeper projects delete <name>                Delete a project and all its data
-beekeeper training start <name>                 Start training
-beekeeper training stop <name>                  Stop training
-beekeeper training status <name>                Current training status
-beekeeper logs get <name> [tail]                Fetch log output (default: last 100 lines)
-beekeeper run analyze <name>                    Synthesized metrics + trend analysis
-beekeeper branch list <name>                    List available branches
-beekeeper branch switch <name> <branch>         Switch to a different branch
-beekeeper stats                                 System stats (GPU, CPU, RAM)
-beekeeper busy                                  Check if any training is running (exit 1 if busy)
-beekeeper version                               Check CLI version against server
+get_project_instructions(<name>)   # full context: purpose, metrics, workflows
+analyze_run(<name>)                # synthesized TensorBoard + log metrics
 ```
+
+Read both outputs before taking any action.
+
+## MCP Tools Reference
+
+| Tool | Description |
+|------|-------------|
+| `list_projects()` | All projects and status |
+| `get_project(name)` | Detailed project info |
+| `create_project(name, git_url, ...)` | Create project (setup runs in background) |
+| `retry_setup(name)` | Retry failed setup, polls until done |
+| `delete_project(name)` | Delete project and all data |
+| `get_project_instructions(name)` | Full project-specific agent context |
+| `start_training(name)` | Start training (pre-launch: git pull + pip install) |
+| `stop_training(name)` | Stop training |
+| `training_status(name)` | Current training status |
+| `get_logs(name, tail)` | Raw log output (default: last 100 lines) |
+| `analyze_run(name)` | TensorBoard metrics + episode log trends |
+| `list_branches(name)` | Available branches |
+| `switch_branch(name, branch)` | Switch branch (training must be stopped) |
+| `get_stats()` | GPU, CPU, RAM stats |
+| `check_busy()` | Is any training currently running? |
 
 ## Common Workflows
 
-### Check system state before starting work
-```bash
-beekeeper busy           # is anything running? (exit 1 = busy, exit 0 = idle)
-beekeeper stats          # GPU util, VRAM, CPU, RAM
-beekeeper projects list  # all projects and their status
+### Check system state
+```
+check_busy()       # anything running?
+get_stats()        # GPU util, VRAM, CPU, RAM
+list_projects()    # all projects and status
 ```
 
-### Load context for a project
-```bash
-beekeeper projects instructions <name>
-beekeeper run analyze <name>
+### Analyze training
+```
+training_status(<name>)
+analyze_run(<name>)
+get_logs(<name>, tail=100)
 ```
 
-### Analyze and monitor training
-```bash
-beekeeper training status <name>
-beekeeper run analyze <name>
-beekeeper logs get <name> 100
+### Start training
 ```
-
-### Start / stop training
-```bash
-beekeeper busy                        # confirm nothing else is running first
-beekeeper training start <name>
-beekeeper training stop <name>
+check_busy()                      # confirm nothing else is running
+training_status(<name>)           # verify idle
+start_training(<name>)
 ```
 
 ### Switch branches
-```bash
-beekeeper branch list <name>          # see what's available
-beekeeper branch switch <name> <branch>
+```
+training_status(<name>)           # must be idle
+list_branches(<name>)
+switch_branch(<name>, <branch>)
 ```
 
-### Starting from Scratch
-
-If there are no projects, ask the user for the details you need, then:
-
-```bash
-beekeeper projects create <name> <git_url>
-# Setup runs automatically in background. Poll until ready:
-beekeeper projects info <name>        # repeat until setup_status=ready
-# Or use retry which polls for you:
-beekeeper projects retry <name>
-# Then start training:
-beekeeper training start <name>
+### Create a new project
+```
+create_project(<name>, <git_url>)
+# Setup runs in background — retry_setup polls until ready:
+retry_setup(<name>)
+start_training(<name>)
 ```
 
-Minimum required: `name` and `git_url`. Defaults: branch=main, python=3.12, train_file=train.py, env_type=venv.
-
-### Retry a failed setup
-```bash
-beekeeper projects retry <name>
-# polls automatically until setup completes or fails
-```
-
-### Remove a project
-```bash
-beekeeper projects delete <name>
-```
+Defaults: branch=main, python_version=3.12, train_file=train.py, env_type=venv.
 """
 
     return Response(
@@ -1365,143 +1272,99 @@ beekeeper projects delete <name>
 @api_key_required
 def get_agent_instructions(name):
     """
-    Download agent instructions as a markdown file.
-
-    This file can be added to a project's CLAUDE.md or similar
-    to give AI agents full access to Beekeeper functionality.
+    Project-specific agent instructions for use with the Beekeeper MCP server.
     """
     load_project(name)
 
-    host = request.host
-
     content = f"""# Beekeeper: {name}
 
-**Use the `beekeeper` CLI for all operations.**
+You are connected to Beekeeper via the **MCP server**. Use MCP tools for all operations.
 
-> **If anything in these instructions doesn't make sense or a command doesn't exist,
-> this file may be stale. Refresh it with:**
-> ```bash
-> beekeeper projects instructions {name}
-> ```
-> Reload the output into your context before continuing.
+> **If this seems stale, call `get_project_instructions("{name}")` to refresh.**
 
-Base URL: http://{host}
+## Step 1 — Get current state
 
-## Step 1 — Verify CLI is installed and current
-
-```bash
-beekeeper version
 ```
-
-- If "command not found" — **stop and tell the user** the CLI needs to be installed. Do not install it yourself.
-- If "UPDATE REQUIRED" — **stop and tell the user** their CLI is out of date and show them the update command from the output.
-- If "UP TO DATE" — proceed to Step 2.
-
-Installation command (for user to run if CLI is missing):
-
-```bash
-curl -L -o /usr/local/bin/beekeeper {CLI_RELEASE_BASE}/v{CLI_VERSION}/beekeeper && chmod +x /usr/local/bin/beekeeper
-```
-
-## Step 2 — Configure and verify connectivity
-
-```bash
-export BEEKEEPER_HOST="http://{host}"
-export BEEKEEPER_API_KEY="your-api-key"   # omit if auth is disabled
-```
-
-Then immediately verify:
-
-```bash
-beekeeper busy
-```
-
-- If this succeeds — proceed to Step 3.
-- If "Server unreachable" — **stop and ask the user for the correct server URL**. Do not retry. The hostname above may not resolve from your machine. The user knows the right address.
-
-## Step 3 — Get current state
-
-```bash
-beekeeper training status {name}
-beekeeper run analyze {name}
+training_status("{name}")
+analyze_run("{name}")
 ```
 
 ## Before Your First Analysis — Ask This Once
 
-Before analyzing training for the first time, ask the user:
+Ask the user:
 
 > "What is the primary metric I should treat as the performance signal for this project,
 > and is higher or lower better? For example: `Train/episode_reward` (higher is better),
 > or `val_loss` (lower is better)."
 
-Remember the answer so you don't ask again. This determines what counts as a good run —
-everything else explains *why* the primary metric looks the way it does.
+Remember the answer. This determines what counts as a good run.
 
 ---
 
-## CLI Commands for This Project
+## MCP Tools for This Project
 
-```bash
-beekeeper training status {name}         Current training status
-beekeeper training start {name}          Start training
-beekeeper training stop {name}           Stop training
-beekeeper run analyze {name}             Synthesized metrics + trend analysis
-beekeeper logs get {name} [tail]         Fetch log output (default: 100 lines)
-beekeeper branch list {name}             List available branches
-beekeeper branch switch {name} <branch>  Switch branch (training must be stopped)
-beekeeper projects info {name}           Project config details
-beekeeper stats                          System stats (GPU, CPU, RAM)
-beekeeper busy                           Check if any training is running
-```
+| Tool | Description |
+|------|-------------|
+| `training_status("{name}")` | Current training status |
+| `start_training("{name}")` | Start training |
+| `stop_training("{name}")` | Stop training |
+| `analyze_run("{name}")` | TensorBoard metrics + episode log trends |
+| `get_logs("{name}", tail=100)` | Raw log output |
+| `list_branches("{name}")` | Available branches |
+| `switch_branch("{name}", branch)` | Switch branch (training must be stopped) |
+| `get_project("{name}")` | Project config details |
+| `get_stats()` | GPU, CPU, RAM |
+| `check_busy()` | Is any training running? |
 
 ## Workflows
 
-### Analyze a running or completed training run
-```bash
-beekeeper run analyze {name}     # TensorBoard metrics + episode trends combined
-beekeeper logs get {name} 100    # raw log output for errors or debug messages
+### Analyze a running or completed run
+```
+analyze_run("{name}")          # TensorBoard metrics + episode trends
+get_logs("{name}", tail=100)   # raw logs for errors or debug messages
 ```
 
-`run analyze` uses both TensorBoard metrics and log-based episode analysis. If TensorBoard data isn't flushed yet, the log-based section still works.
+`analyze_run` combines TensorBoard and log-based episode analysis. If TensorBoard hasn't
+flushed yet, the log-based section still works.
 
 ### Start training
-```bash
-beekeeper busy                        # confirm nothing else is running
-beekeeper training status {name}      # verify status is idle
-beekeeper training start {name}
+```
+check_busy()                   # confirm nothing else is running
+training_status("{name}")      # verify idle
+start_training("{name}")
 ```
 
 ### Stop training
-```bash
-beekeeper training status {name}      # verify it's running
-beekeeper training stop {name}
+```
+training_status("{name}")      # verify it's running
+stop_training("{name}")
 ```
 
 ### Switch branches
-```bash
-beekeeper training status {name}      # must be idle before switching
-beekeeper branch list {name}
-beekeeper branch switch {name} <branch>
+```
+training_status("{name}")      # must be idle
+list_branches("{name}")
+switch_branch("{name}", branch)
 ```
 
-## Understanding `run analyze` Output
+## Understanding `analyze_run` Output
 
-`beekeeper run analyze {name}` returns two sections: TensorBoard metrics and episode log analysis.
+Returns two sections: TensorBoard metrics and episode log analysis.
 
 **Which run does it analyze?**
-- If training is **running** — current active run
-- If training is **idle** — most recent completed run
+- Training **running** → current active run
+- Training **idle** → most recent completed run
 
 **Key fields in each metric:**
 
 | Field | Meaning |
 |-------|---------|
 | `trend` | Overall trend: `improving`, `stable`, `worsening`, or `unstable` |
-| `recent_trend` | Trend of the last 20% of steps — may differ from overall trend |
+| `recent_trend` | Trend of the last 20% of steps — may differ from overall |
 | `improvement_percent` | Change from start to end |
 | `peak_value` | Best value reached at any point |
 | `peak_step` | Step at which the peak occurred |
-| `peak_reversal_pct` | How far the metric moved away from its peak, as % of total range |
+| `peak_reversal_pct` | How far the metric dropped from its peak, as % of total range |
 | `converged` | Has the metric stabilized? |
 | `convergence_step` | Step where convergence was detected |
 | `anomaly_count` | Number of unusual spikes or drops |
@@ -1514,35 +1377,32 @@ beekeeper branch switch {name} <branch>
 
 ## In-Depth Analysis Guide
 
-When asked to analyze training performance, follow this approach regardless of project type:
-
 **1. Identify the primary performance metric first.**
-Look for metrics with names containing: `reward`, `score`, `return`, `accuracy`, `success_rate`, `win_rate`.
+Look for: `reward`, `score`, `return`, `accuracy`, `success_rate`, `win_rate`.
 This is the headline. Everything else explains *why* it looks the way it does.
 
-**2. Scan for critical signals before summarizing anything.**
-These warrant immediate attention, in priority order:
+**2. Scan for critical signals before summarizing.**
+Priority order:
 - `trend: worsening` on any metric — actively degrading
-- `peak_reversal_pct > 50` on a reward/performance metric — peaked and significantly reversed
-- `recent_trend` differs from `trend` — the run changed direction in the final stretch
-- `peak_step` very early relative to total steps — performance peaked early and never recovered
+- `peak_reversal_pct > 50` on a performance metric — peaked and significantly reversed
+- `recent_trend` differs from `trend` — run changed direction in the final stretch
+- `peak_step` very early relative to total steps — peaked early and never recovered
 - High `anomaly_count` — spikes or instability
 
-**3. Separate metric categories before drawing conclusions.**
-- **Performance metrics** (`reward`, `score`, `accuracy`): answer "is the agent improving?"
-- **Loss metrics** (`q_loss`, `td_error`, `reconstruction_loss`): answer "is the model learning correctly?"
-- **Schedule metrics** (`epsilon`, `lr`, `temperature`): intentional decays — ignore as performance signals
-- ⚠️ Improving losses with a declining reward signal is a warning: the model may be optimizing the wrong objective.
+**3. Separate metric categories.**
+- **Performance** (`reward`, `score`, `accuracy`): "is the agent improving?"
+- **Loss** (`q_loss`, `td_error`, `reconstruction_loss`): "is the model learning correctly?"
+- **Schedule** (`epsilon`, `lr`, `temperature`): intentional decays — not performance signals
+- ⚠️ Improving losses with declining reward = model optimizing the wrong objective.
 
 **4. Use `peak_reversal_pct` and `peak_step` to tell the full story.**
-A metric labeled `improving` overall can still have degraded significantly from its peak:
-- `peak_reversal_pct > 20%`: worth mentioning
-- `peak_reversal_pct > 50%`: red flag — report peak value, peak step, and current value
-- `peak_reversal_pct > 80%`: the run largely reversed — this is likely the primary finding
+- `> 20%`: worth mentioning
+- `> 50%`: red flag — report peak value, peak step, and current value
+- `> 80%`: run largely reversed — likely the primary finding
 
 **5. Lead with the performance verdict, use losses to explain it.**
 Don't open with "reconstruction loss improved 99%." Open with where the reward/score stands,
-then use the losses to explain why — or why it degraded despite good losses.
+then use losses to explain why.
 """
 
     return Response(

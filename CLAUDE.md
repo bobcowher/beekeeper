@@ -124,6 +124,29 @@ ssh lab 'cd /home/bobcowher/beekeeper && sudo systemctl stop beekeeper && git pu
 
 Note: setup.sh rebuilds the venv and reinstalls all dependencies, then starts the service.
 
+## MCP Server
+
+The MCP server lives at `mcp_server.py` in this repo.
+No release process needed — agents run it directly from the repo.
+
+MCP config for Claude Code / Claude Desktop:
+```json
+{
+  "mcpServers": {
+    "beekeeper": {
+      "command": "python",
+      "args": ["/path/to/beekeeper/mcp_server.py"],
+      "env": {
+        "BEEKEEPER_HOST": "http://192.168.1.57:5000",
+        "BEEKEEPER_API_KEY": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+Dependencies: `fastmcp` and `requests` (in `requirements.txt`).
+
 ## Release Process
 
 **During development:** Always add changes to the `[Unreleased]` section at the top of CHANGELOG.md. This ensures nothing gets lost between Claude sessions.

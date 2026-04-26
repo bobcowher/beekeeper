@@ -4,6 +4,32 @@
 
 ### New Features
 
+**MCP Server (`mcp_server.py`)**
+- Replaced CLI with a Python MCP server using `fastmcp`
+- Exposes all Beekeeper operations as MCP tools: `list_projects`, `get_project`, `create_project`, `retry_setup`, `delete_project`, `get_project_instructions`, `start_training`, `stop_training`, `training_status`, `get_logs`, `analyze_run`, `list_branches`, `switch_branch`, `get_stats`, `check_busy`
+- Configured via `BEEKEEPER_HOST` and `BEEKEEPER_API_KEY` env vars
+- No binary to install or update — agents run the server directly from the repo
+
+**MCP documentation page** (`/api/v1/mcp`)
+- Setup guide with config snippet, tool reference, and example workflows
+- Replaces CLI reference page
+
+**Agent instructions updated to MCP**
+- Global and project-specific agent instruction endpoints now describe MCP tools
+- No more CLI version checks, install steps, or environment variable setup in instructions
+- `get_project_instructions(name)` replaces `beekeeper projects instructions <name>`
+
+### Breaking Changes
+
+- Removed CLI binary and `beekeeper-cli` repo dependency
+- Removed `/api/v1/cli/version` endpoint
+- Removed `/api/v1/cli` page (now `/api/v1/mcp`)
+- `CLI_VERSION` and `CLI_RELEASE_BASE` constants removed from `api_v1.py`
+
+---
+
+### Previous Unreleased (CLI era)
+
 **CLI v1.1.0–1.1.2: Agent-first command set**
 - Added `beekeeper stats` — GPU/CPU/memory snapshot
 - Added `beekeeper busy` — check if any training is running before deploy/restart
