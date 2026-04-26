@@ -1224,12 +1224,21 @@ curl -L -o beekeeper.exe {CLI_RELEASE_BASE}/v{CLI_VERSION}/beekeeper.exe
 
 CLI version: {CLI_VERSION}
 
-## Step 2 — Configure
+## Step 2 — Configure and verify connectivity
 
 ```bash
 export BEEKEEPER_HOST="http://{host}"
 export BEEKEEPER_API_KEY="your-api-key"   # omit if auth is disabled
 ```
+
+Then immediately verify the connection:
+
+```bash
+beekeeper busy
+```
+
+- If this succeeds — proceed to Step 3.
+- If "Server unreachable" — **stop and ask the user for the correct server URL** before doing anything else. Do not retry. The URL above (`{host}`) is where these instructions were fetched from, but it may not be reachable from your machine (e.g. hostname doesn't resolve, VPN not connected). The user knows the right address.
 
 ## Step 3 — Orient Yourself
 
@@ -1394,12 +1403,21 @@ Installation command (for user to run if CLI is missing):
 curl -L -o /usr/local/bin/beekeeper {CLI_RELEASE_BASE}/v{CLI_VERSION}/beekeeper && chmod +x /usr/local/bin/beekeeper
 ```
 
-## Step 2 — Configure
+## Step 2 — Configure and verify connectivity
 
 ```bash
 export BEEKEEPER_HOST="http://{host}"
 export BEEKEEPER_API_KEY="your-api-key"   # omit if auth is disabled
 ```
+
+Then immediately verify:
+
+```bash
+beekeeper busy
+```
+
+- If this succeeds — proceed to Step 3.
+- If "Server unreachable" — **stop and ask the user for the correct server URL**. Do not retry. The hostname above may not resolve from your machine. The user knows the right address.
 
 ## Step 3 — Get current state
 
