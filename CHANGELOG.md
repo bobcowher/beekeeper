@@ -4,6 +4,32 @@
 
 ### New Features
 
+**CLI v1.1.0–1.1.2: Agent-first command set**
+- Added `beekeeper stats` — GPU/CPU/memory snapshot
+- Added `beekeeper busy` — check if any training is running before deploy/restart
+- Added `beekeeper branch list <project>` and `beekeeper branch switch <project> <branch>`
+- Added `beekeeper projects create` — create a new project from the CLI
+- Added `beekeeper projects instructions` — fetch global agent instructions
+- Added `beekeeper version` — compare installed CLI version against server's expected version; warns when out of sync
+- Fixed `InvalidHeaders` crash (error code 26) when `BEEKEEPER_API_KEY` is unset — Authorization header is now omitted rather than sent as `Bearer ` with a trailing space (v1.1.2)
+
+**CLI version check endpoint**
+- `GET /api/v1/cli/version` returns `cli_version`, `download_url`, `download_url_windows`
+- Agents can detect version mismatch and prompt the user to reinstall
+
+**Agent instructions rewritten (CLI-first)**
+- Global instructions (`/api/v1/agent/instructions`) and per-project instructions now lead with CLI commands, not REST endpoints
+- Both files include a self-refresh callout (agents are told to re-fetch if anything seems stale or missing)
+- Connectivity verification step added: agents check server reachability once and ask the user if unreachable rather than retrying indefinitely
+- "Starting from Scratch" section added to global instructions for agents with no existing project
+
+**Bug fix: stale running state after server restart**
+- In-memory `_running` dict is cleared on restart; JSON state could still show `train_status: running`
+- Project page now reconciles state at render time and updates JSON if the process is no longer alive
+- Stop endpoint also handles stale state gracefully (updates JSON and returns success)
+
+### New Features
+
 **Setup Retry & Delete endpoints for AI agents**
 - `POST /api/v1/projects/{name}/setup/retry` — retry failed project setup; skips completed steps; returns 202, poll for `setup_status`
 - `DELETE /api/v1/projects/{name}` — delete project and all data; guards against deletion while training is running
