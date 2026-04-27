@@ -223,9 +223,13 @@ curl http://{{ host }}/api/v1/stats</pre>
                 <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1.25rem;">pip install beekeeper-mcp</pre>
 
                 <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 2 — Add to your MCP config:</strong></p>
-                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.4rem;">
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.25rem;">
                     Claude Code: <code>.claude/settings.json</code> in your project, or <code>~/.claude/settings.json</code> globally.<br>
                     Claude Desktop: <code>~/.claude/claude_desktop_config.json</code>
+                </p>
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.4rem;">
+                    Add <code>"mcpServers"</code> inside your existing settings object — don't paste this as a second <code>{ }</code> block.
+                    If <code>beekeeper-mcp</code> isn't found, run <code>which beekeeper-mcp</code> and use the full path.
                 </p>
                 <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1.25rem;">{
   "mcpServers": {
@@ -240,7 +244,8 @@ curl http://{{ host }}/api/v1/stats</pre>
 }</pre>
 
                 <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 3 — Load project context at session start:</strong></p>
-                <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 0.5rem;">get_project_instructions("{{ project.name }}")</pre>
+                <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 0.25rem;">get_project_instructions("{{ project.name }}")</pre>
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">Not sure if the server connected? Ask the agent to call <code>list_projects()</code> first — if it works, MCP is live.</p>
                 <p style="font-size: 0.85rem; color: var(--text-secondary);">
                     <a href="{{ url_for('api_v1.mcp_documentation') }}" style="color: var(--accent);">Full MCP setup guide →</a>
                 </p>

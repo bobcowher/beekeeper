@@ -28,10 +28,13 @@
     <h3 style="margin-top: 1rem; margin-bottom: 0.5rem;">1. Install the MCP server</h3>
     <pre class="api-examples">pip install beekeeper-mcp</pre>
 
-    <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">2. Configure Claude Code / Claude Desktop</h3>
-    <p style="margin-bottom: 0.5rem;">
+    <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">2. Add to your MCP config</h3>
+    <p style="margin-bottom: 0.25rem;">
         Claude Code: <code>.claude/settings.json</code> in your project, or <code>~/.claude/settings.json</code> globally.<br>
         Claude Desktop: <code>~/.claude/claude_desktop_config.json</code>
+    </p>
+    <p style="margin-bottom: 0.5rem; color: var(--text-secondary); font-size: 0.9rem;">
+        Add <code>"mcpServers"</code> as a key inside your existing settings object. Don't paste this as a second <code>{ }</code> block — that's invalid JSON.
     </p>
     <pre class="api-examples">{
   "mcpServers": {
@@ -46,16 +49,16 @@
 }</pre>
     <p style="margin-top: 0.5rem; font-size: 0.9rem; color: var(--text-secondary);">
         Omit <code>BEEKEEPER_API_KEY</code> if authentication is disabled.
-        Generate an API key from the <a href="{{ url_for('admin.index') }}">Admin Panel</a>.
+        Generate an API key from the <a href="{{ url_for('admin.index') }}">Admin Panel</a>.<br>
+        If <code>beekeeper-mcp</code> isn't found (common with conda), use the full path: run <code>which beekeeper-mcp</code> and paste the result.
     </p>
 
-    <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">3. Load project context</h3>
-    <p style="margin-bottom: 0.5rem;">Tell the agent to fetch instructions before working on a project:</p>
+    <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">3. Load project context at session start</h3>
+    <p style="margin-bottom: 0.5rem;">Once the MCP server is connected, tell the agent:</p>
     <pre class="api-examples">get_project_instructions("my-project")</pre>
     <p style="color: var(--text-secondary); font-size: 0.9rem;">
-        Or download and paste into your CLAUDE.md:
+        Replace <code>my-project</code> with the Beekeeper project name. Not sure of the name? Call <code>list_projects()</code> first.
     </p>
-    <pre class="api-examples">curl -o BEEKEEPER_my-project.md http://{{ request.host }}/api/v1/projects/my-project/agent/instructions</pre>
 </section>
 
 <section class="card">
