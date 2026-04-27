@@ -1,5 +1,40 @@
 // Beekeeper — shared functionality
 
+// Copy buttons on all .api-examples blocks
+document.addEventListener("DOMContentLoaded", function () {
+    function copyText(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            return navigator.clipboard.writeText(text);
+        }
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        return Promise.resolve();
+    }
+
+    document.querySelectorAll("pre.api-examples").forEach(pre => {
+        const btn = document.createElement("button");
+        btn.className = "copy-btn";
+        btn.textContent = "copy";
+        btn.addEventListener("click", () => {
+            copyText(pre.textContent.replace(/^copy$/, "").trim()).then(() => {
+                btn.textContent = "copied!";
+                btn.classList.add("copied");
+                setTimeout(() => {
+                    btn.textContent = "copy";
+                    btn.classList.remove("copied");
+                }, 1500);
+            });
+        });
+        pre.appendChild(btn);
+    });
+});
+
 // Collapsible sections
 document.addEventListener("DOMContentLoaded", function () {
     document.querySelectorAll(".collapsible-header").forEach(header => {

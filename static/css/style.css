@@ -954,6 +954,39 @@ label {
     margin-top: 6px;
     white-space: pre-wrap;
     word-wrap: break-word;
+    position: relative;
+}
+
+.copy-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: #222;
+    border: 1px solid #444;
+    border-radius: 3px;
+    color: #888;
+    cursor: pointer;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    line-height: 1.4;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s;
+}
+
+.api-examples:hover .copy-btn {
+    opacity: 1;
+}
+
+.copy-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.copy-btn.copied {
+    color: var(--success);
+    border-color: var(--success);
+    opacity: 1;
 }
 
 /* TB launching animation */

@@ -243,9 +243,14 @@ curl http://{{ host }}/api/v1/stats</pre>
   }
 }</pre>
 
-                <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 3 — Load project context at session start:</strong></p>
-                <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 0.25rem;">get_project_instructions("{{ project.name }}")</pre>
-                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">Not sure if the server connected? Ask the agent to call <code>list_projects()</code> first — if it works, MCP is live.</p>
+                <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 3 — Paste this into Claude to start a session:</strong></p>
+                <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 0.5rem;">You have the Beekeeper MCP server connected. Beekeeper manages ML training jobs on a remote GPU server.
+
+Get oriented on the {{ project.name }} project:
+1. Call get_project_instructions("{{ project.name }}") and read it fully
+2. Call analyze_run("{{ project.name }}") for current training state
+3. Save key context (project name, primary metric, training goals) to your memory so you have it next session
+4. Give me a status report: what's running, how it's performing, anything worth flagging</pre>
                 <p style="font-size: 0.85rem; color: var(--text-secondary);">
                     <a href="{{ url_for('api_v1.mcp_documentation') }}" style="color: var(--accent);">Full MCP setup guide →</a>
                 </p>
