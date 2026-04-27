@@ -28,13 +28,18 @@
     <h3 style="margin-top: 1rem; margin-bottom: 0.5rem;">1. Install the MCP server</h3>
     <pre class="api-examples">pip install beekeeper-mcp</pre>
 
-    <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">2. Add to your MCP config</h3>
-    <p style="margin-bottom: 0.25rem;">
-        Claude Code: <code>.claude/settings.json</code> in your project, or <code>~/.claude/settings.json</code> globally.<br>
-        Claude Desktop: <code>~/.claude/claude_desktop_config.json</code>
+    <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">2. Register the MCP server</h3>
+    <p style="margin-bottom: 0.5rem;">
+        <strong>Claude Code</strong> — run this once in your terminal:
     </p>
-    <p style="margin-bottom: 0.5rem; color: var(--text-secondary); font-size: 0.9rem;">
-        Add <code>"mcpServers"</code> as a key inside your existing settings object. Don't paste this as a second <code>{ }</code> block — that's invalid JSON.
+    <pre class="api-examples">claude mcp add beekeeper -s user -e BEEKEEPER_HOST=http://{{ request.host }} -- beekeeper-mcp</pre>
+    <p style="margin-top: 0.5rem; margin-bottom: 0.75rem; font-size: 0.9rem; color: var(--text-secondary);">
+        If auth is enabled, also add <code>-e BEEKEEPER_API_KEY=your-api-key</code> before <code>--</code>.
+        Generate an API key from the <a href="{{ url_for('admin.index') }}">Admin Panel</a>.<br>
+        If <code>beekeeper-mcp</code> isn't found (common with conda), use the full path: run <code>which beekeeper-mcp</code> and use that instead.
+    </p>
+    <p style="margin-bottom: 0.5rem;">
+        <strong>Claude Desktop</strong> — add to <code>~/.claude/claude_desktop_config.json</code>:
     </p>
     <pre class="api-examples">{
   "mcpServers": {
@@ -49,8 +54,6 @@
 }</pre>
     <p style="margin-top: 0.5rem; font-size: 0.9rem; color: var(--text-secondary);">
         Omit <code>BEEKEEPER_API_KEY</code> if authentication is disabled.
-        Generate an API key from the <a href="{{ url_for('admin.index') }}">Admin Panel</a>.<br>
-        If <code>beekeeper-mcp</code> isn't found (common with conda), use the full path: run <code>which beekeeper-mcp</code> and paste the result.
     </p>
 
     <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">3. Paste this into your first message</h3>
