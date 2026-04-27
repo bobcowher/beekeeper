@@ -219,18 +219,39 @@ curl http://{{ host }}/api/v1/stats</pre>
                     Connect your agent via the Beekeeper MCP server. The MCP server exposes all operations as tools — no binary to install.
                 </p>
 
-                <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 1 — Add project instructions to agent context:</strong></p>
+                <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 1 — Add project instructions to your ML project repo:</strong></p>
                 <div style="margin-bottom: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
                     <a href="{{ url_for('api_v1.get_agent_instructions', name=project.name) }}"
                        class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem;">
                         &#8659; Download BEEKEEPER_{{ project.name }}.md
                     </a>
-                    <span style="color: var(--text-secondary); font-size: 0.85rem;">Add to CLAUDE.md or paste into agent context</span>
+                    <span style="color: var(--text-secondary); font-size: 0.85rem;">Copy into your project repo as <code>CLAUDE.md</code></span>
                 </div>
-                <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1rem;">curl -o BEEKEEPER_{{ project.name }}.md http://{{ host }}/api/v1/projects/{{ project.name }}/agent/instructions</pre>
+                <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1.25rem;">curl -o CLAUDE.md http://{{ host }}/api/v1/projects/{{ project.name }}/agent/instructions</pre>
 
-                <p style="font-size: 0.85rem; color: var(--text-secondary);">
-                    <a href="{{ url_for('api_v1.mcp_documentation') }}" style="color: var(--accent);">MCP setup guide →</a>
+                <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 2 — Set up the MCP server:</strong></p>
+                <div style="margin-bottom: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
+                    <a href="{{ url_for('api_v1.download_mcp_server') }}"
+                       class="btn" style="display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.85rem;">
+                        &#8659; Download mcp_server.py
+                    </a>
+                    <span style="color: var(--text-secondary); font-size: 0.85rem;">Save to your machine, then add to MCP config:</span>
+                </div>
+                <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 0.5rem;">{
+  "mcpServers": {
+    "beekeeper": {
+      "command": "python",
+      "args": ["{{ mcp_server_path }}"],
+      "env": {
+        "BEEKEEPER_HOST": "http://{{ host }}",
+        "BEEKEEPER_API_KEY": "your-api-key"
+      }
+    }
+  }
+}</pre>
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                    Omit <code>BEEKEEPER_API_KEY</code> if auth is disabled. &nbsp;·&nbsp;
+                    <a href="{{ url_for('api_v1.mcp_documentation') }}" style="color: var(--accent);">Full MCP setup guide →</a>
                 </p>
                 <details>
                     <summary style="cursor: pointer; color: var(--text-secondary); font-size: 0.9rem;">MCP tools for this project</summary>

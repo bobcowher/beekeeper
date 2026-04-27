@@ -1117,7 +1117,18 @@ def api_documentation():
 def mcp_documentation():
     """Render the MCP setup guide."""
     from flask import render_template
-    return render_template("mcp.html")
+    beekeeper_home = current_app.config["BEEKEEPER_HOME"]
+    mcp_server_path = os.path.join(beekeeper_home, "mcp_server.py")
+    return render_template("mcp.html", mcp_server_path=mcp_server_path)
+
+
+@api_v1_bp.route("/mcp/server")
+def download_mcp_server():
+    """Download mcp_server.py."""
+    from flask import send_file
+    beekeeper_home = current_app.config["BEEKEEPER_HOME"]
+    path = os.path.join(beekeeper_home, "mcp_server.py")
+    return send_file(path, as_attachment=True, download_name="mcp_server.py", mimetype="text/x-python")
 
 
 # ---------------------------------------------------------------------------

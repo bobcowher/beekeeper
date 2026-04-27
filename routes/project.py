@@ -98,7 +98,10 @@ def detail(name):
             p.save(projects_dir)
         project['train_status'] = 'stopped'
 
-    return render_template("project.html", project=project, training=training)
+    beekeeper_home = current_app.config["BEEKEEPER_HOME"]
+    mcp_server_path = os.path.join(beekeeper_home, "mcp_server.py")
+    return render_template("project.html", project=project, training=training,
+                           mcp_server_path=mcp_server_path)
 
 
 @project_bp.route("/<name>/edit")

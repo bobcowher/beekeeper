@@ -25,7 +25,14 @@
 <section class="card">
     <h2>Setup</h2>
 
-    <h3 style="margin-top: 1rem; margin-bottom: 0.5rem;">1. Install dependencies</h3>
+    <h3 style="margin-top: 1rem; margin-bottom: 0.5rem;">1. Get the MCP server script</h3>
+    <div style="margin-bottom: 0.5rem; display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
+        <a href="{{ url_for('api_v1.download_mcp_server') }}" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem;">
+            &#8659; Download mcp_server.py
+        </a>
+        <span style="color: var(--text-secondary); font-size: 0.9rem;">Save it anywhere on the machine running your agent</span>
+    </div>
+    <p style="margin-top: 0.5rem; margin-bottom: 0.5rem; font-size: 0.9rem;">Then install the dependencies:</p>
     <pre class="api-examples">pip install fastmcp requests</pre>
 
     <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">2. Configure Claude Code / Claude Desktop</h3>
@@ -34,7 +41,7 @@
   "mcpServers": {
     "beekeeper": {
       "command": "python",
-      "args": ["/path/to/beekeeper/mcp_server.py"],
+      "args": ["{{ mcp_server_path }}"],
       "env": {
         "BEEKEEPER_HOST": "http://{{ request.host }}",
         "BEEKEEPER_API_KEY": "your-api-key"
