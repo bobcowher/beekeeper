@@ -219,16 +219,8 @@ curl http://{{ host }}/api/v1/stats</pre>
                     Connect your agent via the Beekeeper MCP server. Run these steps on your local machine — not the lab server.
                 </p>
 
-                <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 1 — Download mcp_server.py to your local machine:</strong></p>
-                <div style="margin-bottom: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
-                    <a href="{{ url_for('api_v1.download_mcp_server') }}"
-                       class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.85rem;">
-                        &#8659; Download mcp_server.py
-                    </a>
-                </div>
-                <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 0.25rem;">curl -o ~/mcp_server.py http://{{ host }}/api/v1/mcp/server
-pip install fastmcp requests</pre>
-                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1.25rem;">Save it anywhere stable — your home directory or project folder works fine.</p>
+                <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 1 — Install the MCP server:</strong></p>
+                <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1.25rem;">pip install beekeeper-mcp</pre>
 
                 <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 2 — Add to your MCP config:</strong></p>
                 <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.4rem;">
@@ -238,8 +230,7 @@ pip install fastmcp requests</pre>
                 <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1.25rem;">{
   "mcpServers": {
     "beekeeper": {
-      "command": "python",
-      "args": ["/path/to/mcp_server.py"],
+      "command": "beekeeper-mcp",
       "env": {
         "BEEKEEPER_HOST": "http://{{ host }}",
         "BEEKEEPER_API_KEY": "your-api-key"

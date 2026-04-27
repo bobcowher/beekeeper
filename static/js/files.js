@@ -130,9 +130,18 @@
         const host = window.location.host;
         const url = `http://${host}${baseUrl}/${filePath}`;
         const command = `curl -O ${url}`;
-        navigator.clipboard.writeText(command).then(() => {
-            // Could add a toast notification here if desired
-        });
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(command);
+        } else {
+            const ta = document.createElement('textarea');
+            ta.value = command;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+        }
     }
 
     function renderListing(dirPath) {
