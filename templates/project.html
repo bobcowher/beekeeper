@@ -6,8 +6,10 @@
 <div class="page-header">
     <a href="/" class="back-btn">&larr; Back</a>
     <h1>{{ project.name }}</h1>
-    <span class="status-badge status-{{ project.get('setup_status', 'pending') }}">
-        {{ project.get('setup_status', 'pending') | replace('_', ' ') }}
+    {% set train_status = project.get('train_status', 'idle') %}
+    {% set display_status = train_status if train_status != 'idle' else project.get('setup_status', 'pending') %}
+    <span class="status-badge status-{{ display_status }}">
+        {{ display_status | replace('_', ' ') }}
     </span>
 </div>
 
