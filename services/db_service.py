@@ -106,6 +106,20 @@ class DatabaseService:
                 except Exception:
                     pass  # column already exists
 
+            # Add annotation columns to training_runs if missing
+            cursor = conn.execute("PRAGMA table_info(training_runs)")
+            tr_columns = {row['name'] for row in cursor.fetchall()}
+            for col, typedef in [
+                ('notes',   "TEXT NOT NULL DEFAULT ''"),
+                ('notable', 'INTEGER NOT NULL DEFAULT 0'),
+                ('tags',    "TEXT NOT NULL DEFAULT ''"),
+            ]:
+                if col not in tr_columns:
+                    try:
+                        conn.execute(f'ALTER TABLE training_runs ADD COLUMN {col} {typedef}')
+                    except Exception:
+                        pass
+
             conn.commit()
 
     # User operations
@@ -452,13 +466,29 @@ class DatabaseService:
             ).fetchone()
             return row['count']
 
-    def prune_old_runs(self, project_name: str, keep_last: int = 20) -> list[dict]:
-        """Delete runs beyond retention limit. Returns list of deleted runs."""
+    def update_run_annotations(self, run_id: int, **fields):
+        """Update notes, notable, and/or tags on a run record."""
+        allowed = {'notes': str, 'notable': int, 'tags': str}
+        updates, values = [], []
+        for field, value in fields.items():
+            if field in allowed:
+                updates.append(f'{field} = ?')
+                values.append(allowed[field](value))
+        if not updates:
+            return
+        values.append(run_id)
         with self._get_connection() as conn:
-            # Get runs to delete (all but the most recent keep_last)
+            conn.execute(f"UPDATE training_runs SET {', '.join(updates)} WHERE id = ?", values)
+            conn.commit()
+
+    def prune_old_runs(self, project_name: str, keep_last: int = 20) -> list[dict]:
+        """Delete non-notable runs beyond retention limit. Notable runs are never pruned.
+        Returns list of deleted runs."""
+        with self._get_connection() as conn:
+            # Only count/delete non-notable runs; notable runs are exempt
             rows = conn.execute(
                 '''SELECT * FROM training_runs
-                   WHERE project_name = ?
+                   WHERE project_name = ? AND notable = 0
                    ORDER BY started_at DESC
                    LIMIT -1 OFFSET ?''',
                 (project_name, keep_last)
@@ -466,7 +496,6 @@ class DatabaseService:
 
             deleted_runs = [dict(row) for row in rows]
 
-            # Delete them
             if deleted_runs:
                 ids_to_delete = [row['id'] for row in deleted_runs]
                 placeholders = ','.join('?' * len(ids_to_delete))

@@ -585,11 +585,20 @@ def _execute_training(projects_dir, name, project, python_bin):
             tb_logdir_base = os.path.join(workspace_dir, project.get("tensorboard_log_dir", "runs"))
 
             # Auto-cleanup old TensorBoard logs BEFORE creating the new dir,
-            # so the new dir doesn't consume one of the keep slots
+            # so the new dir doesn't consume one of the keep slots.
+            # Notable runs' TB dirs are exempt from pruning.
             tb_logs_max_runs = project.get('tb_logs_max_runs', 20)
             if tb_logs_max_runs > 0:
                 from services.tensorboard_service import cleanup_old_tb_logs
-                cleanup_result = cleanup_old_tb_logs(tb_logdir_base, tb_logs_max_runs)
+                protected_tb_dirs = set()
+                try:
+                    for r in get_db().get_training_runs(name, limit=1000):
+                        if r.get('notable') and r.get('tensorboard_dir'):
+                            protected_tb_dirs.add(os.path.basename(r['tensorboard_dir']))
+                except Exception:
+                    pass
+                cleanup_result = cleanup_old_tb_logs(tb_logdir_base, tb_logs_max_runs,
+                                                      protected_dirs=protected_tb_dirs)
                 if cleanup_result['deleted']:
                     log.info(f"Auto-cleanup: {cleanup_result['message']}")
 
@@ -599,15 +608,16 @@ def _execute_training(projects_dir, name, project, python_bin):
             os.makedirs(tb_run_dir, exist_ok=True)
             tb_run_dir_rel = f"{project.get('tensorboard_log_dir', 'runs')}/{run_timestamp}"
 
-            # Auto-cleanup old run history if configured
+            # Auto-cleanup old run history if configured; notable runs are exempt.
             run_history_max_runs = project.get('run_history_max_runs', 10)
             if run_history_max_runs > 0:
                 runs = get_db().get_training_runs(name, limit=1000)
                 runs.sort(key=lambda r: r['started_at'], reverse=True)
                 deleted_count = 0
                 for run in runs[run_history_max_runs:]:
-                    get_db().delete_training_run(run['id'])
-                    deleted_count += 1
+                    if not run.get('notable', 0):
+                        get_db().delete_training_run(run['id'])
+                        deleted_count += 1
                 if deleted_count > 0:
                     log.info(f"Auto-cleanup: Deleted {deleted_count} old run record(s), kept {min(len(runs), run_history_max_runs)} recent run(s)")
 

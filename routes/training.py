@@ -184,6 +184,81 @@ def history_log(name, run_id):
                      download_name=f"{name}-run-{run_id}.log")
 
 
+@training_bp.route("/<name>/history/diff")
+def history_diff(name):
+    """Git diff between two runs' commits."""
+    import subprocess
+    from services.db_service import get_db
+
+    from_id = request.args.get('from', type=int)
+    to_id = request.args.get('to', type=int)
+    if not from_id or not to_id:
+        return jsonify({"error": "from and to run IDs required"}), 400
+
+    from_run = get_db().get_training_run(from_id)
+    to_run = get_db().get_training_run(to_id)
+    if not from_run or from_run['project_name'] != name:
+        return jsonify({"error": "Run not found"}), 404
+    if not to_run or to_run['project_name'] != name:
+        return jsonify({"error": "Run not found"}), 404
+
+    from_sha = from_run.get('commit_sha')
+    to_sha = to_run.get('commit_sha')
+    if not from_sha or not to_sha:
+        return jsonify({"error": "Commit SHA not available for one or both runs"}), 422
+
+    if from_sha == to_sha:
+        return jsonify({"diff": "", "same_commit": True,
+                        "from_sha": from_sha[:7], "to_sha": to_sha[:7]})
+
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    workspace_dir = os.path.join(projects_dir, name, "workspace")
+    if not os.path.isdir(workspace_dir):
+        return jsonify({"error": "Workspace not found"}), 422
+
+    try:
+        result = subprocess.run(
+            ["git", "diff", from_sha, to_sha],
+            cwd=workspace_dir, capture_output=True, text=True, timeout=30
+        )
+        if result.returncode != 0:
+            return jsonify({"error": f"git diff failed: {result.stderr.strip()}"}), 422
+        return jsonify({
+            "diff": result.stdout,
+            "same_commit": False,
+            "from_sha": from_sha[:7],
+            "to_sha": to_sha[:7]
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "git diff timed out"}), 422
+    except Exception as e:
+        return jsonify({"error": str(e)}), 422
+
+
+@training_bp.route("/<name>/history/<int:run_id>", methods=["PATCH"])
+def update_run(name, run_id):
+    """Update annotations (notes, notable, tags) on a run."""
+    from services.db_service import get_db
+
+    run = get_db().get_training_run(run_id)
+    if not run or run['project_name'] != name:
+        return jsonify({"error": "Run not found"}), 404
+
+    data = request.get_json() or {}
+    kwargs = {}
+    if 'notes' in data:
+        kwargs['notes'] = str(data['notes'])
+    if 'notable' in data:
+        kwargs['notable'] = 1 if data['notable'] else 0
+    if 'tags' in data:
+        kwargs['tags'] = str(data['tags'])
+
+    if kwargs:
+        get_db().update_run_annotations(run_id, **kwargs)
+
+    return jsonify({"ok": True})
+
+
 @training_bp.route("/<name>/history/clear", methods=["POST"])
 def clear_history(name):
     """Clear all run history for a project."""

@@ -693,13 +693,15 @@ def _generate_summary(
     return ". ".join(parts)
 
 
-def cleanup_old_tb_logs(tb_logdir: str, keep_count: int) -> dict:
+def cleanup_old_tb_logs(tb_logdir: str, keep_count: int, protected_dirs: set = None) -> dict:
     """
     Keep only the N most recent TensorBoard run directories.
+    Directories in protected_dirs (e.g. from notable runs) are never deleted.
 
     Args:
         tb_logdir: Path to TensorBoard log directory (e.g., workspace/runs)
-        keep_count: Number of recent runs to keep (0 = keep all)
+        keep_count: Number of recent non-protected runs to keep (0 = keep all)
+        protected_dirs: Set of directory names that must not be deleted
 
     Returns:
         dict with 'deleted': list of deleted directory names, 'kept': list of kept directory names
@@ -766,10 +768,20 @@ def cleanup_old_tb_logs(tb_logdir: str, keep_count: int) -> dict:
     subdirs.sort(key=lambda x: x[2], reverse=True)
     log.info(f"Sorted subdirs (newest first): {[(name, ts.strftime('%Y-%m-%d %H:%M:%S')) for name, _, ts in subdirs]}")
 
-    # Split into keep and delete lists
-    to_keep = subdirs[:keep_count]
-    to_delete = subdirs[keep_count:]
+    # Separate protected dirs (notable runs) from candidates
+    if protected_dirs:
+        protected = [s for s in subdirs if s[0] in protected_dirs]
+        candidates = [s for s in subdirs if s[0] not in protected_dirs]
+    else:
+        protected = []
+        candidates = subdirs
 
+    # Apply keep_count limit only to non-protected candidates
+    to_keep = candidates[:keep_count] + protected
+    to_delete = candidates[keep_count:]
+
+    if protected:
+        log.info(f"Protected (notable) TB dirs: {[name for name, _, _ in protected]}")
     log.info(f"Will KEEP ({len(to_keep)}): {[name for name, _, _ in to_keep]}")
     log.info(f"Will DELETE ({len(to_delete)}): {[name for name, _, _ in to_delete]}")
 

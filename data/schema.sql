@@ -61,6 +61,11 @@ CREATE TABLE IF NOT EXISTS training_runs (
     log_file_path TEXT,  -- relative path: run_logs/run-{timestamp}-{id}.log
     tensorboard_dir TEXT,  -- relative path: workspace/runs/{timestamp}
 
+    -- Annotations
+    notes      TEXT    NOT NULL DEFAULT '',
+    notable    INTEGER NOT NULL DEFAULT 0,
+    tags       TEXT    NOT NULL DEFAULT '',
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

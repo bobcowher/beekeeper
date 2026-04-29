@@ -1434,3 +1434,195 @@ label {
     font-size: 13px;
     color: var(--accent);
 }
+
+/* ── Run history annotations ─────────────────────────────────── */
+
+.star-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.1rem;
+    color: var(--text-secondary);
+    padding: 2px 4px;
+    line-height: 1;
+    transition: color 0.15s;
+}
+.star-btn:hover { color: var(--accent); }
+.star-btn.notable { color: var(--accent); }
+
+.tag-chip {
+    display: inline-block;
+    padding: 1px 6px;
+    background: var(--accent-dim);
+    color: var(--text-bright);
+    border-radius: 3px;
+    font-size: 0.72rem;
+    font-family: var(--font-mono);
+    margin: 0 2px 2px 0;
+}
+
+.tag-add-btn {
+    background: none;
+    border: 1px dashed var(--border);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    padding: 1px 5px;
+    cursor: pointer;
+    line-height: 1.4;
+}
+.tag-add-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.tag-editor-active {
+    width: 140px;
+    padding: 2px 6px;
+    background: var(--bg-input);
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    font-family: var(--font-mono);
+}
+
+.notes-row td {
+    padding: 0 0.75rem 0.5rem 2.5rem;
+    background: var(--bg-card);
+}
+
+.notes-editor {
+    width: 100%;
+    min-height: 56px;
+    max-height: 200px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 0.83rem;
+    padding: 6px 8px;
+    resize: vertical;
+}
+.notes-editor:focus { border-color: var(--accent); outline: none; }
+
+/* Filter bar */
+.history-filter-bar {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.filter-notable-btn {
+    padding: 4px 10px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.83rem;
+    transition: all 0.15s;
+}
+.filter-notable-btn:hover { border-color: var(--accent); color: var(--accent); }
+.filter-notable-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(232,185,49,0.1); }
+
+.filter-tag-input {
+    padding: 4px 8px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text-primary);
+    font-size: 0.83rem;
+    width: 150px;
+}
+.filter-tag-input:focus { border-color: var(--accent); outline: none; }
+
+/* Compare modal */
+.compare-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    z-index: 2000;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 2rem 1rem;
+    overflow-y: auto;
+}
+
+.compare-modal {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    width: 100%;
+    max-width: 1000px;
+    padding: 1.5rem;
+}
+
+.compare-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.75rem;
+}
+
+.compare-runs-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.compare-run-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.85rem;
+    font-size: 0.85rem;
+    line-height: 1.6;
+}
+
+.compare-run-card h4 {
+    margin: 0 0 0.5rem 0;
+    color: var(--accent);
+    font-size: 0.9rem;
+}
+
+.compare-run-card em {
+    color: var(--text-secondary);
+    font-style: normal;
+}
+
+.diff-section-label {
+    font-size: 0.83rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.4rem;
+}
+
+.diff-view {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    overflow-x: auto;
+    max-height: 480px;
+    overflow-y: auto;
+    white-space: pre;
+    line-height: 1.45;
+}
+
+.diff-line-add    { color: var(--success); }
+.diff-line-remove { color: var(--danger); }
+.diff-line-header { color: var(--running); }
+.diff-line-meta   { color: var(--text-secondary); }
+
+.compare-checkbox {
+    cursor: pointer;
+    accent-color: var(--accent);
+    width: 14px;
+    height: 14px;
+}
