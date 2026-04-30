@@ -64,7 +64,7 @@
         const filtered = getFiltered();
 
         let html = '<div class="history-filter-bar">';
-        html += `<button class="filter-notable-btn${filterNotable ? ' active' : ''}" id="filter-notable-btn">&#9733; Notable only</button>`;
+        html += `<button class="filter-notable-btn${filterNotable ? ' active' : ''}" id="filter-notable-btn">&#9733; Starred</button>`;
         html += `<input type="text" class="filter-tag-input" id="filter-tag-input" placeholder="Filter by tag…" value="${escHtml(filterTag)}">`;
         if (checkedIds.size === 2) {
             html += `<button class="btn btn-secondary btn-sm" id="compare-btn">Compare selected</button>`;
