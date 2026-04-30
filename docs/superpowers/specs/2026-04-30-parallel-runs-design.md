@@ -21,7 +21,7 @@ Beekeeper is built around a single run per project: one branch, one workspace, o
 
 - System-wide capacity enforcement (future work)
 - Distributed multi-worker execution (future work, but this design is forward-compatible)
-- Persistent worker slots (full clone per run, deleted on completion)
+- Persistent worker slots (workspaces reused across runs — full clone per run is the chosen approach)
 
 ---
 
@@ -87,7 +87,15 @@ The SSE stream endpoint resolves log path from `_running[run_id]["log_path"]` �
 
 Each run starts its own TB process pointing to its workspace's TB log dir (`workspace-{run_id}/runs/` for parallel runs, `workspace/runs/` for the primary). Each TB process gets its own port. The run row in the UI shows a TB button if a port is available for that run.
 
-The existing "shared TB" process (pointing to the primary workspace's base `runs/` dir) continues to show all historical run data when viewing past runs.
+**TB log preservation on workspace deletion:** Before a parallel workspace (`workspace-{run_id}/`) is deleted, its TB run directory is moved into the primary workspace's TB base dir:
+
+```
+workspace-{run_id}/runs/{timestamp}/  →  workspace/runs/{timestamp}/
+```
+
+This means the `tensorboard_dir` value stored in the DB (`runs/{timestamp}`) remains valid — it is now relative to the primary `workspace/` which is never deleted. The primary TB process (watching `workspace/runs/`) picks up the moved data automatically.
+
+Training logs are already safe: they are archived to `run_logs/run-{timestamp}-{id}.log` (project-level, outside any workspace) before the process record is finalized.
 
 ---
 
