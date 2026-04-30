@@ -170,15 +170,26 @@ def analyze_metric(metric_name: str, data: list) -> dict:
     # Trend detection (uses internal smoothing already)
     trend = detect_trend(values, metric_name)
 
-    # Recent trend: last 20% of run
+    # Recent trend: last 20% of run, computed on EMA-smoothed values to avoid
+    # linear regression being fooled by a late upturn preceded by noisy volatility
     recent_n = max(5, len(values) // 5)
-    recent_trend = detect_trend(values[-recent_n:], metric_name) if len(values) >= recent_n * 2 else trend
+    recent_trend = detect_trend(smoothed_values[-recent_n:], metric_name) if len(values) >= recent_n * 2 else trend
 
     # Peak detection on EMA-smoothed values — avoids one-episode outlier spikes
     # Scheduled metrics (epsilon, lr) intentionally decay — skip peak reversal.
     is_scheduled = _is_scheduled_metric(metric_name)
     smoothed_range = max(smoothed_values) - min(smoothed_values) if max(smoothed_values) != min(smoothed_values) else 1
     smoothed_final = smoothed_values[-1]
+
+    # Late-window slope: slope of EMA over final 10% of steps, normalized by value range.
+    # Positive = rising right now, negative = falling. More granular than recent_trend label.
+    late_n = max(3, len(smoothed_values) // 10)
+    late_window = smoothed_values[-late_n:]
+    if len(late_window) >= 2 and smoothed_range > 0:
+        late_coeffs = np.polyfit(np.arange(len(late_window)), late_window, 1)
+        late_slope_pct = round(float(late_coeffs[0] * len(late_window) / smoothed_range * 100), 1)
+    else:
+        late_slope_pct = 0.0
 
     if lower_better:
         peak_value = min(smoothed_values)
@@ -209,6 +220,7 @@ def analyze_metric(metric_name: str, data: list) -> dict:
     return {
         'trend': trend,
         'recent_trend': recent_trend,
+        'late_slope_pct': late_slope_pct,
         'peak_value': round(float(peak_value), 4),
         'peak_step': int(peak_step),
         'peak_reversal_pct': round(float(peak_reversal_pct), 1),
