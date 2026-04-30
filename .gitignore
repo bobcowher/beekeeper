@@ -7,3 +7,4 @@ config.properties
 data/beekeeper.db
 .claude/
 static/bin/
+.superpowers/
