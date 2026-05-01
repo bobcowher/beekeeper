@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- Improved 400 error when starting a run while one is active and parallel runs are disabled — message now explains how to enable parallel runs
+
 ---
 
 ## [1.0.7] - 2026-04-30

@@ -476,7 +476,7 @@ def start_training(projects_dir, name, branch=None):
 
         if not parallel_enabled and len(active_runs) > 0:
             get_db().delete_training_run(run_id)
-            return {"error": "Training is already running"}
+            return {"error": "Training is already running. To run multiple runs simultaneously, enable Parallel Runs in Edit Project."}
 
         if parallel_enabled and len(active_runs) >= max_runs:
             get_db().delete_training_run(run_id)
