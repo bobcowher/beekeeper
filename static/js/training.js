@@ -196,6 +196,11 @@ function startLogStream(runId, terminalEl) {
     src.onmessage = (e) => {
         if (e.data) {
             terminalEl.textContent += e.data + '\n';
+            // Cap at 2000 lines to prevent memory bloat on long runs
+            const lines = terminalEl.textContent.split('\n');
+            if (lines.length > 2100) {
+                terminalEl.textContent = lines.slice(lines.length - 2000).join('\n');
+            }
             terminalEl.scrollTop = terminalEl.scrollHeight;
         }
     };
