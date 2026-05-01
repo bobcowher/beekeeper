@@ -932,7 +932,7 @@ def get_run_logs_json(name, run_id):
             'end_byte': actual_end,
             'bytes_returned': len(content_bytes),
             'truncated_before': actual_start > 0,
-            'truncated_after': False,
+            'truncated_after': actual_end < file_size,
             'line_count': content.count('\n')
         })
 
