@@ -495,25 +495,52 @@ def start_training(projects_dir, name, branch=None):
     return {"run_id": run_id, "status": "starting"}
 
 
-def _execute_training(projects_dir, name, project, python_bin, run_id=None, branch=None, workspace_dir=None):
+def _execute_training(projects_dir, name, project, python_bin, run_id, branch, workspace_dir):
     """Run the full pre-launch sequence and start the training subprocess (runs in background thread)."""
-    log_path = os.path.join(projects_dir, name, "train.log")
+    is_parallel = workspace_dir != os.path.join(projects_dir, name, "workspace")
+    log_path = (
+        os.path.join(projects_dir, name, f"train-{run_id}.log")
+        if is_parallel
+        else os.path.join(projects_dir, name, "train.log")
+    )
 
     def _abort(msg):
-        log.error("Pre-launch failed for %s: %s", name, msg)
+        log.error("Pre-launch failed for %s run %d: %s", name, run_id, msg)
         try:
             with open(log_path, "w") as lf:
                 lf.write(f"[beekeeper] Pre-launch failed: {msg}\n")
         except Exception:
             pass
-        _update_project_json(projects_dir, name, train_status="stopped")
+        from services.db_service import get_db
+        get_db().update_training_run(run_id, status="crashed")
         with _lock:
-            _running.pop(name, None)
+            _running.pop(run_id, None)
+            remaining_after = _get_runs_for_project(name)
+        if not remaining_after:
+            _update_project_json(projects_dir, name, train_status="stopped")
+        if is_parallel and os.path.isdir(workspace_dir):
+            import shutil
+            try:
+                shutil.rmtree(workspace_dir)
+            except Exception:
+                pass
 
-    workspace_dir = os.path.join(projects_dir, name, "workspace")
+    # For parallel runs: clone fresh workspace
+    if is_parallel:
+        git_url = project.get("git_url", "")
+        try:
+            result = subprocess.run(
+                ["git", "clone", git_url, workspace_dir],
+                capture_output=True, text=True, timeout=300,
+            )
+            if result.returncode != 0:
+                return _abort(f"Git clone failed: {result.stderr.strip()[-500:]}")
+        except subprocess.TimeoutExpired:
+            return _abort("Git clone timed out (300s)")
+        except Exception as e:
+            return _abort(f"Git clone failed: {e}")
 
     # Sync to remote — remote is always authoritative
-    branch = project.get("branch", "main")
     try:
         fetch = subprocess.run(
             ["git", "fetch", "origin"],
@@ -536,23 +563,19 @@ def _execute_training(projects_dir, name, project, python_bin, run_id=None, bran
 
     run_meta = _collect_run_metadata(workspace_dir, python_bin, branch)
 
-    # Create run record in database
+    # Update the pre-created DB record with full metadata
     from services.db_service import get_db
-    run_id = get_db().create_training_run(
-        project_name=name,
-        metadata={
-            'started_at': datetime.datetime.now(),
-            'status': 'running',
-            'commit_sha': run_meta['commit_sha'],
-            'commit_message': run_meta['commit_msg'],
-            'branch': branch,
-            'python_version': run_meta['python_version'],
-            'gpu_info': json.dumps(run_meta['gpu_info']),
-            'hostname': run_meta['hostname'],
-        }
+    get_db().update_training_run(
+        run_id,
+        status="running",
+        commit_sha=run_meta["commit_sha"],
+        commit_message=run_meta["commit_msg"],
+        python_version=run_meta["python_version"],
+        gpu_info=json.dumps(run_meta["gpu_info"]),
+        hostname=run_meta["hostname"],
     )
 
-    # Ensure data dir symlink exists (before setup script so setup.sh can use it)
+    # Ensure data dir symlink (before setup script so it can use it)
     if project.get("data_dir_enabled") and project.get("data_dir_remote"):
         data_dir_remote = project["data_dir_remote"]
         data_dir_local = project.get("data_dir_local", "data")
@@ -571,22 +594,19 @@ def _execute_training(projects_dir, name, project, python_bin, run_id=None, bran
         else:
             return _abort(f"Data directory '{data_dir_remote}' does not exist on this server.")
 
-    # Run setup script if configured and present (in activated environment)
+    # Run setup script if configured
     setup_script = project.get("setup_script", "")
     if setup_script:
         script_path = os.path.join(workspace_dir, setup_script)
         if os.path.isfile(script_path):
             try:
-                # Run setup script in the activated environment
                 if project.get("env_type") == "conda":
-                    # Use conda run to execute in the conda environment
                     from services.python_versions import _find_conda_bin
                     conda_bin = _find_conda_bin()
                     env_name = f"beekeeper-{name}"
                     cmd = [conda_bin, "run", "-n", env_name, "bash", script_path]
                     env = None
                 else:
-                    # For venv, set environment variables so python/pip resolve correctly
                     venv_path = os.path.join(projects_dir, name, "venv")
                     cmd = ["bash", script_path]
                     env = os.environ.copy()
@@ -594,9 +614,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_id=None, bran
                     env["PATH"] = f"{venv_path}/bin:{env.get('PATH', '')}"
 
                 result = subprocess.run(
-                    cmd,
-                    cwd=workspace_dir,
-                    env=env,
+                    cmd, cwd=workspace_dir, env=env,
                     capture_output=True, text=True, timeout=300,
                 )
                 if result.returncode != 0:
@@ -606,7 +624,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_id=None, bran
             except Exception as e:
                 return _abort(f"Setup script failed: {e}")
 
-    # Install/update dependencies so newly added packages are always present
+    # Install/update dependencies
     req_file = project.get("requirements_file", "requirements.txt")
     req_path = os.path.join(workspace_dir, req_file)
     if os.path.isfile(req_path):
@@ -624,19 +642,15 @@ def _execute_training(projects_dir, name, project, python_bin, run_id=None, bran
 
     train_file = project.get("train_file", "train.py")
     train_path = os.path.join(workspace_dir, train_file)
-
     if not os.path.isfile(train_path):
         return _abort(f"Training file not found: {train_file}")
 
-    # Open log file — truncate previous run's log on new start (log_path defined in _abort closure)
     log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
     _write_run_header(log_fd, run_meta, project)
 
-    # Build environment: inherit system env + project-specific vars
     proc_env = os.environ.copy()
     proc_env.update(project.get("env_vars") or {})
 
-    # Start training process
     try:
         proc = subprocess.Popen(
             [python_bin, "-u", train_file],
@@ -650,16 +664,15 @@ def _execute_training(projects_dir, name, project, python_bin, run_id=None, bran
         os.close(log_fd)
         return _abort(f"Failed to start training: {e}")
 
-    # Close our copy of the fd — the child process has its own
     os.close(log_fd)
 
-    # Kill any standalone TB before starting a new one with training
+    # Kill any standalone TB for this project before starting a new one
     with _lock:
         old_tb = _tb_running.pop(name, None)
     if old_tb:
         _kill_tb_process(old_tb["tb_process"])
 
-    # Start tensorboard with timestamped directory
+    # Start tensorboard for this run's workspace
     tb_process = None
     tb_port = None
     tb_run_dir_rel = None
@@ -669,76 +682,70 @@ def _execute_training(projects_dir, name, project, python_bin, run_id=None, bran
         if tb_port:
             tb_logdir_base = os.path.join(workspace_dir, project.get("tensorboard_log_dir", "runs"))
 
-            # Auto-cleanup old TensorBoard logs BEFORE creating the new dir,
-            # so the new dir doesn't consume one of the keep slots.
-            # Notable runs' TB dirs are exempt from pruning.
-            tb_logs_max_runs = project.get('tb_logs_max_runs', 20)
-            if tb_logs_max_runs > 0:
+            tb_logs_max_runs = project.get("tb_logs_max_runs", 20)
+            if tb_logs_max_runs > 0 and not is_parallel:
+                # Only auto-cleanup TB for primary workspace (parallel workspaces are transient)
                 from services.tensorboard_service import cleanup_old_tb_logs
                 protected_tb_dirs = set()
                 try:
                     for r in get_db().get_training_runs(name, limit=1000):
-                        if r.get('notable') and r.get('tensorboard_dir'):
-                            protected_tb_dirs.add(os.path.basename(r['tensorboard_dir']))
+                        if r.get("notable") and r.get("tensorboard_dir"):
+                            protected_tb_dirs.add(os.path.basename(r["tensorboard_dir"]))
                 except Exception:
                     pass
                 cleanup_result = cleanup_old_tb_logs(tb_logdir_base, tb_logs_max_runs,
-                                                      protected_dirs=protected_tb_dirs)
-                if cleanup_result['deleted']:
-                    log.info(f"Auto-cleanup: {cleanup_result['message']}")
+                                                     protected_dirs=protected_tb_dirs)
+                if cleanup_result["deleted"]:
+                    log.info(f"Auto-cleanup TB: {cleanup_result['message']}")
 
-            # Create timestamped subdirectory for this run
             run_timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
             tb_run_dir = os.path.join(tb_logdir_base, run_timestamp)
             os.makedirs(tb_run_dir, exist_ok=True)
             tb_run_dir_rel = f"{project.get('tensorboard_log_dir', 'runs')}/{run_timestamp}"
 
-            # Auto-cleanup old run history if configured; notable runs are exempt.
-            run_history_max_runs = project.get('run_history_max_runs', 10)
-            if run_history_max_runs > 0:
+            run_history_max_runs = project.get("run_history_max_runs", 10)
+            if run_history_max_runs > 0 and not is_parallel:
                 runs = get_db().get_training_runs(name, limit=1000)
-                runs.sort(key=lambda r: r['started_at'], reverse=True)
+                runs.sort(key=lambda r: r["started_at"], reverse=True)
                 deleted_count = 0
-                for run in runs[run_history_max_runs:]:
-                    if not run.get('notable', 0):
-                        get_db().delete_training_run(run['id'])
+                for r in runs[run_history_max_runs:]:
+                    if not r.get("notable", 0):
+                        get_db().delete_training_run(r["id"])
                         deleted_count += 1
                 if deleted_count > 0:
-                    log.info(f"Auto-cleanup: Deleted {deleted_count} old run record(s), kept {min(len(runs), run_history_max_runs)} recent run(s)")
+                    log.info(f"Auto-cleanup: deleted {deleted_count} old run(s)")
 
-            # Launch Tensorboard pointing to the base directory (shows all runs)
             try:
                 tb_process = subprocess.Popen(
-                    [tb_bin, "--logdir", tb_logdir_base, "--port", str(tb_port),
-                     "--bind_all"],
+                    [tb_bin, "--logdir", tb_logdir_base, "--port", str(tb_port), "--bind_all"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     start_new_session=True,
                 )
-
-                # Update run record with Tensorboard directory
                 get_db().update_training_run(run_id, tensorboard_dir=tb_run_dir_rel)
             except Exception as e:
-                log.warning("Failed to start tensorboard for %s: %s", name, e)
+                log.warning("Failed to start tensorboard for %s run %d: %s", name, run_id, e)
                 tb_port = None
 
     with _lock:
-        _running[name] = {
+        _running[run_id] = {
             "process": proc,
             "log_path": log_path,
             "tb_process": tb_process,
             "tb_port": tb_port,
             "started_at": time.time(),
             "run_id": run_id,
+            "project_name": name,
+            "branch": branch,
+            "workspace_dir": workspace_dir,
         }
 
     _update_project_json(projects_dir, name,
                          train_status="running", train_pid=proc.pid,
                          last_run_at=time.time())
 
-    # Start monitor thread
     thread = threading.Thread(
-        target=_monitor_process, args=(projects_dir, name), daemon=True
+        target=_monitor_process, args=(projects_dir, name, run_id), daemon=True
     )
     thread.start()
 
