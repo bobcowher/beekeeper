@@ -252,14 +252,24 @@ function reconcileRunList(runs) {
     }
 
     for (const run of runs) {
-        if (!activeRuns.has(run.run_id)) {
+        const state = activeRuns.get(run.run_id);
+        if (!state) {
             activeRuns.set(run.run_id, {
                 branch: run.branch,
                 startedAt: Date.now() - (run.elapsed || 0) * 1000,
                 sseSource: null,
+                status: run.status,
             });
             const row = renderRunRow(run);
             runListEl.appendChild(row);
+        } else if (state.status !== run.status) {
+            // Re-render the row on status change (e.g. starting → running)
+            stopLogStream(run.run_id);
+            state.status = run.status;
+            if (run.elapsed) state.startedAt = Date.now() - run.elapsed * 1000;
+            const oldRow = document.getElementById(`run-row-${run.run_id}`);
+            const newRow = renderRunRow(run);
+            if (oldRow) oldRow.replaceWith(newRow);
         } else {
             const elapsedEl = document.getElementById(`elapsed-${run.run_id}`);
             if (elapsedEl && run.elapsed) elapsedEl.textContent = formatElapsed(run.elapsed);
