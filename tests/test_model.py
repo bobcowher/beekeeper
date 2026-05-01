@@ -68,6 +68,7 @@ def test_to_dict_contains_all_fields(tmp_path):
         "setup_script", "data_dir_enabled", "data_dir_local", "data_dir_remote",
         "setup_status", "setup_error", "train_status", "train_pid", "env_vars",
         "pinned", "last_run_at", "tb_logs_max_runs", "run_history_max_runs",
+        "parallel_runs_enabled", "max_parallel_runs",
     }
     assert expected_keys == set(d.keys())
 
@@ -81,3 +82,39 @@ def test_save_overwrites_existing(tmp_path):
 
     loaded = Project.load(str(tmp_path / "myproj" / "project.json"))
     assert loaded.branch == "dev"
+
+
+def test_parallel_runs_defaults(tmp_path):
+    """New fields default to off / 2."""
+    p = Project(name="x", git_url="https://example.com/repo.git")
+    assert p.parallel_runs_enabled is False
+    assert p.max_parallel_runs == 2
+
+
+def test_parallel_runs_persisted(tmp_path):
+    """parallel_runs_enabled and max_parallel_runs round-trip through JSON."""
+    p = Project(name="x", git_url="https://example.com/repo.git",
+                parallel_runs_enabled=True, max_parallel_runs=3)
+    p.save(str(tmp_path))
+    loaded = Project.load(str(tmp_path / "x" / "project.json"))
+    assert loaded.parallel_runs_enabled is True
+    assert loaded.max_parallel_runs == 3
+
+
+def test_old_project_json_loads_without_parallel_fields(tmp_path):
+    """Existing project.json files without the new fields load with defaults."""
+    import json
+    proj_dir = tmp_path / "old"
+    proj_dir.mkdir()
+    data = {"name": "old", "git_url": "https://example.com/repo.git",
+            "branch": "main", "python_version": "3.11", "train_file": "train.py",
+            "tensorboard_log_dir": "runs", "requirements_file": "requirements.txt",
+            "env_type": "venv", "setup_script": "", "data_dir_enabled": False,
+            "data_dir_local": "data", "data_dir_remote": "", "setup_status": "pending",
+            "setup_error": "", "train_status": "idle", "train_pid": 0, "env_vars": {},
+            "pinned": False, "last_run_at": 0.0, "tb_logs_max_runs": 10,
+            "run_history_max_runs": 10}
+    (proj_dir / "project.json").write_text(json.dumps(data))
+    p = Project.load(str(proj_dir / "project.json"))
+    assert p.parallel_runs_enabled is False
+    assert p.max_parallel_runs == 2

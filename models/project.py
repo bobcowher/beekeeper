@@ -27,6 +27,8 @@ class Project:
     last_run_at: float = 0.0
     tb_logs_max_runs: int = 10  # Keep only N most recent TensorBoard run directories (0 = unlimited)
     run_history_max_runs: int = 10  # Keep only N most recent run records in database (0 = unlimited)
+    parallel_runs_enabled: bool = False
+    max_parallel_runs: int = 2
 
     def to_dict(self):
         return asdict(self)
