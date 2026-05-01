@@ -79,16 +79,16 @@
          data-default-branch="{{ project.get('branch', 'main') }}">
         <!-- Populated by training.js -->
     </div>
-    <div class="run-list-actions">
+    <div class="run-list-actions" id="run-list-actions" style="display:none">
         <button class="btn btn-success btn-sm" id="btn-start-run">+ Start Run…</button>
     </div>
-    <div class="branch-picker" id="branch-picker">
+    <div class="branch-picker open" id="branch-picker">
         <label for="run-branch-select" style="font-size:0.85rem;">Branch:</label>
         <select id="run-branch-select" style="padding: 4px 8px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 3px; color: var(--text-primary); width:auto;min-width:200px;">
             <option value="{{ project.get('branch', 'main') }}">{{ project.get('branch', 'main') }} (default)</option>
         </select>
         <button class="btn btn-success btn-sm" id="btn-confirm-start">Start</button>
-        <button class="btn btn-secondary btn-sm" id="btn-cancel-start">Cancel</button>
+        <button class="btn btn-secondary btn-sm" id="btn-cancel-start" style="display:none">Cancel</button>
     </div>
 </section>
 

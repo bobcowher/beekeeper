@@ -24,22 +24,31 @@ function escHtml(s) {
 // Branch picker (for starting new runs)
 // ============================================================
 const startBtn = document.getElementById('btn-start-run');
+const runListActions = document.getElementById('run-list-actions');
 const branchPicker = document.getElementById('branch-picker');
 const runBranchSelect = document.getElementById('run-branch-select');
 const confirmStartBtn = document.getElementById('btn-confirm-start');
 const cancelStartBtn = document.getElementById('btn-cancel-start');
 
+// True when user clicked "Start Run..." while runs were active.
+// Prevents refreshRuns from closing the picker mid-fill.
+let pickerManuallyOpen = false;
+
 if (startBtn) {
     startBtn.addEventListener('click', async () => {
-        branchPicker.classList.add('open');
-        startBtn.disabled = true;
+        pickerManuallyOpen = true;
+        if (runListActions) runListActions.style.display = 'none';
+        if (branchPicker) branchPicker.classList.add('open');
+        if (cancelStartBtn) cancelStartBtn.style.display = '';
         await loadRunBranches();
     });
 }
 if (cancelStartBtn) {
     cancelStartBtn.addEventListener('click', () => {
-        branchPicker.classList.remove('open');
-        if (startBtn) startBtn.disabled = false;
+        pickerManuallyOpen = false;
+        if (branchPicker) branchPicker.classList.remove('open');
+        if (cancelStartBtn) cancelStartBtn.style.display = 'none';
+        if (runListActions) runListActions.style.display = '';
     });
 }
 if (confirmStartBtn) {
@@ -75,8 +84,9 @@ async function loadRunBranches() {
 }
 
 async function startRun(branch) {
+    pickerManuallyOpen = false;
     if (branchPicker) branchPicker.classList.remove('open');
-    if (startBtn) startBtn.disabled = false;
+    if (cancelStartBtn) cancelStartBtn.style.display = 'none';
     try {
         const r = await apiFetch(`/api/v1/projects/${PROJECT_NAME}/training/start`, {
             method: 'POST',
@@ -288,27 +298,29 @@ function reconcileRunList(runs) {
     }
 
     const idleMsg = document.getElementById('run-idle-msg');
-    if (runs.length === 0 && activeRuns.size === 0) {
-        if (!idleMsg) {
-            const p = document.createElement('p');
-            p.className = 'muted';
-            p.id = 'run-idle-msg';
-            p.textContent = 'No active runs.';
-            runListEl.appendChild(p);
-        }
-    } else if (idleMsg && runs.length > 0) {
-        idleMsg.remove();
-    }
+    if (idleMsg) idleMsg.remove();
 }
 
 function updateStartButton(runs) {
-    if (!startBtn) return;
-    if (!PARALLEL_ENABLED && runs.length > 0) {
-        startBtn.disabled = true;
-        startBtn.title = 'Enable parallel runs in project settings to run multiple branches';
+    if (runs.length === 0) {
+        // Idle: show picker, hide start button and cancel
+        pickerManuallyOpen = false;
+        if (runListActions) runListActions.style.display = 'none';
+        if (cancelStartBtn) cancelStartBtn.style.display = 'none';
+        if (branchPicker && !branchPicker.classList.contains('open')) {
+            branchPicker.classList.add('open');
+        }
+    } else if (!PARALLEL_ENABLED) {
+        // Single-run mode with an active run: hide both
+        if (!pickerManuallyOpen && branchPicker) branchPicker.classList.remove('open');
+        if (runListActions) runListActions.style.display = 'none';
     } else {
-        startBtn.disabled = false;
-        startBtn.title = '';
+        // Parallel enabled, runs active: show button below run list, hide picker (unless user opened it)
+        if (!pickerManuallyOpen) {
+            if (runListActions) runListActions.style.display = '';
+            if (branchPicker) branchPicker.classList.remove('open');
+            if (cancelStartBtn) cancelStartBtn.style.display = 'none';
+        }
     }
 }
 
@@ -517,6 +529,7 @@ bindTbLaunch();
 // Init
 // ============================================================
 if (runListEl) {
+    loadRunBranches();
     refreshRuns();
     setInterval(refreshRuns, 10000);
 }

@@ -88,6 +88,7 @@
         html += '<table class="run-history-table"><thead><tr>';
         html += '<th style="width:32px;text-align:center">&#9733;</th>';
         html += '<th style="width:20px"></th>';
+        html += '<th style="width:40px">#</th>';
         html += '<th>Started</th>';
         html += '<th>Duration</th>';
         html += '<th>Status</th>';
@@ -124,6 +125,7 @@
         let row = `<tr data-run-id="${run.id}">`;
         row += `<td style="text-align:center"><button class="star-btn${notable ? ' notable' : ''}" data-run-id="${run.id}" title="${notable ? 'Remove star' : 'Star this run'}">${notable ? '&#9733;' : '&#9734;'}</button></td>`;
         row += `<td><input type="checkbox" class="compare-checkbox" data-run-id="${run.id}"${isChecked ? ' checked' : ''}></td>`;
+        row += `<td class="muted" style="font-size:0.8rem">#${run.id}</td>`;
         row += `<td>${started}</td>`;
         row += `<td>${duration}</td>`;
         row += `<td><span class="status-badge status-${statusClass}">${run.status}</span></td>`;
@@ -140,7 +142,7 @@
         // Notes sub-row
         const notesText = escHtml(run.notes || '');
         row += `<tr class="notes-row" data-run-id="${run.id}" style="${notesOpen ? '' : 'display:none'}">`;
-        row += `<td colspan="8"><textarea class="notes-editor" data-run-id="${run.id}" placeholder="Add post-run observations…">${notesText}</textarea></td>`;
+        row += `<td colspan="9"><textarea class="notes-editor" data-run-id="${run.id}" placeholder="Add post-run observations…">${notesText}</textarea></td>`;
         row += '</tr>';
 
         return row;
