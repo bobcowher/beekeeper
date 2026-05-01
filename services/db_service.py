@@ -405,9 +405,12 @@ class DatabaseService:
             return cursor.lastrowid
 
     def update_training_run(self, run_id: int, **fields):
-        """Update run fields (status, end_time, duration, etc.)."""
-        allowed_fields = ['ended_at', 'duration_seconds', 'status', 'exit_code',
-                         'log_file_path', 'tensorboard_dir']
+        """Update run fields (status, timing, metadata, etc.)."""
+        allowed_fields = [
+            'ended_at', 'duration_seconds', 'status', 'exit_code',
+            'log_file_path', 'tensorboard_dir',
+            'commit_sha', 'commit_message', 'python_version', 'gpu_info', 'hostname',
+        ]
         updates = []
         values = []
 
