@@ -831,19 +831,6 @@ def stop_training(projects_dir, name, run_id=None):
     with _lock:
         info = _running.pop(run_id, None)
         if info:
-            log_path = info.get("log_path")
-            started_at = info.get("started_at")
-
-            if log_path and started_at:
-                _append_run_footer(log_path, exit_code, started_at)
-
-            archived_log_path = None
-            if log_path and os.path.isfile(log_path):
-                archived_log_path = _archive_run_log(projects_dir, name, run_id, log_path)
-
-            if started_at:
-                _finalize_run_record(run_id, exit_code, started_at, archived_log_path)
-
             tb = info.get("tb_process")
             tb_port = info.get("tb_port")
             if tb and tb.poll() is None and tb_port:
@@ -853,6 +840,21 @@ def stop_training(projects_dir, name, run_id=None):
                     "last_access": time.time(),
                 }
                 log.info("Migrated TB for %s run %d to standalone", name, run_id)
+
+    # File I/O and DB writes outside lock to avoid blocking other threads
+    if info:
+        log_path = info.get("log_path")
+        started_at = info.get("started_at")
+
+        if log_path and started_at:
+            _append_run_footer(log_path, exit_code, started_at)
+
+        archived_log_path = None
+        if log_path and os.path.isfile(log_path):
+            archived_log_path = _archive_run_log(projects_dir, name, run_id, log_path)
+
+        if started_at:
+            _finalize_run_record(run_id, exit_code, started_at, archived_log_path)
 
     is_parallel = workspace_dir != primary_ws
     if is_parallel:
