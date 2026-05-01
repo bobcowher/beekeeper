@@ -2,157 +2,100 @@
 
 ## [Unreleased]
 
+---
+
+## [1.0.7] - 2026-04-30
+
 ### New Features
 
-**MCP Server (`mcp_server.py`)**
-- Replaced CLI with a Python MCP server using `fastmcp`
-- Exposes all Beekeeper operations as MCP tools: `list_projects`, `get_project`, `create_project`, `retry_setup`, `delete_project`, `get_project_instructions`, `start_training`, `stop_training`, `training_status`, `get_logs`, `analyze_run`, `list_branches`, `switch_branch`, `get_stats`, `check_busy`
+**Parallel Runs**
+- Run multiple training branches simultaneously on the same project
+- Enable per-project via Edit → Parallel Runs toggle and Max Parallel Runs setting
+- Each parallel run gets its own workspace clone, log file, and Tensorboard instance
+- Parallel workspaces are cleaned up automatically when the run completes
+- `POST /api/v1/projects/<name>/training/start` accepts an optional `branch` parameter
+- `GET /api/v1/projects/<name>/training/status` returns a `runs` array, one entry per active run
+- `POST /api/v1/projects/<name>/training/stop` accepts an optional `run_id` parameter
+
+**Run List UI**
+- Training section replaced with a live run list — each active run is its own row
+- Each row shows: status badge, branch, run ID, elapsed time, Tensorboard link, inline logs, stop button
+- Branch picker visible by default (no extra click required); picks up available branches on load
+- `+ Start Run…` button appears below the run list when parallel runs are enabled and a run is active
+- Inline log terminal per run — capped at 2,000 lines to prevent memory bloat on long runs
+- Run rows re-render automatically on status transitions (e.g. `starting` → `running`)
+
+**Run Annotations**
+- Star any run in Run History to mark it as notable (⭐ button on each row)
+- Starred runs are exempt from automatic pruning — they'll never be deleted by Cleanup Old Runs
+- Add tags to runs (comma-separated, e.g. `baseline,lr=0.01`) — searchable via filter bar
+- Add freeform notes to any run — saved automatically on blur
+- Filter run history by starred status or tag text
+
+**Run Compare / Diff**
+- Select two runs in Run History and click **Compare selected**
+- Modal shows both runs side by side: branch, status, commit, duration, tags, notes
+- Includes a `git diff` between the two commits — see exactly what code changed between runs
+
+**Run ID in History Table**
+- Run History table now has a `#` column showing the run ID
+- Matches the ID shown in the active run list and log file headers
+
+**MCP Server**
+- Replaced CLI binary with a Python MCP server (`mcp_server.py`) using `fastmcp`
+- Install via pip: `pip install beekeeper-mcp` (version 0.1.0)
+- Or run directly from the repo: `python mcp_server.py`
+- MCP tools: `list_projects`, `get_project`, `create_project`, `retry_setup`, `delete_project`, `get_project_instructions`, `start_training`, `stop_training`, `training_status`, `get_logs`, `analyze_run`, `list_branches`, `switch_branch`, `get_stats`, `check_busy`
 - Configured via `BEEKEEPER_HOST` and `BEEKEEPER_API_KEY` env vars
-- No binary to install or update — agents run the server directly from the repo
+- Claude Code registration: `claude mcp add beekeeper -s user -e BEEKEEPER_HOST=http://server:5000 -- beekeeper-mcp`
 
 **MCP documentation page** (`/api/v1/mcp`)
 - Setup guide with config snippet, tool reference, and example workflows
-- Replaces CLI reference page
 
 **Agent instructions updated to MCP**
 - Global and project-specific agent instruction endpoints now describe MCP tools
-- No more CLI version checks, install steps, or environment variable setup in instructions
-- `get_project_instructions(name)` replaces `beekeeper projects instructions <name>`
+- `get_project_instructions(name)` replaces old CLI-based instructions
+
+**Branch Switching**
+- Active Branch dropdown in the Project Info card — switch branches without editing the project
+- Beekeeper runs `git fetch` + `git reset --hard origin/<branch>` for a clean switch
+- API: `GET /api/v1/projects/<name>/branches` (list), `POST /api/v1/projects/<name>/branch` (switch)
+
+**EMA-Smoothed Metric Analysis**
+- `recent_trend` field now computed on EMA-smoothed values (was: raw values)
+- New `late_slope_pct` field: slope of the last 20% of training, normalized as % of total metric range
+- `smoothed_points` (detail=medium) returns ~100 EMA-smoothed curve points for plotting
+- `smoothed_final_value`: EMA value at end of training (more stable than raw final)
+- Peak detection uses EMA-smoothed signal — single noisy episodes no longer mask the true peak
+
+**TensorBoard Log Retention Management**
+- `tb_logs_max_runs` project setting (default: 10) — auto-prune old TB run dirs on training start
+- Manual cleanup UI in TensorBoard section with configurable keep count
+- API endpoint: `POST /api/v1/projects/{name}/tensorboard/cleanup`
+
+**Other**
+- `GET /api/v1/busy` — check if any training is running (useful before deploy/restart)
+- Clone project: UI button and `POST /api/v1/projects/<name>/clone`
+- `POST /api/v1/projects` — create projects via API
+- Comprehensive API docs at `/api/v1/docs`
+- File browser: last-modified timestamps, sortable columns, copy-curl menu item
+- Project-level resource tracking (CPU, RAM, GPU) in training controls section
 
 ### Breaking Changes
 
-- Removed CLI binary and `beekeeper-cli` repo dependency
-- Removed `/api/v1/cli/version` endpoint
-- Removed `/api/v1/cli` page (now `/api/v1/mcp`)
-- `CLI_VERSION` and `CLI_RELEASE_BASE` constants removed from `api_v1.py`
-
----
-
-### Previous Unreleased (CLI era)
-
-**CLI v1.1.0–1.1.2: Agent-first command set**
-- Added `beekeeper stats` — GPU/CPU/memory snapshot
-- Added `beekeeper busy` — check if any training is running before deploy/restart
-- Added `beekeeper branch list <project>` and `beekeeper branch switch <project> <branch>`
-- Added `beekeeper projects create` — create a new project from the CLI
-- Added `beekeeper projects instructions` — fetch global agent instructions
-- Added `beekeeper version` — compare installed CLI version against server's expected version; warns when out of sync
-- Fixed `InvalidHeaders` crash (error code 26) when `BEEKEEPER_API_KEY` is unset — Authorization header is now omitted rather than sent as `Bearer ` with a trailing space (v1.1.2)
-
-**CLI version check endpoint**
-- `GET /api/v1/cli/version` returns `cli_version`, `download_url`, `download_url_windows`
-- Agents can detect version mismatch and prompt the user to reinstall
-
-**Agent instructions rewritten (CLI-first)**
-- Global instructions (`/api/v1/agent/instructions`) and per-project instructions now lead with CLI commands, not REST endpoints
-- Both files include a self-refresh callout (agents are told to re-fetch if anything seems stale or missing)
-- Connectivity verification step added: agents check server reachability once and ask the user if unreachable rather than retrying indefinitely
-- "Starting from Scratch" section added to global instructions for agents with no existing project
-
-**Bug fix: stale running state after server restart**
-- In-memory `_running` dict is cleared on restart; JSON state could still show `train_status: running`
-- Project page now reconciles state at render time and updates JSON if the process is no longer alive
-- Stop endpoint also handles stale state gracefully (updates JSON and returns success)
-
-### New Features
-
-**Setup Retry & Delete endpoints for AI agents**
-- `POST /api/v1/projects/{name}/setup/retry` — retry failed project setup; skips completed steps; returns 202, poll for `setup_status`
-- `DELETE /api/v1/projects/{name}` — delete project and all data; guards against deletion while training is running
-- Both endpoints documented in agent instructions (`/agent/instructions`)
-
-**CLI served from GitHub Releases**
-- CLI binary removed from beekeeper git repo (was 3MB ELF committed directly)
-- `CLI_VERSION` and `CLI_RELEASE_BASE` constants in `api_v1.py` control which release agents download
-- Agent install instructions now point to `https://github.com/bobcowher/beekeeper-cli/releases/download/v{version}/beekeeper`
-- Windows binary (`beekeeper.exe`) available alongside Linux binary on each release
-- Bump `CLI_VERSION` in `api_v1.py` to roll agents to a new CLI build
-
-**EMA-Smoothed Metric Analysis**
-- `GET /api/v1/projects/{name}/tensorboard/latest?detail=medium` now returns `smoothed_points` — the full training curve with EMA alpha=0.9 smoothing applied (matches TensorBoard's heavy smoothing)
-- Peak detection (`peak_value`, `peak_step`, `peak_reversal_pct`) now uses the EMA-smoothed signal, not raw values — prevents single outlier episodes from masking the true peak
-- Added `smoothed_final_value` field: the EMA value at the end of training (more stable than raw final value)
-- Added `ema_alpha` field so agents know the smoothing factor applied
-- Active training runs: cache is now invalidated on every `/tensorboard/latest` request so agents always see current data (was: cached forever after first parse)
-
-**TensorBoard Log Retention Management**
-- Added `tb_logs_max_runs` setting to project configuration (default: 10, configurable in Project Info)
-- Auto-cleanup of old TensorBoard logs when starting training (keeps N most recent)
-- Manual cleanup UI in TensorBoard section: one-off cleanup with custom keep count
-- Manual cleanup UI in Run History section: one-off cleanup with custom keep count
-- Both cleanup buttons default to the project's `tb_logs_max_runs` setting
-- API endpoint: `POST /api/v1/projects/{name}/tensorboard/cleanup` for automated cleanup
-- Cleanup can optionally remove old run history records from database
-- Prevents TensorBoard directories and run history from growing indefinitely
-
-**Busy Status Endpoint**
-- Added `GET /api/v1/busy` endpoint to check if any training is running
-- Returns list of projects with active training
-- Useful for checking if it's safe to deploy/restart the service
-- Prevents interrupting running training jobs
-
-**Project Cloning (UI & API)**
-- Added "Clone" button to project page for quick project duplication
-- Clone creates a new project with all settings from the source project
-- Optionally override the git branch when cloning
-- API endpoint: `POST /api/v1/projects/<name>/clone`
-- Useful for creating project variations or experimental branches
-
-**Project Creation API**
-- Added `POST /api/v1/projects` endpoint for creating projects programmatically
-- Allows AI agents and scripts to create new projects without using the UI
-- Accepts JSON payload with project configuration (name, git_url, branch, python_version, etc.)
-- Enables full project lifecycle automation via API
-
-**Comprehensive API Documentation**
-- Added dedicated API documentation page at `/api/v1/docs`
-- Documents all API v1 endpoints including new project creation and cloning
-- Includes request/response examples, query parameters, and common workflows
-- Accessible from sidebar navigation
-- Shows both human-readable curl examples and detailed endpoint specifications
-
-**File Browser: Last Modified Timestamps**
-- File browser now displays last-edit timestamps for all files and directories
-- Recent files show relative time ("2 hours ago", "3 days ago")
-- Older files show formatted date (YYYY-MM-DD)
-
-**Project-Level Resource Tracking**
-- Training processes now display real-time CPU, memory, and GPU usage
-- Resource usage appears in the project page training controls section
-- Shows CPU percentage, RAM usage in MB/GB, and GPU memory allocation
-- GPU ID is displayed when the process is using a GPU
-- Updates every 3 seconds during training
+- CLI binary and `beekeeper-cli` repo dependency removed
+- `/api/v1/cli/version` endpoint removed
+- `/api/v1/cli` page removed (replaced by `/api/v1/mcp`)
 
 ### Bug Fixes
 
-**File Browser Timestamps**
-- Fixed file modification times displaying as NaN
-- Backend now properly sends mtime field in file listing API response
-
-### Improvements
-
-**File Browser Enhancements**
-- Timestamps now display in consistent YYYY-MM-DD HH:MM format (no more relative times)
-- All columns (Name, Size, Modified) are now sortable - click headers to sort
-- Added "Copy curl download" option to file context menu
-- Sort indicators (▲/▼) show current sort column and direction
-
-**Clearer Agent Documentation Refresh Instructions**
-- Agent instructions now include a prominent section at the top explaining how to refresh the documentation
-- Explicitly tells agents to use the API endpoint, not local file operations (find, grep, cat)
-- Prevents agents from searching locally for documentation that should be fetched from the API
-- Ensures agents always have the most up-to-date information
-- Added branch management endpoints to agent instructions (list branches, switch branch)
-- Added reference to global API documentation at /api/v1/docs for complete endpoint coverage
-
-**Better TensorBoard Diagnostics**
-- When `/tensorboard/latest` returns NO_TENSORBOARD_DATA, the error message now includes diagnostic information:
-  - Distinguishes between: directory not found, no event files, event files exist but empty/not flushed, parse errors
-  - Provides specific guidance (e.g., "call writer.flush() in your training script")
-  - Includes paths and file counts to help debug TensorBoard issues
-
-### Internal
-(Add internal changes here as they're developed)
+- Fixed stale `train_status: running` in project JSON after server restart
+- Fixed path traversal check in file browser (`startswith` → `realpath` + separator boundary)
+- Fixed file browser modification times displaying as NaN
+- Fixed `setup.sh` running in base Python env instead of project conda/venv env
+- Fixed Retry Setup not pulling latest code from git before re-running setup
+- Fixed TB log cleanup off-by-one (new empty dir consumed one keep-count slot)
+- Fixed inline log terminal XSS: branch/status now HTML-escaped before `innerHTML`
 
 ---
 
