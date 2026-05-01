@@ -614,6 +614,8 @@ def analyze_logs(name):
     recent_rewards = [ep['reward'] for ep in recent]
 
     return api_response(data={
+        'parser': 'episode_pipe_v1',
+        'parser_warning': 'This endpoint uses a format-specific parser (Episode N | reward: X). For format-agnostic log access use GET /api/v1/projects/{name}/runs/{run_id}/logs',
         'episode_range': [episodes[0]['episode'], episodes[-1]['episode']],
         'total_episodes': n,
         'trend': trend,
@@ -865,6 +867,81 @@ def download_run_log(name, run_id):
 
     from flask import send_file
     return send_file(log_path, as_attachment=True)
+
+
+@api_v1_bp.route("/projects/<name>/runs/<int:run_id>/logs")
+@api_key_required
+def get_run_logs_json(name, run_id):
+    """Get log content as JSON for a specific run."""
+    load_project(name)
+
+    from services.db_service import get_db
+    run = get_db().get_training_run(run_id)
+
+    if not run or run['project_name'] != name:
+        return api_response(
+            error_code="NOT_FOUND",
+            error_message=f"Run {run_id} not found",
+            status_code=404
+        )
+
+    if not run.get('log_file_path'):
+        return api_response(
+            error_code="NO_LOGS",
+            error_message="Log file not available",
+            status_code=404
+        )
+
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    log_relative_path = run['log_file_path']
+    log_path = os.path.join(projects_dir, name, log_relative_path)
+
+    if not os.path.isfile(log_path):
+        return api_response(
+            error_code="NO_LOGS",
+            error_message="Log file not found",
+            status_code=404
+        )
+
+    # Query params
+    tail_lines = request.args.get("tail_lines", default=200, type=int)
+    start_byte = request.args.get("start_byte", type=int)
+    limit_bytes = request.args.get("limit_bytes", default=65536, type=int)
+
+    try:
+        file_size = os.path.getsize(log_path)
+
+        if start_byte is None:
+            actual_start = _tail_offset(log_path, tail_lines)
+        else:
+            actual_start = max(0, min(start_byte, file_size))
+
+        with open(log_path, "rb") as f:
+            f.seek(actual_start)
+            content_bytes = f.read(limit_bytes)
+            actual_end = f.tell()
+
+        content = content_bytes.decode('utf-8', errors='replace')
+
+        return api_response(data={
+            'run_id': run_id,
+            'path': log_relative_path,
+            'content': content,
+            'encoding': 'utf-8',
+            'start_byte': actual_start,
+            'end_byte': actual_end,
+            'bytes_returned': len(content_bytes),
+            'truncated_before': actual_start > 0,
+            'truncated_after': False,
+            'line_count': content.count('\n')
+        })
+
+    except Exception as e:
+        return api_response(
+            error_code="READ_ERROR",
+            error_message=f"Failed to read log file: {e}",
+            status_code=500
+        )
 
 
 @api_v1_bp.route("/projects/<name>/runs/clear", methods=["DELETE"])

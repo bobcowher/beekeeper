@@ -210,16 +210,18 @@ def get_logs(name: str, run_id: int | None = None, tail: int = 100) -> str:
 
 
 @mcp.tool()
-def analyze_run(name: str) -> dict:
+def analyze_run(name: str, run_id: int | None = None) -> dict:
     """
-    Synthesized analysis of the current or most recent training run.
-    Combines TensorBoard metrics (trends, peaks, convergence) with log-based
-    episode statistics (reward trends, quartile progression). Use this as the
-    primary tool for assessing training progress.
+    Synthesized analysis of a training run.
+    Combines TensorBoard metrics (trends, peaks, convergence) with a raw log tail.
+    The consuming agent should interpret the log content.
     """
     tb = _get(f"/projects/{name}/tensorboard/latest")
-    logs = _get(f"/projects/{name}/logs/analysis")
-    return {"tensorboard": tb, "log_analysis": logs}
+    if run_id is not None:
+        logs = _get(f"/projects/{name}/runs/{run_id}/logs?tail_lines=300")
+    else:
+        logs = _get(f"/projects/{name}/logs?tail=300")
+    return {"tensorboard": tb, "logs": logs}
 
 
 # ---------------------------------------------------------------------------
