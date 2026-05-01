@@ -154,14 +154,15 @@ def get_project_instructions(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def start_training(name: str) -> dict:
+def start_training(name: str, branch: str = None) -> dict:
     """
-    Start training for a project. The pre-launch sequence (git pull, pip install)
-    runs first — this can take 30-120s. Check training_status afterward to confirm
-    the run is active.
+    Start training for a project. branch overrides the project's configured default.
+    The pre-launch sequence (git sync, pip install) runs first — 30-120s.
+    Returns run_id. Use training_status() to confirm the run is active.
     """
+    body = {"branch": branch} if branch else {}
     try:
-        return _post(f"/projects/{name}/training/start", timeout=180)
+        return _post(f"/projects/{name}/training/start", body, timeout=180)
     except requests.exceptions.ReadTimeout:
         return {
             "success": True,
@@ -170,14 +171,22 @@ def start_training(name: str) -> dict:
 
 
 @mcp.tool()
-def stop_training(name: str) -> dict:
-    """Stop training for a project (SIGTERM, then SIGKILL after 5s if needed)."""
-    return _post(f"/projects/{name}/training/stop")
+def stop_training(name: str, run_id: int = None) -> dict:
+    """
+    Stop a training run. Provide run_id when multiple runs are active on the same project.
+    If only one run is active and run_id is omitted, it stops automatically.
+    """
+    body = {"run_id": run_id} if run_id is not None else {}
+    return _post(f"/projects/{name}/training/stop", body)
 
 
 @mcp.tool()
 def training_status(name: str) -> dict:
-    """Get the current training status for a project."""
+    """
+    Get all active training runs for a project.
+    Returns a list of runs, each with run_id, branch, status, elapsed seconds, pid, tb_port.
+    Use run_id values when calling stop_training or get_logs for a specific run.
+    """
     return _get(f"/projects/{name}/training/status")
 
 
@@ -186,12 +195,16 @@ def training_status(name: str) -> dict:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def get_logs(name: str, tail: int = 100) -> str:
+def get_logs(name: str, run_id: int = None, tail: int = 100) -> str:
     """
-    Fetch the last N lines of training logs. Returns raw log text.
+    Fetch the last N lines of training logs for a specific run.
+    Provide run_id when multiple runs are active — required to avoid ambiguity.
     Use tail=500 for more context, tail=50 for a quick check.
     """
-    result = _get(f"/projects/{name}/logs?tail={tail}")
+    params = f"tail={tail}"
+    if run_id is not None:
+        params += f"&run_id={run_id}"
+    result = _get(f"/projects/{name}/logs?{params}")
     return result.get("data", {}).get("content", "")
 
 
@@ -240,11 +253,28 @@ def get_stats() -> dict:
 @mcp.tool()
 def check_busy() -> dict:
     """
-    Check if any project is currently training. Returns busy=True/False and
-    a list of running projects. Always call this before starting a new training
-    run — the GPU can only handle one job at a time.
+    Check if any training is running. Returns busy=True/False and running_projects list.
+    Prefer get_capacity() for new workflows — it shows available headroom, not just busy/free.
     """
-    return _get("/busy")
+    capacity = _get("/capacity")
+    data = capacity.get("data", {})
+    running_projects = [
+        p["name"] for p in data.get("projects", []) if p.get("running_runs", 0) > 0
+    ]
+    return {
+        "busy": data.get("running", 0) > 0,
+        "running_projects": running_projects,
+    }
+
+
+@mcp.tool()
+def get_capacity() -> dict:
+    """
+    System-wide training capacity. Returns total_slots, running, available, and per-project breakdown.
+    Use this before starting a new run — it tells you not just busy/free but how much headroom exists.
+    Prefer this over check_busy() for any new agent workflows.
+    """
+    return _get("/capacity")
 
 
 if __name__ == "__main__":
