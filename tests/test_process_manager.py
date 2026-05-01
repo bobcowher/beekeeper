@@ -189,3 +189,40 @@ def test_pip_install_runs_after_git_pull(tmp_path):
     assert call_order[0] == "git_sync"
     assert "pip_install" in call_order
     assert call_order.index("git_sync") < call_order.index("pip_install")
+
+
+# --- get_runs_for_project ---
+
+def test_get_runs_for_project_empty(tmp_path):
+    """Returns empty list when no runs active."""
+    from services import process_manager
+    # Ensure clean state
+    process_manager._running.clear()
+    from services.process_manager import get_runs_for_project
+    assert get_runs_for_project("nonexistent") == []
+
+def test_get_runs_for_project_returns_active(tmp_path):
+    """Returns one entry per active run for the project."""
+    from services import process_manager
+    process_manager._running.clear()
+    mock_proc = MagicMock()
+    mock_proc.pid = 1234
+    process_manager._running[42] = {
+        "process": mock_proc,
+        "starting": False,
+        "project_name": "myproject",
+        "run_id": 42,
+        "branch": "main",
+        "workspace_dir": "/fake/workspace",
+        "log_path": "/fake/train.log",
+        "tb_port": None,
+        "started_at": 0.0,
+    }
+    from services.process_manager import get_runs_for_project
+    with patch("services.resource_tracker.get_process_resources", return_value=None):
+        runs = get_runs_for_project("myproject")
+    assert len(runs) == 1
+    assert runs[0]["run_id"] == 42
+    assert runs[0]["branch"] == "main"
+    assert runs[0]["status"] == "running"
+    process_manager._running.clear()

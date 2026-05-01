@@ -12,7 +12,7 @@ from models.project import Project
 
 log = logging.getLogger(__name__)
 
-_running = {}
+_running = {}  # {run_id: info_dict} — keyed by DB run ID (int)
 _tb_running = {}  # standalone TB processes: {name: {"tb_process": Popen, "tb_port": int, "last_access": float}}
 _lock = threading.Lock()
 _TB_IDLE_TIMEOUT = 1800  # 30 min
@@ -125,11 +125,68 @@ def _tb_idle_reaper():
 threading.Thread(target=_tb_idle_reaper, daemon=True).start()
 
 
-def _monitor_process(projects_dir, name):
+def _get_runs_for_project(name: str) -> list:
+    """Internal: return all active info dicts for a project (holds _lock NOT required — callers handle locking)."""
+    return [info for info in _running.values() if info.get("project_name") == name]
+
+
+def get_runs_for_project(name: str) -> list:
+    """Return active run summary dicts for a project. Safe for API/MCP consumers."""
+    now = time.time()
+    result = []
+    with _lock:
+        for run_id, info in _running.items():
+            if info.get("project_name") != name:
+                continue
+            if info.get("starting"):
+                result.append({
+                    "run_id": run_id,
+                    "branch": info.get("branch", ""),
+                    "status": "starting",
+                    "pid": None,
+                    "elapsed": None,
+                    "tb_port": None,
+                    "resources": None,
+                })
+            else:
+                proc = info.get("process")
+                pid = proc.pid if proc else None
+                from services.resource_tracker import get_process_resources
+                resources = get_process_resources(pid) if pid else None
+                result.append({
+                    "run_id": run_id,
+                    "branch": info.get("branch", ""),
+                    "status": "running",
+                    "pid": pid,
+                    "elapsed": now - info.get("started_at", now),
+                    "tb_port": info.get("tb_port"),
+                    "resources": resources,
+                })
+    return result
+
+
+def get_run_log_path(projects_dir: str, name: str, run_id: int = None) -> str:
+    """Return the active log file path for a run. Falls back to train.log."""
+    with _lock:
+        if run_id is not None:
+            info = _running.get(run_id)
+            if info and info.get("log_path"):
+                return info["log_path"]
+        else:
+            active = [
+                info for info in _running.values()
+                if info.get("project_name") == name and not info.get("starting")
+            ]
+            if len(active) == 1 and active[0].get("log_path"):
+                return active[0]["log_path"]
+    return os.path.join(projects_dir, name, "train.log")
+
+
+def _monitor_process(projects_dir, name, run_id):
     """Background thread that waits for the training process to exit."""
     while True:
         with _lock:
-            info = _running.get(name)
+            info = _running.get(run_id)
             if not info:
                 return
             proc = info["process"]
@@ -138,14 +195,11 @@ def _monitor_process(projects_dir, name):
         if ret is not None:
             log_path = None
             started_at = None
-            run_id = None
             with _lock:
-                info = _running.get(name)
+                info = _running.get(run_id)
                 if info:
                     log_path = info.get("log_path")
                     started_at = info.get("started_at")
-                    run_id = info.get("run_id")
-                    # Migrate tensorboard to standalone tracking
                     tb = info.get("tb_process")
                     tb_port = info.get("tb_port")
                     if tb and tb.poll() is None and tb_port:
@@ -154,38 +208,37 @@ def _monitor_process(projects_dir, name):
                             "tb_port": tb_port,
                             "last_access": time.time(),
                         }
-                        log.info("Migrated TB for %s to standalone (port %d)", name, tb_port)
-                    del _running[name]
+                        log.info("Migrated TB for %s run %d to standalone (port %d)", name, run_id, tb_port)
+                    del _running[run_id]
 
             if log_path and started_at:
                 _append_run_footer(log_path, ret, started_at)
 
-            # Archive log and finalize run record
             archived_log_path = None
-            if run_id and log_path and os.path.isfile(log_path):
+            if log_path and os.path.isfile(log_path):
                 archived_log_path = _archive_run_log(projects_dir, name, run_id, log_path)
 
-            if run_id and started_at:
+            if started_at:
                 _finalize_run_record(run_id, ret, started_at, archived_log_path)
 
-            # Trigger background metric parsing for completed runs
-            if run_id and ret == 0:  # Only successful runs
-                import threading
+            if ret == 0:
+                import threading as _threading
                 from services import tensorboard_service
-                threading.Thread(
+                _threading.Thread(
                     target=tensorboard_service.parse_run_metrics,
                     args=(projects_dir, name, run_id),
-                    daemon=True
+                    daemon=True,
                 ).start()
 
-            # Prune old runs (keep last 20)
             _prune_old_runs(projects_dir, name, keep_last=20)
 
-            status = "stopped" if ret == 0 else "crashed"
-            _update_project_json(projects_dir, name,
-                                 train_status=status, train_pid=0)
-            log.info("Training for %s exited with code %d (status: %s)",
-                     name, ret, status)
+            # Only update train_status when the last run for this project finishes
+            with _lock:
+                remaining = _get_runs_for_project(name)
+            if not remaining:
+                status = "stopped" if ret == 0 else "crashed"
+                _update_project_json(projects_dir, name, train_status=status, train_pid=0)
+                log.info("All runs for %s finished. Status: %s", name, status)
             return
 
         time.sleep(1)
@@ -727,37 +780,20 @@ def stop_training(projects_dir, name):
     return {"status": "stopped"}
 
 
-def get_training_status(name):
-    """Get the current training status for a project."""
-    with _lock:
-        info = _running.get(name)
-        if info:
-            if info.get("starting"):
-                return {
-                    "status": "starting",
-                    "pid": None,
-                    "run_id": None,
-                    "started_at": None,
-                    "tb_port": None,
-                    "elapsed": None,
-                    "resources": None,
-                }
-            proc = info["process"]
-            pid = proc.pid
-
-            # Get resource usage for running process
-            from services.resource_tracker import get_process_resources
-            resources = get_process_resources(pid)
-
-            return {
-                "status": "running",
-                "pid": pid,
-                "run_id": info.get("run_id"),
-                "started_at": info.get("started_at"),
-                "tb_port": info.get("tb_port"),
-                "elapsed": time.time() - info.get("started_at", time.time()),
-                "resources": resources,
-            }
+def get_training_status(name: str) -> dict:
+    """Backward-compat: return status for the first active run, or idle."""
+    runs = get_runs_for_project(name)
+    if runs:
+        r = runs[0]
+        return {
+            "status": r["status"],
+            "pid": r["pid"],
+            "run_id": r["run_id"],
+            "started_at": None,
+            "tb_port": r["tb_port"],
+            "elapsed": r["elapsed"],
+            "resources": r["resources"],
+        }
     # Check standalone TB
     with _lock:
         tb_info = _tb_running.get(name)
