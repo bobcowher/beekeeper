@@ -212,6 +212,10 @@ def _monitor_process(projects_dir, name, run_id):
                         log.info("Migrated TB for %s run %d to standalone (port %d)", name, run_id, tb_port)
                     del _running[run_id]
 
+            workspace_dir = info.get("workspace_dir") if info else None
+            primary_ws = os.path.join(projects_dir, name, "workspace")
+            is_parallel = workspace_dir and workspace_dir != primary_ws
+
             if log_path and started_at:
                 _append_run_footer(log_path, ret, started_at)
 
@@ -221,6 +225,16 @@ def _monitor_process(projects_dir, name, run_id):
 
             if started_at:
                 _finalize_run_record(run_id, ret, started_at, archived_log_path)
+
+            # Clean up parallel workspace on natural completion
+            if is_parallel and workspace_dir:
+                _move_tb_logs_to_primary(projects_dir, name, workspace_dir, run_id)
+                import shutil as _shutil
+                try:
+                    _shutil.rmtree(workspace_dir)
+                    log.info("Deleted parallel workspace %s", workspace_dir)
+                except Exception as e:
+                    log.warning("Failed to delete parallel workspace %s: %s", workspace_dir, e)
 
             if ret == 0:
                 import threading as _threading
