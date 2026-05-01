@@ -749,60 +749,99 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
     )
     thread.start()
 
-def stop_training(projects_dir, name):
-    """Stop the training subprocess for a project."""
+def _move_tb_logs_to_primary(projects_dir: str, name: str, workspace_dir: str, run_id: int):
+    """Move TB run dir from parallel workspace to primary workspace before deletion."""
+    import shutil
+    from services.db_service import get_db
+
+    run = get_db().get_training_run(run_id)
+    if not run or not run.get("tensorboard_dir"):
+        return
+
+    tb_rel = run["tensorboard_dir"]  # e.g. "runs/20260430-123456"
+    src = os.path.join(workspace_dir, tb_rel)
+    primary_ws = os.path.join(projects_dir, name, "workspace")
+    dst = os.path.join(primary_ws, tb_rel)
+
+    if not os.path.isdir(src):
+        return
+
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    try:
+        shutil.move(src, dst)
+        log.info("Moved TB logs %s → %s", src, dst)
+    except Exception as e:
+        log.warning("Failed to move TB logs %s → %s: %s", src, dst, e)
+
+
+def stop_training(projects_dir, name, run_id=None):
+    """Stop a training run. run_id selects which run; omit if only one is active."""
+    primary_ws = os.path.join(projects_dir, name, "workspace")
+
     with _lock:
-        info = _running.get(name)
-        if not info:
-            config_path = os.path.join(projects_dir, name, "project.json")
-            project = Project.load(config_path)
-            if project and project.train_status == 'running':
-                project.train_status = 'stopped'
-                project.save(projects_dir)
-                return {"stopped": True}
-            return {"error": "Training is not running"}
+        if run_id is not None:
+            info = _running.get(run_id)
+            if not info or info.get("project_name") != name:
+                return {"error": f"Run {run_id} not found for project {name}"}
+        else:
+            project_runs = [rid for rid, info in _running.items()
+                            if info.get("project_name") == name]
+            if not project_runs:
+                try:
+                    config_path = os.path.join(projects_dir, name, "project.json")
+                    project = Project.load(config_path)
+                    if project.train_status == "running":
+                        project.train_status = "stopped"
+                        project.save(projects_dir)
+                        return {"stopped": True}
+                except Exception:
+                    pass
+                return {"error": "Training is not running"}
+            if len(project_runs) > 1:
+                return {"error": "Multiple runs active — specify run_id"}
+            run_id = project_runs[0]
+            info = _running.get(run_id)
+
         proc = info["process"]
+        workspace_dir = info.get("workspace_dir", primary_ws)
 
-    # SIGTERM the process group (the child is session leader)
-    try:
-        pgid = os.getpgid(proc.pid)
-        os.killpg(pgid, signal.SIGTERM)
-    except (ProcessLookupError, OSError):
-        pass
-
-    # Wait up to 5 seconds for graceful shutdown
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
+    if proc is not None:
         try:
             pgid = os.getpgid(proc.pid)
-            os.killpg(pgid, signal.SIGKILL)
-            proc.wait(timeout=3)
+            os.killpg(pgid, signal.SIGTERM)
         except (ProcessLookupError, OSError):
             pass
 
-    # Get exit code
-    exit_code = proc.returncode if proc.returncode is not None else -15  # SIGTERM
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                pgid = os.getpgid(proc.pid)
+                os.killpg(pgid, signal.SIGKILL)
+                proc.wait(timeout=3)
+            except (ProcessLookupError, OSError):
+                pass
+
+        exit_code = proc.returncode if proc.returncode is not None else -15
+    else:
+        exit_code = -15
 
     with _lock:
-        info = _running.pop(name, None)
+        info = _running.pop(run_id, None)
         if info:
-            # Finalize run record in database
             log_path = info.get("log_path")
             started_at = info.get("started_at")
-            run_id = info.get("run_id")
 
             if log_path and started_at:
                 _append_run_footer(log_path, exit_code, started_at)
 
             archived_log_path = None
-            if run_id and log_path and os.path.isfile(log_path):
+            if log_path and os.path.isfile(log_path):
                 archived_log_path = _archive_run_log(projects_dir, name, run_id, log_path)
 
-            if run_id and started_at:
+            if started_at:
                 _finalize_run_record(run_id, exit_code, started_at, archived_log_path)
 
-            # Migrate tensorboard to standalone tracking
             tb = info.get("tb_process")
             tb_port = info.get("tb_port")
             if tb and tb.poll() is None and tb_port:
@@ -811,12 +850,24 @@ def stop_training(projects_dir, name):
                     "tb_port": tb_port,
                     "last_access": time.time(),
                 }
-                log.info("Migrated TB for %s to standalone (port %d)", name, tb_port)
+                log.info("Migrated TB for %s run %d to standalone", name, run_id)
 
-    _update_project_json(projects_dir, name,
-                         train_status="stopped", train_pid=0)
+    is_parallel = workspace_dir != primary_ws
+    if is_parallel:
+        _move_tb_logs_to_primary(projects_dir, name, workspace_dir, run_id)
+        import shutil
+        try:
+            shutil.rmtree(workspace_dir)
+            log.info("Deleted parallel workspace %s", workspace_dir)
+        except Exception as e:
+            log.warning("Failed to delete parallel workspace %s: %s", workspace_dir, e)
 
-    return {"status": "stopped"}
+    with _lock:
+        remaining = _get_runs_for_project(name)
+    if not remaining:
+        _update_project_json(projects_dir, name, train_status="stopped", train_pid=0)
+
+    return {"status": "stopped", "run_id": run_id}
 
 
 def get_training_status(name: str) -> dict:
@@ -855,11 +906,12 @@ def start_tensorboard(projects_dir, name):
     """Start tensorboard on-demand for a project. Returns existing port if already running."""
     # Check if TB is already running (from training or standalone)
     with _lock:
-        info = _running.get(name)
-        if info and info.get("tb_port"):
-            tb = info.get("tb_process")
-            if tb and tb.poll() is None:
-                return {"tb_port": info["tb_port"]}
+        # Check if any active run for this project already has TB
+        for run_info in _running.values():
+            if run_info.get("project_name") == name and run_info.get("tb_port"):
+                tb = run_info.get("tb_process")
+                if tb and tb.poll() is None:
+                    return {"tb_port": run_info["tb_port"], "status": "already_running"}
         tb_info = _tb_running.get(name)
         if tb_info:
             tb = tb_info.get("tb_process")
