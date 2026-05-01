@@ -162,3 +162,17 @@ def test_training_status_returns_runs_list(client, ready_project):
     data = r.get_json()
     assert "runs" in data["data"]
     assert data["data"]["runs"][0]["run_id"] == 3
+
+
+def test_capacity_endpoint_shape(client):
+    """GET /capacity returns total_slots, running, available, projects."""
+    r = client.get("/api/v1/capacity", headers={"Authorization": "Bearer test"})
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data["success"] is True
+    body = data["data"]
+    assert "total_slots" in body
+    assert "running" in body
+    assert "available" in body
+    assert "projects" in body
+    assert body["available"] == body["total_slots"] - body["running"]

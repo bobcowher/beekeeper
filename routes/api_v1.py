@@ -759,6 +759,42 @@ def check_busy():
     })
 
 
+@api_v1_bp.route("/capacity")
+@api_key_required
+def get_capacity():
+    """System-wide training capacity: total slots, running, available."""
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    total_slots = 0
+    total_running = 0
+    project_list = []
+
+    if os.path.isdir(projects_dir):
+        for proj_name in sorted(os.listdir(projects_dir)):
+            config_path = os.path.join(projects_dir, proj_name, "project.json")
+            if not os.path.isfile(config_path):
+                continue
+            try:
+                project = Project.load(config_path)
+            except Exception:
+                continue
+            max_runs = project.max_parallel_runs if project.parallel_runs_enabled else 1
+            running_count = len(get_runs_for_project(proj_name))
+            total_slots += max_runs
+            total_running += running_count
+            project_list.append({
+                "name": proj_name,
+                "running_runs": running_count,
+                "max_runs": max_runs,
+            })
+
+    return api_response(data={
+        "total_slots": total_slots,
+        "running": total_running,
+        "available": total_slots - total_running,
+        "projects": project_list,
+    })
+
+
 # ---------------------------------------------------------------------------
 # Run History
 # ---------------------------------------------------------------------------
