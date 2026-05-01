@@ -1626,3 +1626,99 @@ label {
     width: 14px;
     height: 14px;
 }
+
+/* Parallel run list */
+.run-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.run-row {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.run-row.run-active {
+    border-color: var(--running);
+}
+
+.run-row-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.75rem;
+    flex-wrap: wrap;
+}
+
+.run-id {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    background: var(--bg-primary);
+    padding: 1px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+}
+
+.run-branch {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--accent);
+}
+
+.run-elapsed {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-left: auto;
+}
+
+.run-log-panel {
+    border-top: 1px solid var(--border);
+    background: var(--bg-primary);
+}
+
+.run-log-controls {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.4rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+}
+
+.run-log-terminal {
+    padding: 0.5rem 0.75rem;
+    max-height: 320px;
+    overflow-y: auto;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.run-list-actions {
+    margin-top: 0.5rem;
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+/* Branch picker modal */
+.branch-picker {
+    display: none;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.75rem;
+    margin-top: 0.5rem;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.branch-picker.open {
+    display: flex;
+}

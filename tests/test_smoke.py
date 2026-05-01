@@ -105,23 +105,22 @@ def test_project_detail_idle(client, ready_project, mocker):
     resp = client.get("/projects/myproject")
     assert resp.status_code == 200
     assert b"myproject" in resp.data
-    # Training controls present
-    assert b"Start Training" in resp.data
+    # Training section present
+    assert b'id="training-section"' in resp.data
     # JS config injected into page — training.js will fail silently without this
     assert b"window.TRAINING_CONFIG" in resp.data
     # DOM IDs that training.js binds event listeners to
-    assert b'id="training-controls"' in resp.data
-    assert b'id="btn-start"' in resp.data
-    assert b'id="log-terminal"' in resp.data
+    assert b'id="run-list"' in resp.data
+    assert b'id="btn-start-run"' in resp.data
 
 
 def test_project_detail_running(client, ready_project, mocker):
     mocker.patch("routes.project.get_training_status", return_value=RUNNING_STATUS)
     resp = client.get("/projects/myproject")
     assert resp.status_code == 200
-    assert b"Stop Training" in resp.data
-    assert b'id="btn-stop"' in resp.data
-    assert b"42000" in resp.data  # PID displayed
+    # Training section and run list are present; run rows are rendered client-side by JS
+    assert b'id="training-section"' in resp.data
+    assert b'id="run-list"' in resp.data
 
 
 def test_project_detail_pending_setup(client, app, mocker):

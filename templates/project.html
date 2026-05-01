@@ -69,42 +69,26 @@
 </section>
 
 {% if project.get('setup_status') == 'ready' %}
-<section class="card">
-    <h2>Controls</h2>
-    <div class="training-controls" id="training-controls" data-name="{{ project.name }}">
-        {% if training.status == 'running' %}
-        <div class="training-info">
-            <span class="status-badge status-running">Running</span>
-            <span class="muted">PID: {{ training.pid }}</span>
-            <span class="muted" id="elapsed-time"></span>
-            <span class="muted" id="resource-usage"></span>
-        </div>
-        <button class="btn btn-danger" id="btn-stop">Stop Training</button>
-        {% elif training.status == 'starting' %}
-        <div class="training-info">
-            <span class="status-badge status-running">Starting...</span>
-        </div>
-        <button class="btn btn-secondary" disabled>Starting...</button>
-        {% else %}
-        <div class="training-info">
-            <span class="status-badge status-{{ project.get('train_status', 'idle') }}">
-                {{ project.get('train_status', 'idle') }}
-            </span>
-        </div>
-        <button class="btn btn-success" id="btn-start">Start Training</button>
-        {% endif %}
+<section class="card" id="training-section">
+    <div class="card-header">
+        <h2>Training</h2>
     </div>
-</section>
-
-{% set logs_open = training.status == 'running' or project.get('train_status') in ('crashed', 'stopped') %}
-<section class="card collapsible" id="logs-section">
-    <h2 class="collapsible-header" data-target="logs-body">Logs <span class="collapse-icon">{{ '▼' if logs_open else '▶' }}</span></h2>
-    <div class="collapsible-body" id="logs-body" style="{{ '' if logs_open else 'display:none' }}">
-        <div class="log-controls">
-            <button class="btn btn-secondary" id="btn-clear-log">Clear Display</button>
-            <a href="{{ url_for('training.logs_download', name=project.name) }}" class="btn btn-secondary">Download Log</a>
-        </div>
-        <pre class="log-terminal" id="log-terminal"></pre>
+    <div id="run-list" class="run-list"
+         data-name="{{ project.name }}"
+         data-parallel="{{ 'true' if project.get('parallel_runs_enabled') else 'false' }}"
+         data-default-branch="{{ project.get('branch', 'main') }}">
+        <!-- Populated by training.js -->
+    </div>
+    <div class="run-list-actions">
+        <button class="btn btn-success btn-sm" id="btn-start-run">+ Start Run…</button>
+    </div>
+    <div class="branch-picker" id="branch-picker">
+        <label for="run-branch-select" style="font-size:0.85rem;">Branch:</label>
+        <select id="run-branch-select" style="padding: 4px 8px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 3px; color: var(--text-primary); width:auto;min-width:200px;">
+            <option value="{{ project.get('branch', 'main') }}">{{ project.get('branch', 'main') }} (default)</option>
+        </select>
+        <button class="btn btn-success btn-sm" id="btn-confirm-start">Start</button>
+        <button class="btn btn-secondary btn-sm" id="btn-cancel-start">Cancel</button>
     </div>
 </section>
 
@@ -160,7 +144,7 @@
 </section>
 {% else %}
 <section class="card">
-    <h2>Controls</h2>
+    <h2>Training</h2>
     <p class="muted">Project setup must complete before training can start.</p>
 </section>
 {% endif %}
@@ -383,9 +367,6 @@ Get oriented on the {{ project.name }} project:
 <script>
     window.TRAINING_CONFIG = {
         name: "{{ project.name }}",
-        status: "{{ training.status }}",
-        trainStatus: "{{ project.get('train_status', 'idle') }}",
-        startedAt: {{ training.started_at or 'null' }},
         tbPort: {{ training.tb_port or 'null' }},
         host: "{{ request.host.split(':')[0] }}"
     };

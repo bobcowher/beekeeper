@@ -9,7 +9,7 @@ from flask import (
 from models.project import Project
 from services.project_service import create_project, delete_project, retry_setup
 from services.python_versions import find_available, has_conda
-from services.process_manager import get_training_status, stop_tensorboard
+from services.process_manager import get_training_status, stop_tensorboard, get_runs_for_project
 
 project_bp = Blueprint("project", __name__, url_prefix="/projects")
 
@@ -88,6 +88,7 @@ def detail(name):
         project = json.load(f)
 
     training = get_training_status(name)
+    runs = get_runs_for_project(name)
 
     # Reconcile stale state: server restarted, _running cleared, but JSON still says 'running'
     if training['status'] == 'idle' and project.get('train_status') == 'running':
@@ -100,7 +101,7 @@ def detail(name):
 
     beekeeper_home = current_app.config["BEEKEEPER_HOME"]
     mcp_server_path = os.path.join(beekeeper_home, "mcp_server.py")
-    return render_template("project.html", project=project, training=training,
+    return render_template("project.html", project=project, training=training, runs=runs,
                            mcp_server_path=mcp_server_path)
 
 
