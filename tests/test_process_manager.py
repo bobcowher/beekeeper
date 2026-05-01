@@ -38,6 +38,8 @@ def _make_project(tmp_path, **overrides):
         "train_status": "idle",
         "train_pid": 0,
         "env_vars": {},
+        "parallel_runs_enabled": False,
+        "max_parallel_runs": 2,
     }
     data.update(overrides)
     (proj_dir / "project.json").write_text(json.dumps(data))
@@ -68,20 +70,27 @@ def _inline_thread(**kwargs):
 
 def test_pip_install_called_with_requirements_file(tmp_path):
     """pip install must be called with the project's requirements file."""
+    from services import process_manager
+    process_manager._running.clear()
     projects_dir = _make_project(tmp_path)
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=99),
+                        delete_training_run=MagicMock(),
+                        get_training_runs=MagicMock(return_value=[]))
 
     with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
          patch("services.process_manager.subprocess.run", return_value=_ok_run()) as mock_run, \
          patch("services.process_manager.subprocess.Popen") as mock_popen, \
          patch("services.process_manager._update_project_json"), \
          patch("services.process_manager._monitor_process"), \
-         patch("services.process_manager.threading.Thread", side_effect=_inline_thread):
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.get_db", return_value=mock_db):
 
         mock_proc = MagicMock()
         mock_proc.pid = 9999
         mock_popen.return_value = mock_proc
 
         start_training(projects_dir, "myproject")
+    process_manager._running.clear()
 
     calls = [c.args[0] for c in mock_run.call_args_list]
     pip_calls = [c for c in calls if "pip" in c]
@@ -95,21 +104,28 @@ def test_pip_install_called_with_requirements_file(tmp_path):
 
 def test_pip_install_skipped_when_no_requirements_file(tmp_path):
     """If requirements.txt doesn't exist, pip install is silently skipped."""
+    from services import process_manager
+    process_manager._running.clear()
     projects_dir = _make_project(tmp_path)
     os.remove(os.path.join(projects_dir, "myproject", "workspace", "requirements.txt"))
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=99),
+                        delete_training_run=MagicMock(),
+                        get_training_runs=MagicMock(return_value=[]))
 
     with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
          patch("services.process_manager.subprocess.run", return_value=_ok_run()) as mock_run, \
          patch("services.process_manager.subprocess.Popen") as mock_popen, \
          patch("services.process_manager._update_project_json"), \
          patch("services.process_manager._monitor_process"), \
-         patch("services.process_manager.threading.Thread", side_effect=_inline_thread):
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.get_db", return_value=mock_db):
 
         mock_proc = MagicMock()
         mock_proc.pid = 9999
         mock_popen.return_value = mock_proc
 
         start_training(projects_dir, "myproject")
+    process_manager._running.clear()
 
     calls = [c.args[0] for c in mock_run.call_args_list]
     pip_calls = [c for c in calls if "pip" in c]
@@ -120,7 +136,12 @@ def test_pip_install_skipped_when_no_requirements_file(tmp_path):
 
 def test_pip_install_failure_blocks_training(tmp_path):
     """A non-zero pip exit code must not launch the process."""
+    from services import process_manager
+    process_manager._running.clear()
     projects_dir = _make_project(tmp_path)
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=99),
+                        delete_training_run=MagicMock(),
+                        get_training_runs=MagicMock(return_value=[]))
 
     def fake_run(cmd, **kwargs):
         if "pip" in cmd:
@@ -131,17 +152,24 @@ def test_pip_install_failure_blocks_training(tmp_path):
          patch("services.process_manager.subprocess.run", side_effect=fake_run), \
          patch("services.process_manager.subprocess.Popen") as mock_popen, \
          patch("services.process_manager._update_project_json"), \
-         patch("services.process_manager.threading.Thread", side_effect=_inline_thread):
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.get_db", return_value=mock_db):
 
         start_training(projects_dir, "myproject")
 
     mock_popen.assert_not_called()
+    process_manager._running.clear()
 
 
 def test_pip_install_timeout_blocks_training(tmp_path):
     """A pip install timeout must not launch the process."""
     import subprocess as _subprocess
+    from services import process_manager
+    process_manager._running.clear()
     projects_dir = _make_project(tmp_path)
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=99),
+                        delete_training_run=MagicMock(),
+                        get_training_runs=MagicMock(return_value=[]))
 
     def fake_run(cmd, **kwargs):
         if "pip" in cmd:
@@ -152,19 +180,26 @@ def test_pip_install_timeout_blocks_training(tmp_path):
          patch("services.process_manager.subprocess.run", side_effect=fake_run), \
          patch("services.process_manager.subprocess.Popen") as mock_popen, \
          patch("services.process_manager._update_project_json"), \
-         patch("services.process_manager.threading.Thread", side_effect=_inline_thread):
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.get_db", return_value=mock_db):
 
         start_training(projects_dir, "myproject")
 
     mock_popen.assert_not_called()
+    process_manager._running.clear()
 
 
 # --- pip runs after git sync ---
 
 def test_pip_install_runs_after_git_pull(tmp_path):
     """pip install must happen after git sync, not before."""
+    from services import process_manager
+    process_manager._running.clear()
     projects_dir = _make_project(tmp_path)
     call_order = []
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=99),
+                        delete_training_run=MagicMock(),
+                        get_training_runs=MagicMock(return_value=[]))
 
     def fake_run(cmd, **kwargs):
         if "fetch" in cmd or "reset" in cmd:
@@ -178,13 +213,15 @@ def test_pip_install_runs_after_git_pull(tmp_path):
          patch("services.process_manager.subprocess.Popen") as mock_popen, \
          patch("services.process_manager._update_project_json"), \
          patch("services.process_manager._monitor_process"), \
-         patch("services.process_manager.threading.Thread", side_effect=_inline_thread):
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.get_db", return_value=mock_db):
 
         mock_proc = MagicMock()
         mock_proc.pid = 9999
         mock_popen.return_value = mock_proc
 
         start_training(projects_dir, "myproject")
+    process_manager._running.clear()
 
     assert call_order[0] == "git_sync"
     assert "pip_install" in call_order
@@ -225,4 +262,86 @@ def test_get_runs_for_project_returns_active(tmp_path):
     assert runs[0]["run_id"] == 42
     assert runs[0]["branch"] == "main"
     assert runs[0]["status"] == "running"
+    process_manager._running.clear()
+
+
+# --- parallel capacity ---
+
+def test_start_training_rejects_second_run_when_parallel_disabled(tmp_path):
+    """Second start_training call is rejected when parallel_runs_enabled=False."""
+    from services import process_manager
+    process_manager._running.clear()
+    projects_dir = _make_project(tmp_path)
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=1),
+                        delete_training_run=MagicMock(),
+                        get_training_runs=MagicMock(return_value=[]))
+
+    # Simulate run 1 already active
+    process_manager._running[1] = {
+        "process": MagicMock(), "starting": False,
+        "project_name": "myproject", "run_id": 1,
+        "branch": "main",
+        "workspace_dir": os.path.join(projects_dir, "myproject", "workspace"),
+    }
+
+    with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
+         patch("services.process_manager.get_db", return_value=mock_db):
+        result = process_manager.start_training(projects_dir, "myproject")
+
+    assert "error" in result
+    process_manager._running.clear()
+
+
+def test_start_training_allows_second_run_when_parallel_enabled(tmp_path):
+    """Second start_training is allowed when parallel_runs_enabled=True."""
+    from services import process_manager
+    process_manager._running.clear()
+    projects_dir = _make_project(tmp_path, parallel_runs_enabled=True, max_parallel_runs=2)
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=2),
+                        delete_training_run=MagicMock(),
+                        get_training_runs=MagicMock(return_value=[]))
+
+    # Simulate run 1 already active on primary workspace
+    process_manager._running[1] = {
+        "process": MagicMock(), "starting": False,
+        "project_name": "myproject", "run_id": 1,
+        "branch": "main",
+        "workspace_dir": os.path.join(projects_dir, "myproject", "workspace"),
+    }
+
+    with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
+         patch("services.process_manager._update_project_json"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.subprocess.run", return_value=_ok_run()), \
+         patch("services.process_manager.subprocess.Popen") as mock_popen, \
+         patch("services.process_manager._monitor_process"), \
+         patch("services.process_manager.get_db", return_value=mock_db):
+        mock_popen.return_value = MagicMock(pid=9999)
+        result = process_manager.start_training(projects_dir, "myproject", branch="feature/x")
+
+    assert "error" not in result
+    assert result.get("run_id") == 2
+    process_manager._running.clear()
+
+
+def test_start_training_returns_run_id(tmp_path):
+    """start_training returns run_id in the response."""
+    from services import process_manager
+    process_manager._running.clear()
+    projects_dir = _make_project(tmp_path)
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=42),
+                        delete_training_run=MagicMock(),
+                        get_training_runs=MagicMock(return_value=[]))
+
+    with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
+         patch("services.process_manager._update_project_json"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.subprocess.run", return_value=_ok_run()), \
+         patch("services.process_manager.subprocess.Popen") as mock_popen, \
+         patch("services.process_manager._monitor_process"), \
+         patch("services.process_manager.get_db", return_value=mock_db):
+        mock_popen.return_value = MagicMock(pid=9999)
+        result = process_manager.start_training(projects_dir, "myproject")
+
+    assert result.get("run_id") == 42
     process_manager._running.clear()

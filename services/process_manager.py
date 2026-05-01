@@ -9,6 +9,7 @@ import time
 import logging
 
 from models.project import Project
+from services.db_service import get_db
 
 log = logging.getLogger(__name__)
 
@@ -419,51 +420,82 @@ def _prune_old_runs(projects_dir: str, project_name: str, keep_last: int = 20):
                 log.warning(f"Failed to delete Tensorboard logs {tb_path}: {e}")
 
 
-def start_training(projects_dir, name):
-    """Validate, reserve the training slot, and launch the pre-launch sequence in background."""
-    with _lock:
-        if name in _running:
-            return {"error": "Training is already running"}
-        # Reserve slot immediately to prevent concurrent double-starts
-        _running[name] = {"process": None, "starting": True}
-
+def start_training(projects_dir, name, branch=None):
+    """Validate, reserve a training slot, and launch the pre-launch sequence in background."""
     config_path = os.path.join(projects_dir, name, "project.json")
     if not os.path.isfile(config_path):
-        with _lock:
-            _running.pop(name, None)
         return {"error": "Project not found"}
 
     with open(config_path) as f:
         project = json.load(f)
 
     if project.get("setup_status") != "ready":
-        with _lock:
-            _running.pop(name, None)
         return {"error": "Project setup is not complete"}
 
     python_bin = _resolve_python_binary(projects_dir, project)
     if not python_bin:
-        with _lock:
-            _running.pop(name, None)
         if project.get("env_type") == "conda":
             hint = f"conda env beekeeper-{name}"
         else:
             hint = os.path.join(projects_dir, name, "venv", "bin")
         return {"error": f"Could not find Python binary (checked {hint})"}
 
+    if branch is None:
+        branch = project.get("branch", "main")
+
+    # Pre-create DB record so run_id is available immediately for slot reservation
+    run_id = get_db().create_training_run(
+        project_name=name,
+        metadata={
+            "started_at": datetime.datetime.now(),
+            "status": "starting",
+            "branch": branch,
+        }
+    )
+
+    primary_ws = os.path.join(projects_dir, name, "workspace")
+
+    with _lock:
+        active_runs = _get_runs_for_project(name)
+        parallel_enabled = project.get("parallel_runs_enabled", False)
+        max_runs = project.get("max_parallel_runs", 2)
+
+        if not parallel_enabled and len(active_runs) > 0:
+            get_db().delete_training_run(run_id)
+            return {"error": "Training is already running"}
+
+        if parallel_enabled and len(active_runs) >= max_runs:
+            get_db().delete_training_run(run_id)
+            return {"error": f"At capacity ({max_runs} parallel runs)"}
+
+        primary_in_use = any(info.get("workspace_dir") == primary_ws for info in active_runs)
+        workspace_dir = (
+            primary_ws if not primary_in_use
+            else os.path.join(projects_dir, name, f"workspace-{run_id}")
+        )
+
+        _running[run_id] = {
+            "process": None,
+            "starting": True,
+            "project_name": name,
+            "run_id": run_id,
+            "branch": branch,
+            "workspace_dir": workspace_dir,
+        }
+
     _update_project_json(projects_dir, name, train_status="starting")
 
     thread = threading.Thread(
         target=_execute_training,
-        args=(projects_dir, name, project, python_bin),
+        args=(projects_dir, name, project, python_bin, run_id, branch, workspace_dir),
         daemon=True,
     )
     thread.start()
 
-    return {"status": "starting"}
+    return {"run_id": run_id, "status": "starting"}
 
 
-def _execute_training(projects_dir, name, project, python_bin):
+def _execute_training(projects_dir, name, project, python_bin, run_id=None, branch=None, workspace_dir=None):
     """Run the full pre-launch sequence and start the training subprocess (runs in background thread)."""
     log_path = os.path.join(projects_dir, name, "train.log")
 
