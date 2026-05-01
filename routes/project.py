@@ -177,6 +177,13 @@ def update(name):
             env_vars[k] = v
     project_data["env_vars"] = env_vars
 
+    # Handle parallel runs settings
+    project_data["parallel_runs_enabled"] = bool(request.form.get("parallel_runs_enabled"))
+    try:
+        project_data["max_parallel_runs"] = max(2, int(request.form.get("max_parallel_runs", 2)))
+    except (ValueError, TypeError):
+        project_data["max_parallel_runs"] = 2
+
     from models.project import Project
     project = Project(**project_data)
     project.save(projects_dir)

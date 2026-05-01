@@ -129,6 +129,33 @@
     </div>
     <button type="button" class="btn btn-secondary" id="btn-add-env">+ Add Variable</button>
 
+    <h2>Parallel Runs</h2>
+
+    <div class="form-group">
+        <label class="checkbox-label">
+            <input type="checkbox" name="parallel_runs_enabled" id="parallel-runs-toggle"
+                   value="1" {{ 'checked' if project.parallel_runs_enabled }}>
+            Enable parallel runs
+            <span class="tooltip-icon" title="Allow multiple branches to run simultaneously on this project.">?</span>
+        </label>
+    </div>
+
+    <div class="form-group" id="max-parallel-runs-group"
+         style="{{ '' if project.parallel_runs_enabled else 'display:none' }}">
+        <label for="max_parallel_runs">
+            Max parallel runs
+            <span class="tooltip-icon" title="Maximum number of branches that can run simultaneously. Minimum 2.">?</span>
+        </label>
+        <input type="number" id="max_parallel_runs" name="max_parallel_runs"
+               value="{{ project.max_parallel_runs }}" min="2" max="8">
+    </div>
+
+    <script>
+    document.getElementById('parallel-runs-toggle').addEventListener('change', function() {
+        document.getElementById('max-parallel-runs-group').style.display = this.checked ? '' : 'none';
+    });
+    </script>
+
     <div class="form-actions">
         <button type="submit" class="btn btn-primary">Save Changes</button>
         <a href="{{ url_for('project.detail', name=project.name) }}" class="btn btn-cancel">Cancel</a>
