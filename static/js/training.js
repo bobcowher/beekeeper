@@ -16,6 +16,10 @@ function apiFetch(url, opts = {}) {
     });
 }
 
+function escHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 // ============================================================
 // Branch picker (for starting new runs)
 // ============================================================
@@ -124,14 +128,16 @@ function renderRunRow(run) {
     div.className = `run-row ${status === 'running' || status === 'starting' ? 'run-active' : ''}`;
     div.id = `run-row-${run_id}`;
     const host = (window.TRAINING_CONFIG && window.TRAINING_CONFIG.host) || location.hostname;
+    const sBranch = escHtml(branch);
+    const sStatus = escHtml(status);
     div.innerHTML = `
         <div class="run-row-header">
-            <span class="status-badge status-${status === 'starting' ? 'running' : status}">${status}</span>
-            <span class="run-branch">${branch}</span>
+            <span class="status-badge status-${status === 'starting' ? 'running' : sStatus}">${sStatus}</span>
+            <span class="run-branch">${sBranch}</span>
             <span class="run-id">#${run_id}</span>
             ${pid ? `<span class="muted" style="font-size:0.75rem;">PID ${pid}</span>` : ''}
             <span class="run-elapsed" id="elapsed-${run_id}">${elapsed ? formatElapsed(elapsed) : ''}</span>
-            ${tb_port ? `<a href="http://${host}:${tb_port}" target="_blank" class="btn btn-secondary btn-sm">Tensorboard</a>` : ''}
+            ${tb_port ? `<a href="http://${escHtml(host)}:${tb_port}" target="_blank" class="btn btn-secondary btn-sm">Tensorboard</a>` : ''}
             <button class="btn btn-secondary btn-sm" id="btn-logs-${run_id}">▶ Logs</button>
             ${status !== 'starting' ? `<button class="btn btn-danger btn-sm" id="btn-stop-${run_id}">■ Stop</button>` : ''}
         </div>
