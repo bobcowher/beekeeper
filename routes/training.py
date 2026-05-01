@@ -4,7 +4,7 @@ from flask import Blueprint, current_app, jsonify, request, Response, send_file
 
 from services.process_manager import (
     start_training, stop_training, get_training_status,
-    start_tensorboard, stop_tensorboard,
+    start_tensorboard, stop_tensorboard, get_run_log_path, get_runs_for_project,
 )
 
 training_bp = Blueprint("training", __name__, url_prefix="/projects")
@@ -89,10 +89,9 @@ def _tail_offset(filepath, lines):
 @training_bp.route("/<name>/logs/stream")
 def logs_stream(name):
     projects_dir = current_app.config["PROJECTS_DIR"]
-    log_path = os.path.join(projects_dir, name, "train.log")
-
-    # ?tail=N sends only the last N lines first, then streams new ones
     tail = request.args.get("tail", type=int)
+    run_id = request.args.get("run_id", type=int)
+    log_path = get_run_log_path(projects_dir, name, run_id=run_id)
 
     def generate():
         if tail and os.path.isfile(log_path):
@@ -101,14 +100,13 @@ def logs_stream(name):
             offset = 0
 
         retries_without_data = 0
-        max_idle = 300  # stop after 5 min of no data and no running process
+        max_idle = 300
 
         while True:
             try:
                 if os.path.isfile(log_path):
                     size = os.path.getsize(log_path)
                     if size < offset:
-                        # Log file was truncated/rewritten (new run)
                         offset = 0
                     if size > offset:
                         with open(log_path, "r") as f:
@@ -122,8 +120,12 @@ def logs_stream(name):
                             continue
 
                 retries_without_data += 1
-                info = get_training_status(name)
-                if info["status"] != "running" and retries_without_data > 2:
+                runs = get_runs_for_project(name)
+                if run_id is not None:
+                    run_active = any(r["run_id"] == run_id for r in runs)
+                else:
+                    run_active = len(runs) > 0
+                if not run_active and retries_without_data > 2:
                     yield "data: \n\nevent: done\ndata: finished\n\n"
                     return
                 if retries_without_data > max_idle:
@@ -135,18 +137,18 @@ def logs_stream(name):
             time.sleep(0.5)
 
     return Response(generate(), mimetype="text/event-stream",
-                    headers={"Cache-Control": "no-cache",
-                             "X-Accel-Buffering": "no"})
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @training_bp.route("/<name>/logs/download")
 def logs_download(name):
     projects_dir = current_app.config["PROJECTS_DIR"]
-    log_path = os.path.join(projects_dir, name, "train.log")
+    run_id = request.args.get("run_id", type=int)
+    log_path = get_run_log_path(projects_dir, name, run_id=run_id)
     if not os.path.isfile(log_path):
         return jsonify({"error": "No log file found"}), 404
-    return send_file(log_path, as_attachment=True,
-                     download_name=f"{name}-train.log")
+    filename = f"{name}-run-{run_id}.log" if run_id else f"{name}-train.log"
+    return send_file(log_path, as_attachment=True, download_name=filename)
 
 
 @training_bp.route("/<name>/history")

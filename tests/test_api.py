@@ -124,3 +124,41 @@ def test_files_hides_pycache_and_dotfiles(client, ready_project, app):
     assert "__pycache__" not in names
     assert ".git" not in names
     assert "train.py" in names
+
+
+# --- API v1 training endpoints ---
+
+def test_training_start_returns_run_id(client, ready_project):
+    """POST /training/start returns run_id."""
+    from unittest.mock import patch
+    with patch("routes.api_v1.start_training", return_value={"run_id": 7, "status": "starting"}):
+        r = client.post("/api/v1/projects/myproject/training/start",
+                        json={}, headers={"Authorization": "Bearer test"})
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data["success"] is True
+    assert data["data"]["run_id"] == 7
+
+
+def test_training_start_passes_branch(client, ready_project):
+    """POST /training/start forwards branch param."""
+    from unittest.mock import patch, call
+    with patch("routes.api_v1.start_training", return_value={"run_id": 8, "status": "starting"}) as mock_start:
+        client.post("/api/v1/projects/myproject/training/start",
+                    json={"branch": "feature/test"},
+                    headers={"Authorization": "Bearer test"})
+    _, kwargs = mock_start.call_args
+    assert kwargs.get("branch") == "feature/test"
+
+
+def test_training_status_returns_runs_list(client, ready_project):
+    """GET /training/status returns runs list."""
+    from unittest.mock import patch
+    mock_runs = [{"run_id": 3, "branch": "main", "status": "running", "elapsed": 60, "pid": 123, "tb_port": None, "resources": None}]
+    with patch("routes.api_v1.get_runs_for_project", return_value=mock_runs):
+        r = client.get("/api/v1/projects/myproject/training/status",
+                       headers={"Authorization": "Bearer test"})
+    assert r.status_code == 200
+    data = r.get_json()
+    assert "runs" in data["data"]
+    assert data["data"]["runs"][0]["run_id"] == 3

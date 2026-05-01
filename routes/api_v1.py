@@ -13,7 +13,7 @@ from typing import NoReturn
 from flask import Blueprint, abort, current_app, jsonify, request, Response
 
 from models.project import Project
-from services.process_manager import start_training, stop_training, get_training_status
+from services.process_manager import start_training, stop_training, get_training_status, get_runs_for_project, get_run_log_path
 from services.stats_service import get_all_stats
 from services.auth_service import api_key_required
 
@@ -342,76 +342,37 @@ def delete_project_api(name):
 @api_key_required
 def training_start(name):
     """Start training for a project."""
-    project = load_project(name)
-
-    if project.setup_status != "ready":
-        return api_response(
-            error_code="SETUP_INCOMPLETE",
-            error_message="Project setup is not complete",
-            status_code=400
-        )
-
-    # Check if already running or starting
-    status = get_training_status(name)
-    if status["status"] in ("running", "starting"):
-        return api_response(
-            error_code="ALREADY_RUNNING",
-            error_message="Training is already running",
-            status_code=409
-        )
-
+    load_project(name)
     projects_dir = current_app.config["PROJECTS_DIR"]
-    result = start_training(projects_dir, name)
-
+    body = request.get_json() or {}
+    branch = body.get("branch")  # None → use project default
+    result = start_training(projects_dir, name, branch=branch)
     if "error" in result:
-        return api_response(
-            error_code="START_FAILED",
-            error_message=result["error"],
-            status_code=400
-        )
-
-    return api_response(
-        data={"status": "starting"},
-        status_code=202
-    )
+        return api_response(error_code="START_ERROR", error_message=result["error"], status_code=400)
+    return api_response(data=result)
 
 
 @api_v1_bp.route("/projects/<name>/training/stop", methods=["POST"])
 @api_key_required
 def training_stop(name):
-    """Stop training for a project."""
+    """Stop training. Provide run_id in body when multiple runs are active."""
     load_project(name)
-
-    # Check if running
-    status = get_training_status(name)
-    if status["status"] != "running":
-        return api_response(
-            error_code="NOT_RUNNING",
-            error_message="Training is not running",
-            status_code=409
-        )
-
     projects_dir = current_app.config["PROJECTS_DIR"]
-    result = stop_training(projects_dir, name)
-
+    body = request.get_json() or {}
+    run_id = body.get("run_id")
+    result = stop_training(projects_dir, name, run_id=run_id)
     if "error" in result:
-        return api_response(
-            error_code="STOP_FAILED",
-            error_message=result["error"],
-            status_code=400
-        )
-
-    return api_response(data={"status": "stopped"})
+        return api_response(error_code="STOP_ERROR", error_message=result["error"], status_code=400)
+    return api_response(data=result)
 
 
 @api_v1_bp.route("/projects/<name>/training/status")
 @api_key_required
 def training_status(name):
-    """Get training status for a project."""
+    """Get active training runs for a project."""
     load_project(name)
-
-    status = get_training_status(name)
-    return api_response(data=status)
+    runs = get_runs_for_project(name)
+    return api_response(data={"runs": runs})
 
 
 # ---------------------------------------------------------------------------
@@ -431,19 +392,15 @@ def get_logs(name):
         from services.db_service import get_db
         run = get_db().get_training_run(run_id)
         if not run or run['project_name'] != name:
-            return api_response(
-                error_code="NOT_FOUND",
-                error_message=f"Run {run_id} not found",
-                status_code=404
-            )
-        log_file_path = run.get('log_file_path')
-        if log_file_path:
-            log_path = os.path.join(projects_dir, name, log_file_path)
+            return api_response(error_code="NOT_FOUND",
+                                error_message=f"Run {run_id} not found", status_code=404)
+        # Prefer archived log; fall back to live log path (handles active parallel runs)
+        if run.get('log_file_path'):
+            log_path = os.path.join(projects_dir, name, run['log_file_path'])
         else:
-            # Active run — fall back to live log
-            log_path = os.path.join(projects_dir, name, "train.log")
+            log_path = get_run_log_path(projects_dir, name, run_id=run_id)
     else:
-        log_path = os.path.join(projects_dir, name, "train.log")
+        log_path = get_run_log_path(projects_dir, name)
 
     if not os.path.isfile(log_path):
         return api_response(data={"content": "", "lines": 0})
@@ -476,11 +433,10 @@ def get_logs(name):
 def stream_logs(name):
     """SSE stream of log content."""
     load_project(name)
-
     projects_dir = current_app.config["PROJECTS_DIR"]
-    log_path = os.path.join(projects_dir, name, "train.log")
-
     tail = request.args.get("tail", type=int)
+    run_id = request.args.get("run_id", type=int)
+    log_path = get_run_log_path(projects_dir, name, run_id=run_id)
 
     def generate():
         if tail and os.path.isfile(log_path):
@@ -489,14 +445,13 @@ def stream_logs(name):
             offset = 0
 
         retries_without_data = 0
-        max_idle = 300  # stop after 5 min of no data and no running process
+        max_idle = 300
 
         while True:
             try:
                 if os.path.isfile(log_path):
                     size = os.path.getsize(log_path)
                     if size < offset:
-                        # Log file was truncated/rewritten (new run)
                         offset = 0
                     if size > offset:
                         with open(log_path, "r") as f:
@@ -510,8 +465,12 @@ def stream_logs(name):
                             continue
 
                 retries_without_data += 1
-                info = get_training_status(name)
-                if info["status"] != "running" and retries_without_data > 2:
+                runs = get_runs_for_project(name)
+                if run_id is not None:
+                    run_active = any(r["run_id"] == run_id for r in runs)
+                else:
+                    run_active = len(runs) > 0
+                if not run_active and retries_without_data > 2:
                     yield "data: \n\nevent: done\ndata: finished\n\n"
                     return
                 if retries_without_data > max_idle:
@@ -522,11 +481,8 @@ def stream_logs(name):
 
             time.sleep(0.5)
 
-    return Response(
-        generate(),
-        mimetype="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
-    )
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @api_v1_bp.route("/projects/<name>/logs/analysis")
