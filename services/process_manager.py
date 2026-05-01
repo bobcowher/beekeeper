@@ -801,6 +801,8 @@ def stop_training(projects_dir, name, run_id=None):
                 return {"error": "Multiple runs active — specify run_id"}
             run_id = project_runs[0]
             info = _running.get(run_id)
+            if info is None:
+                return {"error": "Training is not running"}
 
         proc = info["process"]
         workspace_dir = info.get("workspace_dir", primary_ws)
