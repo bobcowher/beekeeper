@@ -234,7 +234,7 @@ def analyze_run(name: str, run_id: int | None = None) -> dict:
         for rid in active_ids:
             tb = _get(f"/projects/{name}/tensorboard/latest?run_id={rid}")
             logs = _get(f"/projects/{name}/runs/{rid}/logs?tail_lines=300")
-            results[str(rid)] = {"tensorboard": tb, "logs": logs}
+            results[str(rid)] = {"run_id": rid, "tensorboard": tb, "logs": logs}
         return {"parallel_runs": results}
 
     tb = _get(f"/projects/{name}/tensorboard/latest")
