@@ -11,3 +11,14 @@ static/bin/
 dist/
 build/
 *.egg-info/
+
+# Local/private files — not for public repo
+CLAUDE.md
+QWEN.md
+SESSION_NOTES.md
+BEEKEEPER_*.md
+nikto_report.txt
+API_IMPLEMENTATION.md
+AUTH_README.md
+softwarespec.md
+docs/superpowers/
