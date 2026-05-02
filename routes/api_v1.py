@@ -489,10 +489,11 @@ def stream_logs(name):
 @api_key_required
 def analyze_logs(name):
     """
-    Analyze training logs to extract episode metrics and trends.
+    DEPRECATED: Format-specific log parser. Only works for logs using the
+    "Episode N | reward: X | ..." format. Kept for backward compatibility.
 
-    Works for active runs where tensorboard data may not be flushed yet.
-    Parses log lines matching: "Episode N | reward: X | ..."
+    Prefer GET /api/v1/projects/{name}/runs/{run_id}/logs for raw log access
+    that works regardless of log format.
 
     Query params:
       ?tail=N - Only analyze last N lines (default: 500)

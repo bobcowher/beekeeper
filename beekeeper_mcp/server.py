@@ -212,9 +212,10 @@ def get_logs(name: str, run_id: int | None = None, tail: int = 100) -> str:
 @mcp.tool()
 def analyze_run(name: str, run_id: int | None = None) -> dict:
     """
-    Synthesized analysis of a training run.
-    Combines TensorBoard metrics (trends, peaks, convergence) with a raw log tail.
-    The consuming agent should interpret the log content.
+    Synthesized analysis of a training run. Returns TensorBoard metrics (trends,
+    peaks, convergence) plus a raw log tail. Interpret the log content yourself —
+    Beekeeper does not parse or summarize log text. Use get_logs for a larger
+    tail or download the full log via the run's log download endpoint if needed.
     """
     tb = _get(f"/projects/{name}/tensorboard/latest")
     if run_id is not None:
