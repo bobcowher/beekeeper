@@ -1059,6 +1059,13 @@ def get_latest_metrics(name):
         other_runs = [r for r in runs if r['status'] in ('canceled', 'crashed')]
 
         if running_runs:
+            if len(running_runs) > 1:
+                ids = [r['id'] for r in running_runs]
+                return api_response(
+                    error_code="MULTIPLE_RUNS_ACTIVE",
+                    error_message=f"Multiple runs are active (IDs: {ids}). Specify ?run_id=N to select one.",
+                    status_code=409
+                )
             target_run = running_runs[0]
             is_active = True
         elif completed_runs:

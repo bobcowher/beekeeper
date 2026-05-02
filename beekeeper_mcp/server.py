@@ -216,12 +216,29 @@ def analyze_run(name: str, run_id: int | None = None) -> dict:
     peaks, convergence) plus a raw log tail. Interpret the log content yourself —
     Beekeeper does not parse or summarize log text. Use get_logs for a larger
     tail or download the full log via the run's log download endpoint if needed.
+
+    When parallel runs are active and no run_id is given, returns an analysis
+    for each active run keyed by run_id.
     """
-    tb = _get(f"/projects/{name}/tensorboard/latest")
     if run_id is not None:
+        tb = _get(f"/projects/{name}/tensorboard/latest?run_id={run_id}")
         logs = _get(f"/projects/{name}/runs/{run_id}/logs?tail_lines=300")
-    else:
-        logs = _get(f"/projects/{name}/logs?tail=300")
+        return {"run_id": run_id, "tensorboard": tb, "logs": logs}
+
+    status = _get(f"/projects/{name}/training/status")
+    runs = status.get("data", status).get("runs", [])
+    active_ids = [r["run_id"] for r in runs if r.get("status") in ("running", "starting")]
+
+    if len(active_ids) > 1:
+        results = {}
+        for rid in active_ids:
+            tb = _get(f"/projects/{name}/tensorboard/latest?run_id={rid}")
+            logs = _get(f"/projects/{name}/runs/{rid}/logs?tail_lines=300")
+            results[str(rid)] = {"tensorboard": tb, "logs": logs}
+        return {"parallel_runs": results}
+
+    tb = _get(f"/projects/{name}/tensorboard/latest")
+    logs = _get(f"/projects/{name}/logs?tail=300")
     return {"tensorboard": tb, "logs": logs}
 
 
