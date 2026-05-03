@@ -23,6 +23,9 @@ from routes.files import _safe_path, _fmt_size, _zip_directory
 
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
+SERVER_VERSION = "1.0.7"
+MIN_MCP_VERSION = "0.1.1"
+
 # ---------------------------------------------------------------------------
 # Response helpers
 # ---------------------------------------------------------------------------
@@ -724,6 +727,15 @@ def browse_files(name, subpath=""):
 # ---------------------------------------------------------------------------
 # System Stats
 # ---------------------------------------------------------------------------
+
+@api_v1_bp.route("/version")
+def get_version():
+    """Return server version and minimum required MCP version."""
+    return api_response(data={
+        "server_version": SERVER_VERSION,
+        "min_mcp_version": MIN_MCP_VERSION,
+    })
+
 
 @api_v1_bp.route("/stats")
 @api_key_required

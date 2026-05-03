@@ -35,6 +35,8 @@ from fastmcp import FastMCP
 BEEKEEPER_HOST = os.environ.get("BEEKEEPER_HOST", "http://localhost:5000").rstrip("/")
 BEEKEEPER_API_KEY = os.environ.get("BEEKEEPER_API_KEY", "")
 
+MCP_VERSION = "0.1.1"
+
 mcp = FastMCP("Beekeeper")
 
 
@@ -67,6 +69,34 @@ def _delete(path: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Version check
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def get_version() -> dict:
+    """
+    Check MCP and server version compatibility.
+    Call this at the start of any session to verify your MCP client is up to date.
+    Returns mcp_version, server_version, min_mcp_version, and an 'outdated' flag.
+    If outdated is true, reinstall: pip install -e /path/to/beekeeper
+    """
+    from packaging.version import Version
+    result = _get("/version")
+    server_data = result.get("data", {})
+    min_required = server_data.get("min_mcp_version", "0.0.0")
+    outdated = Version(MCP_VERSION) < Version(min_required)
+    return {
+        "mcp_version": MCP_VERSION,
+        "server_version": server_data.get("server_version"),
+        "min_mcp_version": min_required,
+        "outdated": outdated,
+        "warning": (
+            f"MCP version {MCP_VERSION} is below the minimum required {min_required}. "
+            "Reinstall: pip install -e /path/to/beekeeper"
+        ) if outdated else None,
+    }
+
+
 # Projects
 # ---------------------------------------------------------------------------
 

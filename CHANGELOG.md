@@ -2,8 +2,14 @@
 
 ## [Unreleased]
 
+### New Features
+
+- `GET /api/v1/version` — returns `server_version` and `min_mcp_version`; no auth required
+- MCP `get_version()` tool — compares installed MCP version against server's minimum, returns `outdated` flag with reinstall message if behind
+
 ### Bug Fixes
 
+- Branch switching now blocked during `starting` state — previously a switch could corrupt a run's workspace during the pre-launch git pull
 - Improved 400 error when starting a run while one is active and parallel runs are disabled — message now explains how to enable parallel runs
 
 ---
