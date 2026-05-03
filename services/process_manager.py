@@ -694,7 +694,29 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
     if tb_bin:
         tb_port = _find_free_port()
         if tb_port:
-            tb_logdir_base = os.path.join(workspace_dir, project.get("tensorboard_log_dir", "runs"))
+            tb_log_rel = project.get("tensorboard_log_dir", "runs")
+            primary_tb_base = os.path.join(projects_dir, name, "workspace", tb_log_rel)
+
+            if is_parallel:
+                # Redirect the parallel workspace's TB log dir into the primary workspace via
+                # symlink so TB writes land in primary_workspace/runs/run_<id>/ and are visible
+                # in the main TensorBoard immediately alongside historical runs.
+                parallel_tb_link = os.path.join(workspace_dir, tb_log_rel)
+                parallel_redirect_dir = os.path.join(primary_tb_base, f"run_{run_id}")
+                os.makedirs(parallel_redirect_dir, exist_ok=True)
+                if os.path.isdir(parallel_tb_link) and not os.path.islink(parallel_tb_link):
+                    import shutil as _shutil_tb
+                    try:
+                        _shutil_tb.rmtree(parallel_tb_link)
+                    except Exception as e:
+                        log.warning("Could not clear parallel TB dir %s: %s", parallel_tb_link, e)
+                if not os.path.exists(parallel_tb_link):
+                    os.symlink(parallel_redirect_dir, parallel_tb_link)
+                tb_logdir_base = primary_tb_base
+                tb_run_dir = parallel_redirect_dir
+                tb_run_dir_rel = f"{tb_log_rel}/run_{run_id}"
+            else:
+                tb_logdir_base = os.path.join(workspace_dir, tb_log_rel)
 
             tb_logs_max_runs = project.get("tb_logs_max_runs", 20)
             if tb_logs_max_runs > 0 and not is_parallel:
@@ -712,10 +734,11 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
                 if cleanup_result["deleted"]:
                     log.info(f"Auto-cleanup TB: {cleanup_result['message']}")
 
-            run_timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            tb_run_dir = os.path.join(tb_logdir_base, run_timestamp)
-            os.makedirs(tb_run_dir, exist_ok=True)
-            tb_run_dir_rel = f"{project.get('tensorboard_log_dir', 'runs')}/{run_timestamp}"
+            if not is_parallel:
+                run_timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+                tb_run_dir = os.path.join(tb_logdir_base, run_timestamp)
+                os.makedirs(tb_run_dir, exist_ok=True)
+                tb_run_dir_rel = f"{tb_log_rel}/{run_timestamp}"
 
             run_history_max_runs = project.get("run_history_max_runs", 10)
             if run_history_max_runs > 0 and not is_parallel:
@@ -731,7 +754,8 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
 
             try:
                 tb_process = subprocess.Popen(
-                    [tb_bin, "--logdir", tb_logdir_base, "--port", str(tb_port), "--bind_all"],
+                    [tb_bin, "--logdir", tb_logdir_base, "--port", str(tb_port),
+                     "--bind_all", "--reload_interval=5"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     start_new_session=True,
@@ -966,7 +990,8 @@ def start_tensorboard(projects_dir, name):
 
     try:
         tb_process = subprocess.Popen(
-            [tb_bin, "--logdir", tb_logdir, "--port", str(tb_port), "--bind_all"],
+            [tb_bin, "--logdir", tb_logdir, "--port", str(tb_port),
+             "--bind_all", "--reload_interval=5"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
