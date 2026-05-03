@@ -694,13 +694,15 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
     if tb_bin:
         tb_port = _find_free_port()
         if tb_port:
-            tb_log_rel = project.get("tensorboard_log_dir", "runs")
+            tb_log_rel = project.get("tensorboard_log_dir") or "runs"
             primary_tb_base = os.path.join(projects_dir, name, "workspace", tb_log_rel)
 
-            if is_parallel:
+            if is_parallel and project.get("tensorboard_log_dir"):
                 # Redirect the parallel workspace's TB log dir into the primary workspace via
                 # symlink so TB writes land in primary_workspace/runs/run_<id>/ and are visible
                 # in the main TensorBoard immediately alongside historical runs.
+                # Only done when tensorboard_log_dir is explicitly configured — otherwise we
+                # don't know where the training script actually writes its TB data.
                 parallel_tb_link = os.path.join(workspace_dir, tb_log_rel)
                 parallel_redirect_dir = os.path.join(primary_tb_base, f"run_{run_id}")
                 os.makedirs(parallel_redirect_dir, exist_ok=True)
