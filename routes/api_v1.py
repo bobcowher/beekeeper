@@ -1572,12 +1572,12 @@ def switch_branch(name):
     """Switch to a different branch."""
     project = load_project(name)
 
-    # Check if training is running
-    status = get_training_status(name)
-    if status["status"] == "running":
+    # Block if any run is active (starting or running)
+    from services.process_manager import get_runs_for_project
+    if get_runs_for_project(name):
         return api_response(
             error_code="TRAINING_RUNNING",
-            error_message="Cannot switch branches while training is running",
+            error_message="Cannot switch branches while training is active",
             status_code=409
         )
 
