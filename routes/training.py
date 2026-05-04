@@ -286,7 +286,7 @@ def clear_history(name):
                     pass
 
         if run.get('tensorboard_dir'):
-            tb_path = os.path.join(projects_dir, name, run['tensorboard_dir'])
+            tb_path = os.path.join(projects_dir, name, "workspace", run['tensorboard_dir'])
             if os.path.isdir(tb_path):
                 try:
                     shutil.rmtree(tb_path)

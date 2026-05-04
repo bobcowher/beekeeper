@@ -324,6 +324,54 @@ def test_start_training_allows_second_run_when_parallel_enabled(tmp_path):
     process_manager._running.clear()
 
 
+def test_parallel_tensorboard_link_exists_before_training_process(tmp_path):
+    """Parallel runs must redirect TB logs before the training process can create runs/."""
+    from services import process_manager
+    process_manager._running.clear()
+    projects_dir = _make_project(tmp_path, parallel_runs_enabled=True, max_parallel_runs=2)
+    parallel_ws = os.path.join(projects_dir, "myproject", "workspace-2")
+    os.makedirs(parallel_ws)
+    with open(os.path.join(parallel_ws, "train.py"), "w") as f:
+        f.write("print('training')")
+
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=2),
+                        delete_training_run=MagicMock(),
+                        get_training_runs=MagicMock(return_value=[]))
+
+    process_manager._running[1] = {
+        "process": MagicMock(), "starting": False,
+        "project_name": "myproject", "run_id": 1,
+        "branch": "main",
+        "workspace_dir": os.path.join(projects_dir, "myproject", "workspace"),
+    }
+
+    expected_target = os.path.join(projects_dir, "myproject", "workspace", "runs", "run_2")
+    link_path = os.path.join(parallel_ws, "runs")
+
+    def fake_popen(cmd, **kwargs):
+        assert os.path.islink(link_path)
+        assert os.readlink(link_path) == expected_target
+        assert kwargs["env"]["BEEKEEPER_TENSORBOARD_DIR"] == expected_target
+        assert kwargs["env"]["TENSORBOARD_LOG_DIR"] == expected_target
+        proc = MagicMock()
+        proc.pid = 9999
+        return proc
+
+    with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
+         patch("services.process_manager._resolve_tensorboard_binary", return_value=None), \
+         patch("services.process_manager._update_project_json"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.subprocess.run", return_value=_ok_run()), \
+         patch("services.process_manager.subprocess.Popen", side_effect=fake_popen), \
+         patch("services.process_manager._monitor_process"), \
+         patch("services.process_manager.get_db", return_value=mock_db):
+        result = process_manager.start_training(projects_dir, "myproject", branch="feature/x")
+
+    assert "error" not in result
+    mock_db.update_training_run.assert_any_call(2, tensorboard_dir="runs/run_2")
+    process_manager._running.clear()
+
+
 def test_start_training_returns_run_id(tmp_path):
     """start_training returns run_id in the response."""
     from services import process_manager

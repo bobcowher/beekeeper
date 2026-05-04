@@ -36,7 +36,7 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> dict
             return {'success': False, 'reason': 'no_tensorboard_dir'}
 
         # Try the stored path first
-        tb_dir = os.path.join(projects_dir, project_name, run['tensorboard_dir'])
+        tb_dir = os.path.join(projects_dir, project_name, 'workspace', run['tensorboard_dir'])
 
         # If stored path doesn't exist, auto-discover TensorBoard data
         if not os.path.isdir(tb_dir):
