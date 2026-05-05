@@ -419,6 +419,164 @@ def test_output_paths_link_to_persistent_run_dir_before_training_process(tmp_pat
     process_manager._running.clear()
 
 
+def test_primary_workspace_output_conflict_warns_and_skips_symlink(tmp_path):
+    """Primary workspace conflicts are non-destructive and recorded in the run log."""
+    from services import process_manager
+    process_manager._running.clear()
+    projects_dir = _make_project(tmp_path, output_paths=["saved_models"])
+    workspace_dir = os.path.join(projects_dir, "myproject", "workspace")
+    conflict_dir = os.path.join(workspace_dir, "saved_models")
+    os.makedirs(conflict_dir)
+    with open(os.path.join(conflict_dir, "keep.txt"), "w") as f:
+        f.write("do not delete")
+
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=44),
+                        delete_training_run=MagicMock(),
+                        get_training_runs=MagicMock(return_value=[]))
+
+    with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
+         patch("services.process_manager._resolve_tensorboard_binary", return_value=None), \
+         patch("services.process_manager._update_project_json"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.subprocess.run", return_value=_ok_run()), \
+         patch("services.process_manager.subprocess.Popen") as mock_popen, \
+         patch("services.process_manager._monitor_process"), \
+         patch("services.process_manager.get_db", return_value=mock_db):
+        mock_popen.return_value = MagicMock(pid=9999)
+        result = process_manager.start_training(projects_dir, "myproject")
+
+    assert "error" not in result
+    assert os.path.isdir(conflict_dir)
+    assert not os.path.islink(conflict_dir)
+    with open(os.path.join(projects_dir, "myproject", "train.log")) as f:
+        log_content = f.read()
+    assert "Could not protect output path 'saved_models'" in log_content
+    process_manager._running.clear()
+
+
+def test_parallel_workspace_output_conflict_is_replaced(tmp_path):
+    """Disposable parallel workspaces replace committed output directories with symlinks."""
+    from services import process_manager
+    process_manager._running.clear()
+    projects_dir = _make_project(
+        tmp_path,
+        parallel_runs_enabled=True,
+        max_parallel_runs=2,
+        output_paths=["saved_models"],
+    )
+    parallel_ws = os.path.join(projects_dir, "myproject", "workspace-45")
+    os.makedirs(os.path.join(parallel_ws, "saved_models"))
+    with open(os.path.join(parallel_ws, "train.py"), "w") as f:
+        f.write("print('training')")
+    with open(os.path.join(parallel_ws, "saved_models", "tracked.txt"), "w") as f:
+        f.write("replace me")
+
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=45),
+                        delete_training_run=MagicMock(),
+                        get_training_runs=MagicMock(return_value=[]))
+
+    process_manager._running[1] = {
+        "process": MagicMock(), "starting": False,
+        "project_name": "myproject", "run_id": 1,
+        "branch": "main",
+        "workspace_dir": os.path.join(projects_dir, "myproject", "workspace"),
+    }
+    target_dir = os.path.join(projects_dir, "myproject", "persistent", "runs", "run_45", "saved_models")
+
+    def fake_popen(cmd, **kwargs):
+        link_path = os.path.join(parallel_ws, "saved_models")
+        assert os.path.islink(link_path)
+        assert os.readlink(link_path) == target_dir
+        proc = MagicMock()
+        proc.pid = 9999
+        return proc
+
+    with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
+         patch("services.process_manager._resolve_tensorboard_binary", return_value=None), \
+         patch("services.process_manager._update_project_json"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.subprocess.run", return_value=_ok_run()), \
+         patch("services.process_manager.subprocess.Popen", side_effect=fake_popen), \
+         patch("services.process_manager._monitor_process"), \
+         patch("services.process_manager.get_db", return_value=mock_db):
+        result = process_manager.start_training(projects_dir, "myproject")
+
+    assert "error" not in result
+    process_manager._running.clear()
+
+
+def test_reserved_run_env_var_is_overridden_and_warned(tmp_path):
+    """Beekeeper run env vars override project env vars and emit a run-log warning."""
+    from services import process_manager
+    process_manager._running.clear()
+    projects_dir = _make_project(tmp_path, env_vars={"BEEKEEPER_RUN_DIR": "/tmp/wrong"})
+    expected_dir = os.path.join(projects_dir, "myproject", "persistent", "runs", "run_46")
+
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=46),
+                        delete_training_run=MagicMock(),
+                        get_training_runs=MagicMock(return_value=[]))
+
+    def fake_popen(cmd, **kwargs):
+        assert kwargs["env"]["BEEKEEPER_RUN_DIR"] == expected_dir
+        proc = MagicMock()
+        proc.pid = 9999
+        return proc
+
+    with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
+         patch("services.process_manager._resolve_tensorboard_binary", return_value=None), \
+         patch("services.process_manager._update_project_json"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.subprocess.run", return_value=_ok_run()), \
+         patch("services.process_manager.subprocess.Popen", side_effect=fake_popen), \
+         patch("services.process_manager._monitor_process"), \
+         patch("services.process_manager.get_db", return_value=mock_db):
+        result = process_manager.start_training(projects_dir, "myproject")
+
+    assert "error" not in result
+    with open(os.path.join(projects_dir, "myproject", "train.log")) as f:
+        log_content = f.read()
+    assert "Project env var BEEKEEPER_RUN_DIR is reserved by Beekeeper" in log_content
+    process_manager._running.clear()
+
+
+def test_run_history_cleanup_deletes_only_non_notable_old_run_storage(tmp_path):
+    """Retention cleanup keeps notable runs and removes non-notable run storage."""
+    from services import process_manager
+    process_manager._running.clear()
+    projects_dir = _make_project(tmp_path, run_history_max_runs=1)
+    project_dir = os.path.join(projects_dir, "myproject")
+    notable_dir = os.path.join(project_dir, "persistent", "runs", "run_10")
+    old_dir = os.path.join(project_dir, "persistent", "runs", "run_11")
+    os.makedirs(notable_dir, exist_ok=True)
+    os.makedirs(old_dir, exist_ok=True)
+
+    old_runs = [
+        {"id": 46, "started_at": "2026-05-04T12:00:00", "notable": 0},
+        {"id": 10, "started_at": "2026-05-03T12:00:00", "notable": 1, "persistent_dir": "persistent/runs/run_10"},
+        {"id": 11, "started_at": "2026-05-02T12:00:00", "notable": 0, "persistent_dir": "persistent/runs/run_11"},
+    ]
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=46),
+                        delete_training_run=MagicMock(),
+                        get_training_runs=MagicMock(return_value=old_runs))
+
+    with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
+         patch("services.process_manager._resolve_tensorboard_binary", return_value=None), \
+         patch("services.process_manager._update_project_json"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.subprocess.run", return_value=_ok_run()), \
+         patch("services.process_manager.subprocess.Popen") as mock_popen, \
+         patch("services.process_manager._monitor_process"), \
+         patch("services.process_manager.get_db", return_value=mock_db):
+        mock_popen.return_value = MagicMock(pid=9999)
+        result = process_manager.start_training(projects_dir, "myproject")
+
+    assert "error" not in result
+    assert os.path.isdir(notable_dir)
+    assert not os.path.exists(old_dir)
+    mock_db.delete_training_run.assert_called_once_with(11)
+    process_manager._running.clear()
+
+
 def test_start_tensorboard_uses_persistent_runs_root(tmp_path):
     """Standalone TensorBoard points at persistent/runs for new run storage."""
     from services import process_manager

@@ -6,6 +6,7 @@ from services.process_manager import (
     start_training, stop_training, get_training_status,
     start_tensorboard, stop_tensorboard, get_run_log_path, get_runs_for_project,
 )
+from services.run_storage_service import clear_persistent_runs, delete_run_storage
 
 training_bp = Blueprint("training", __name__, url_prefix="/projects")
 
@@ -265,7 +266,6 @@ def update_run(name, run_id):
 def clear_history(name):
     """Clear all run history for a project."""
     from services.db_service import get_db
-    import shutil
     projects_dir = current_app.config["PROJECTS_DIR"]
 
     config_path = os.path.join(projects_dir, name, "project.json")
@@ -277,30 +277,9 @@ def clear_history(name):
 
     # Delete archived logs and run storage directories
     for run in runs:
-        if run.get('log_file_path'):
-            log_path = os.path.join(projects_dir, name, run['log_file_path'])
-            if os.path.isfile(log_path):
-                try:
-                    os.unlink(log_path)
-                except Exception:
-                    pass
+        delete_run_storage(projects_dir, name, run)
 
-        if run.get('persistent_dir'):
-            persistent_path = os.path.join(projects_dir, name, run['persistent_dir'])
-            if os.path.isdir(persistent_path):
-                try:
-                    shutil.rmtree(persistent_path)
-                except Exception:
-                    pass
-        elif run.get('tensorboard_dir'):
-            project_relative = os.path.join(projects_dir, name, run['tensorboard_dir'])
-            workspace_relative = os.path.join(projects_dir, name, "workspace", run['tensorboard_dir'])
-            tb_path = project_relative if os.path.isdir(project_relative) else workspace_relative
-            if os.path.isdir(tb_path):
-                try:
-                    shutil.rmtree(tb_path)
-                except Exception:
-                    pass
+    clear_persistent_runs(projects_dir, name)
 
     # Delete run_logs directory if empty
     run_logs_dir = os.path.join(projects_dir, name, "run_logs")

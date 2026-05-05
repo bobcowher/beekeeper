@@ -15,6 +15,7 @@ from services.project_service import (
 )
 from services.python_versions import find_available, has_conda
 from services.process_manager import get_training_status, stop_tensorboard, get_runs_for_project
+from services.run_storage_service import delete_run_storage
 
 project_bp = Blueprint("project", __name__, url_prefix="/projects")
 
@@ -281,7 +282,6 @@ def cleanup_tb_logs(name):
 @project_bp.route("/<name>/cleanup-run-history", methods=["POST"])
 def cleanup_run_history(name):
     from services.db_service import get_db
-    import shutil
     projects_dir = current_app.config["PROJECTS_DIR"]
     config_path = os.path.join(projects_dir, name, "project.json")
     if not os.path.isfile(config_path):
@@ -301,25 +301,7 @@ def cleanup_run_history(name):
     # Delete runs beyond keep_count
     deleted_count = 0
     for run in runs[keep_count:]:
-        if run.get("persistent_dir"):
-            path = os.path.join(projects_dir, name, run["persistent_dir"])
-            if os.path.isdir(path):
-                shutil.rmtree(path, ignore_errors=True)
-        elif run.get("tensorboard_dir"):
-            for path in (
-                os.path.join(projects_dir, name, run["tensorboard_dir"]),
-                os.path.join(projects_dir, name, "workspace", run["tensorboard_dir"]),
-            ):
-                if os.path.isdir(path):
-                    shutil.rmtree(path, ignore_errors=True)
-                    break
-        if run.get("log_file_path"):
-            log_path = os.path.join(projects_dir, name, run["log_file_path"])
-            if os.path.isfile(log_path):
-                try:
-                    os.unlink(log_path)
-                except Exception:
-                    pass
+        delete_run_storage(projects_dir, name, run)
         db.delete_training_run(run['id'])
         deleted_count += 1
 

@@ -12,6 +12,7 @@ import shutil
 from models.project import Project
 from services.db_service import get_db
 from services.project_service import validate_output_paths, validate_workspace_path
+from services.run_storage_service import delete_run_storage, persistent_runs_root
 
 log = logging.getLogger(__name__)
 
@@ -24,10 +25,6 @@ _BEEKEEPER_RUN_ENV_KEYS = {
     "BEEKEEPER_TENSORBOARD_DIR",
     "TENSORBOARD_LOG_DIR",
 }
-
-
-def _persistent_runs_root(projects_dir: str, name: str) -> str:
-    return os.path.join(projects_dir, name, "persistent", "runs")
 
 
 def _persistent_run_paths(projects_dir: str, name: str, run_id: int) -> tuple[str, str]:
@@ -46,7 +43,7 @@ def _dir_has_entries(path: str) -> bool:
 
 
 def _tensorboard_launch_args(tb_bin: str, projects_dir: str, name: str, project: dict, port: int) -> list[str]:
-    persistent_root = _persistent_runs_root(projects_dir, name)
+    persistent_root = persistent_runs_root(projects_dir, name)
     os.makedirs(persistent_root, exist_ok=True)
 
     args = [tb_bin]
@@ -60,7 +57,14 @@ def _tensorboard_launch_args(tb_bin: str, projects_dir: str, name: str, project:
     return args
 
 
-def _ensure_workspace_symlink(workspace_dir: str, rel_path: str, target_dir: str, warnings: list[str], label: str):
+def _ensure_workspace_symlink(
+    workspace_dir: str,
+    rel_path: str,
+    target_dir: str,
+    warnings: list[str],
+    label: str,
+    is_parallel: bool = False,
+):
     link_path = os.path.join(workspace_dir, rel_path)
     os.makedirs(target_dir, exist_ok=True)
     try:
@@ -71,7 +75,7 @@ def _ensure_workspace_symlink(workspace_dir: str, rel_path: str, target_dir: str
 
     if os.path.lexists(link_path):
         if os.path.islink(link_path):
-            if os.readlink(link_path) == target_dir:
+            if os.path.realpath(link_path) == os.path.realpath(target_dir):
                 return
             try:
                 os.unlink(link_path)
@@ -80,55 +84,32 @@ def _ensure_workspace_symlink(workspace_dir: str, rel_path: str, target_dir: str
                 return
         elif os.path.isdir(link_path):
             try:
-                os.rmdir(link_path)
+                if is_parallel:
+                    shutil.rmtree(link_path)
+                else:
+                    os.rmdir(link_path)
             except OSError:
                 warnings.append(
                     f"Could not protect {label} path '{rel_path}' because a non-empty directory already exists there."
                 )
                 return
         else:
-            warnings.append(
-                f"Could not protect {label} path '{rel_path}' because a file already exists there."
-            )
-            return
+            if is_parallel:
+                try:
+                    os.unlink(link_path)
+                except Exception as e:
+                    warnings.append(f"Could not replace existing {label} file '{rel_path}': {e}")
+                    return
+            else:
+                warnings.append(
+                    f"Could not protect {label} path '{rel_path}' because a file already exists there."
+                )
+                return
 
     try:
         os.symlink(target_dir, link_path)
     except Exception as e:
         warnings.append(f"Could not create {label} symlink '{rel_path}': {e}")
-
-
-def _delete_path(path: str, label: str):
-    try:
-        if os.path.islink(path) or os.path.isfile(path):
-            os.unlink(path)
-            log.info("Deleted %s: %s", label, path)
-        elif os.path.isdir(path):
-            shutil.rmtree(path)
-            log.info("Deleted %s: %s", label, path)
-    except Exception as e:
-        log.warning("Failed to delete %s %s: %s", label, path, e)
-
-
-def _delete_run_storage(projects_dir: str, project_name: str, run: dict):
-    if run.get("log_file_path"):
-        _delete_path(
-            os.path.join(projects_dir, project_name, run["log_file_path"]),
-            "archived log",
-        )
-
-    if run.get("persistent_dir"):
-        _delete_path(
-            os.path.join(projects_dir, project_name, run["persistent_dir"]),
-            "persistent run directory",
-        )
-    elif run.get("tensorboard_dir"):
-        project_relative = os.path.join(projects_dir, project_name, run["tensorboard_dir"])
-        workspace_relative = os.path.join(projects_dir, project_name, "workspace", run["tensorboard_dir"])
-        if os.path.lexists(project_relative):
-            _delete_path(project_relative, "TensorBoard logs")
-        else:
-            _delete_path(workspace_relative, "TensorBoard logs")
 
 
 def _resolve_python_binary(projects_dir, project):
@@ -518,7 +499,7 @@ def _prune_old_runs(projects_dir: str, project_name: str, keep_last: int = 20):
     deleted_runs = db.prune_old_runs(project_name, keep_last=keep_last)
 
     for run in deleted_runs:
-        _delete_run_storage(projects_dir, project_name, run)
+        delete_run_storage(projects_dir, project_name, run)
 
 
 def start_training(projects_dir, name, branch=None):
@@ -769,6 +750,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
         persistent_run_dir,
         prelaunch_warnings,
         "TensorBoard",
+        is_parallel=is_parallel,
     )
     for output_rel in output_paths:
         _ensure_workspace_symlink(
@@ -777,6 +759,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
             os.path.join(persistent_run_dir, output_rel),
             prelaunch_warnings,
             "output",
+            is_parallel=is_parallel,
         )
 
     get_db().update_training_run(
@@ -792,7 +775,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
         deleted_count = 0
         for r in runs[run_history_max_runs:]:
             if not r.get("notable", 0):
-                _delete_run_storage(projects_dir, name, r)
+                delete_run_storage(projects_dir, name, r)
                 get_db().delete_training_run(r["id"])
                 deleted_count += 1
         if deleted_count > 0:

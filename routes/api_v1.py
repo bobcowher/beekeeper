@@ -17,6 +17,7 @@ from services.process_manager import start_training, stop_training, get_training
 from services.stats_service import get_all_stats
 from services.auth_service import api_key_required
 from services.project_service import validate_output_paths
+from services.run_storage_service import delete_run_storage
 
 # Reuse helpers from existing routes
 from routes.training import _tail_offset
@@ -1178,7 +1179,6 @@ def cleanup_tensorboard_logs(name):
     db_cleanup_info = None
     if cleanup_db:
         from services.db_service import get_db
-        import shutil
         db = get_db()
         runs = db.get_training_runs(name, limit=1000)
 
@@ -1188,25 +1188,7 @@ def cleanup_tensorboard_logs(name):
         # Delete runs beyond keep_count
         deleted_run_ids = []
         for run in runs[keep_count:]:
-            if run.get("persistent_dir"):
-                path = os.path.join(projects_dir, name, run["persistent_dir"])
-                if os.path.isdir(path):
-                    shutil.rmtree(path, ignore_errors=True)
-            elif run.get("tensorboard_dir"):
-                for path in (
-                    os.path.join(projects_dir, name, run["tensorboard_dir"]),
-                    os.path.join(projects_dir, name, "workspace", run["tensorboard_dir"]),
-                ):
-                    if os.path.isdir(path):
-                        shutil.rmtree(path, ignore_errors=True)
-                        break
-            if run.get("log_file_path"):
-                log_path = os.path.join(projects_dir, name, run["log_file_path"])
-                if os.path.isfile(log_path):
-                    try:
-                        os.unlink(log_path)
-                    except Exception:
-                        pass
+            delete_run_storage(projects_dir, name, run)
             db.delete_training_run(run['id'])
             deleted_run_ids.append(run['id'])
 
