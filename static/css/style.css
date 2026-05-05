@@ -394,7 +394,7 @@ body {
 }
 
 /* Forms */
-input, select {
+input, select, textarea {
     background: var(--bg-input);
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -405,7 +405,11 @@ input, select {
     width: 100%;
 }
 
-input:focus, select:focus {
+textarea {
+    resize: vertical;
+}
+
+input:focus, select:focus, textarea:focus {
     outline: none;
     border-color: var(--accent);
 }
