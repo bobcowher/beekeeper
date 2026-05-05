@@ -2,13 +2,13 @@ import os
 import time
 from flask import Blueprint, current_app, jsonify, request, Response, send_file
 
-RUN_NOT_FOUND_MSG = "Run not found"
-
 from services.process_manager import (
     start_training, stop_training, get_training_status,
     start_tensorboard, stop_tensorboard, get_run_log_path, get_runs_for_project,
 )
 from services.run_storage_service import clear_persistent_runs, delete_run_storage
+
+RUN_NOT_FOUND_MSG = "Run not found"
 
 training_bp = Blueprint("training", __name__, url_prefix="/projects")
 

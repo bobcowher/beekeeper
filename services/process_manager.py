@@ -259,7 +259,7 @@ def get_runs_for_project(name: str) -> list:
     return result
 
 
-def get_run_log_path(projects_dir: str, name: str, run_id: int = None) -> str:
+def get_run_log_path(projects_dir: str, name: str, run_id: int | None = None) -> str:
     """Return the active log file path for a run. Falls back to train.log."""
     with _lock:
         if run_id is not None:
@@ -467,7 +467,7 @@ def _archive_run_log(projects_dir: str, project_name: str, run_id: int, source_l
         return None
 
 
-def _finalize_run_record(run_id: int, exit_code: int, started_at: float, log_path: str):
+def _finalize_run_record(run_id: int, exit_code: int, started_at: float, log_path: str | None):
     """Update run record with completion data."""
     ended_at = datetime.datetime.now()
     duration = int(time.time() - started_at)

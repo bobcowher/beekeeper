@@ -724,7 +724,7 @@ def _generate_summary(
     return ". ".join(parts)
 
 
-def cleanup_old_tb_logs(tb_logdir: str, keep_count: int, protected_dirs: set = None) -> dict:
+def cleanup_old_tb_logs(tb_logdir: str, keep_count: int, protected_dirs: set | None = None) -> dict:
     """
     Keep only the N most recent TensorBoard run directories.
     Directories in protected_dirs (e.g. from notable runs) are never deleted.
