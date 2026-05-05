@@ -2,6 +2,8 @@ import os
 import time
 from flask import Blueprint, current_app, jsonify, request, Response, send_file
 
+RUN_NOT_FOUND_MSG = "Run not found"
+
 from services.process_manager import (
     start_training, stop_training, get_training_status,
     start_tensorboard, stop_tensorboard, get_run_log_path, get_runs_for_project,
@@ -33,7 +35,7 @@ def stop(name):
     return jsonify(result)
 
 
-@training_bp.route("/<name>/status")
+@training_bp.route("/<name>/status", methods=["GET"])
 def status(name):
     return jsonify(get_training_status(name))
 
@@ -87,7 +89,7 @@ def _tail_offset(filepath, lines):
     return offset
 
 
-@training_bp.route("/<name>/logs/stream")
+@training_bp.route("/<name>/logs/stream", methods=["GET"])
 def logs_stream(name):
     projects_dir = current_app.config["PROJECTS_DIR"]
     tail = request.args.get("tail", type=int)
@@ -141,7 +143,7 @@ def logs_stream(name):
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-@training_bp.route("/<name>/logs/download")
+@training_bp.route("/<name>/logs/download", methods=["GET"])
 def logs_download(name):
     projects_dir = current_app.config["PROJECTS_DIR"]
     run_id = request.args.get("run_id", type=int)
@@ -152,7 +154,7 @@ def logs_download(name):
     return send_file(log_path, as_attachment=True, download_name=filename)
 
 
-@training_bp.route("/<name>/history")
+@training_bp.route("/<name>/history", methods=["GET"])
 def history(name):
     """Get training run history for a project."""
     from services.db_service import get_db
@@ -166,7 +168,7 @@ def history(name):
     return jsonify({"runs": runs})
 
 
-@training_bp.route("/<name>/history/<int:run_id>/log")
+@training_bp.route("/<name>/history/<int:run_id>/log", methods=["GET"])
 def history_log(name, run_id):
     """Download archived log for a specific run."""
     from services.db_service import get_db
@@ -174,7 +176,7 @@ def history_log(name, run_id):
 
     run = get_db().get_training_run(run_id)
     if not run or run['project_name'] != name:
-        return jsonify({"error": "Run not found"}), 404
+        return jsonify({"error": RUN_NOT_FOUND_MSG}), 404
 
     if not run.get('log_file_path'):
         return jsonify({"error": "Log file not available"}), 404
@@ -187,7 +189,7 @@ def history_log(name, run_id):
                      download_name=f"{name}-run-{run_id}.log")
 
 
-@training_bp.route("/<name>/history/diff")
+@training_bp.route("/<name>/history/diff", methods=["GET"])
 def history_diff(name):
     """Git diff between two runs' commits."""
     import subprocess
@@ -201,9 +203,9 @@ def history_diff(name):
     from_run = get_db().get_training_run(from_id)
     to_run = get_db().get_training_run(to_id)
     if not from_run or from_run['project_name'] != name:
-        return jsonify({"error": "Run not found"}), 404
+        return jsonify({"error": RUN_NOT_FOUND_MSG}), 404
     if not to_run or to_run['project_name'] != name:
-        return jsonify({"error": "Run not found"}), 404
+        return jsonify({"error": RUN_NOT_FOUND_MSG}), 404
 
     from_sha = from_run.get('commit_sha')
     to_sha = to_run.get('commit_sha')
@@ -245,7 +247,7 @@ def update_run(name, run_id):
 
     run = get_db().get_training_run(run_id)
     if not run or run['project_name'] != name:
-        return jsonify({"error": "Run not found"}), 404
+        return jsonify({"error": RUN_NOT_FOUND_MSG}), 404
 
     data = request.get_json() or {}
     kwargs = {}

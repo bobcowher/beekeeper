@@ -8,7 +8,7 @@ from services.db_service import get_db
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
 
-@admin_bp.route('/')
+@admin_bp.route('/', methods=['GET'])
 @admin_required
 def index():
     """Admin panel home."""

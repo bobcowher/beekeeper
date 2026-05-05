@@ -59,14 +59,14 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> dict
 
         # If stored path doesn't exist, auto-discover TensorBoard data
         if not os.path.isdir(tb_dir):
-            log.info(f"Stored TB path not found, attempting auto-discovery")
+            log.info("Stored TB path not found, attempting auto-discovery")
             try:
                 discovered = _discover_tensorboard_dir(projects_dir, project_name, run)
                 if discovered:
                     tb_dir = discovered
                     log.info(f"Auto-discovered TensorBoard data at: {tb_dir}")
                 else:
-                    log.warning(f"Auto-discovery found no matching TensorBoard directories")
+                    log.warning("Auto-discovery found no matching TensorBoard directories")
                     return {'success': False, 'reason': 'directory_not_found', 'path': tb_dir}
             except Exception as e:
                 log.error(f"Auto-discovery failed with exception: {e}", exc_info=True)
@@ -226,7 +226,7 @@ def analyze_metric(metric_name: str, data: list) -> dict:
     # Generate summary
     summary = _generate_summary(
         metric_name, trend, initial_value, final_value,
-        improvement_percent, convergence, anomalies
+        convergence, anomalies
     )
 
     # Raw sampled points (for debugging / high-detail view)
@@ -432,7 +432,7 @@ def smart_sample(data: list, target: int = 100) -> list:
     if len(data) > 2:
         derivatives = np.diff([d[1] for d in data])
         sign_changes = np.diff(np.sign(derivatives))
-        inflection_indices = np.where(sign_changes != 0)[0] + 1
+        inflection_indices = np.nonzero(sign_changes != 0)[0] + 1
 
         # Add inflection points (limit to avoid too many)
         for idx in inflection_indices[:20]:
@@ -684,7 +684,6 @@ def _generate_summary(
     trend: str,
     initial_value: float,
     final_value: float,
-    improvement_percent: float,
     convergence: dict,
     anomalies: list
 ) -> str:
@@ -761,7 +760,7 @@ def cleanup_old_tb_logs(tb_logdir: str, keep_count: int, protected_dirs: set = N
         if bk_match:
             try:
                 return dt.strptime(f"{bk_match.group(1)}{bk_match.group(2)}", "%Y%m%d%H%M%S")
-            except:
+            except Exception:
                 pass
 
         # Training script format: 2026-04-03_12-46-35_tag
@@ -769,7 +768,7 @@ def cleanup_old_tb_logs(tb_logdir: str, keep_count: int, protected_dirs: set = N
         if ts_match:
             try:
                 return dt.strptime(ts_match.group(1), "%Y-%m-%d_%H-%M-%S")
-            except:
+            except Exception:
                 pass
 
         # Fallback: use directory mtime

@@ -206,7 +206,7 @@ def unlock_account(args):
 
     db.reset_failed_logins(user.id)
     print(f"✓ Account unlocked for {user.name} ({user.email})")
-    print(f"  Failed login attempts reset to 0")
+    print("  Failed login attempts reset to 0")
 
 
 def list_api_keys(args):

@@ -42,7 +42,7 @@ def _safe_path(projects_dir, name, subpath):
     return workspace_dir, target
 
 
-@files_bp.route("/<name>/files/view/<path:subpath>")
+@files_bp.route("/<name>/files/view/<path:subpath>", methods=["GET"])
 def view_file(name, subpath=""):
     """Serve a file inline (for the in-browser viewer)."""
     projects_dir = current_app.config["PROJECTS_DIR"]
@@ -65,8 +65,8 @@ def view_file(name, subpath=""):
     abort(415)
 
 
-@files_bp.route("/<name>/files/")
-@files_bp.route("/<name>/files/<path:subpath>")
+@files_bp.route("/<name>/files/", methods=["GET"])
+@files_bp.route("/<name>/files/<path:subpath>", methods=["GET"])
 def browse(name, subpath=""):
     projects_dir = current_app.config["PROJECTS_DIR"]
     workspace_dir, target = _safe_path(projects_dir, name, subpath)

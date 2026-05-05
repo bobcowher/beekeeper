@@ -27,6 +27,8 @@ api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
 SERVER_VERSION = "1.0.7"
 MIN_MCP_VERSION = "0.1.1"
+PROJECT_FILE = "project.json"
+MCP_SERVER_FILE = "mcp_server.py"
 
 # ---------------------------------------------------------------------------
 # Response helpers
@@ -52,7 +54,7 @@ def _abort_json(status_code: int, error_code: str, error_message: str) -> NoRetu
 def load_project(name) -> Project:
     """Load a project by name. Aborts with JSON 404/500 if not found or unreadable."""
     projects_dir = current_app.config["PROJECTS_DIR"]
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, PROJECT_FILE)
     if not os.path.isfile(config_path):
         _abort_json(404, "NOT_FOUND", f"Project '{name}' not found")
     try:
@@ -65,7 +67,7 @@ def load_project(name) -> Project:
 # Projects
 # ---------------------------------------------------------------------------
 
-@api_v1_bp.route("/projects")
+@api_v1_bp.route("/projects", methods=["GET"])
 @api_key_required
 def list_projects():
     """List all projects with basic info and training status."""
@@ -76,7 +78,7 @@ def list_projects():
         return api_response(data={"projects": []})
 
     for name in sorted(os.listdir(projects_dir)):
-        config_path = os.path.join(projects_dir, name, "project.json")
+        config_path = os.path.join(projects_dir, name, PROJECT_FILE)
         if os.path.isfile(config_path):
             try:
                 project = Project.load(config_path)
@@ -194,7 +196,7 @@ def create_project():
         )
 
     # Load and return the created project
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, PROJECT_FILE)
     project = Project.load(config_path)
 
     return api_response(
@@ -203,7 +205,7 @@ def create_project():
     )
 
 
-@api_v1_bp.route("/projects/<name>")
+@api_v1_bp.route("/projects/<name>", methods=["GET"])
 @api_key_required
 def get_project(name):
     """Get detailed project info including training status."""
@@ -284,7 +286,7 @@ def clone_project(name):
         )
 
     # Load and return the cloned project
-    config_path = os.path.join(projects_dir, new_name, "project.json")
+    config_path = os.path.join(projects_dir, new_name, PROJECT_FILE)
     cloned_project = Project.load(config_path)
 
     return api_response(
@@ -382,7 +384,7 @@ def training_stop(name):
     return api_response(data=result)
 
 
-@api_v1_bp.route("/projects/<name>/training/status")
+@api_v1_bp.route("/projects/<name>/training/status", methods=["GET"])
 @api_key_required
 def training_status(name):
     """Get active training runs for a project."""
@@ -395,7 +397,7 @@ def training_status(name):
 # Logs
 # ---------------------------------------------------------------------------
 
-@api_v1_bp.route("/projects/<name>/logs")
+@api_v1_bp.route("/projects/<name>/logs", methods=["GET"])
 @api_key_required
 def get_logs(name):
     """Get log content. Use ?tail=N for last N lines, ?run_id=N for a specific run."""
@@ -444,7 +446,7 @@ def get_logs(name):
         )
 
 
-@api_v1_bp.route("/projects/<name>/logs/stream")
+@api_v1_bp.route("/projects/<name>/logs/stream", methods=["GET"])
 @api_key_required
 def stream_logs(name):
     """SSE stream of log content."""
@@ -501,7 +503,7 @@ def stream_logs(name):
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-@api_v1_bp.route("/projects/<name>/logs/analysis")
+@api_v1_bp.route("/projects/<name>/logs/analysis", methods=["GET"])
 @api_key_required
 def analyze_logs(name):
     """
@@ -657,8 +659,8 @@ def analyze_logs(name):
 # Files
 # ---------------------------------------------------------------------------
 
-@api_v1_bp.route("/projects/<name>/files")
-@api_v1_bp.route("/projects/<name>/files/<path:subpath>")
+@api_v1_bp.route("/projects/<name>/files", methods=["GET"])
+@api_v1_bp.route("/projects/<name>/files/<path:subpath>", methods=["GET"])
 @api_key_required
 def browse_files(name, subpath=""):
     """List files in workspace root or subdir, or download a file."""
@@ -741,7 +743,7 @@ def browse_files(name, subpath=""):
 # System Stats
 # ---------------------------------------------------------------------------
 
-@api_v1_bp.route("/version")
+@api_v1_bp.route("/version", methods=["GET"])
 def get_version():
     """Return server version and minimum required MCP version."""
     return api_response(data={
@@ -750,7 +752,7 @@ def get_version():
     })
 
 
-@api_v1_bp.route("/stats")
+@api_v1_bp.route("/stats", methods=["GET"])
 @api_key_required
 def system_stats():
     """Get system stats (CPU, RAM, GPU)."""
@@ -758,7 +760,7 @@ def system_stats():
     return api_response(data=stats)
 
 
-@api_v1_bp.route("/busy")
+@api_v1_bp.route("/busy", methods=["GET"])
 @api_key_required
 def check_busy():
     """
@@ -775,7 +777,7 @@ def check_busy():
 
     if os.path.isdir(projects_dir):
         for name in os.listdir(projects_dir):
-            config_path = os.path.join(projects_dir, name, "project.json")
+            config_path = os.path.join(projects_dir, name, PROJECT_FILE)
             if os.path.isfile(config_path):
                 status = get_training_status(name)
                 if status.get("status") == "running":
@@ -787,7 +789,7 @@ def check_busy():
     })
 
 
-@api_v1_bp.route("/capacity")
+@api_v1_bp.route("/capacity", methods=["GET"])
 @api_key_required
 def get_capacity():
     """System-wide training capacity: total slots, running, available."""
@@ -798,7 +800,7 @@ def get_capacity():
 
     if os.path.isdir(projects_dir):
         for proj_name in sorted(os.listdir(projects_dir)):
-            config_path = os.path.join(projects_dir, proj_name, "project.json")
+            config_path = os.path.join(projects_dir, proj_name, PROJECT_FILE)
             if not os.path.isfile(config_path):
                 continue
             try:
@@ -827,7 +829,7 @@ def get_capacity():
 # Run History
 # ---------------------------------------------------------------------------
 
-@api_v1_bp.route("/projects/<name>/runs")
+@api_v1_bp.route("/projects/<name>/runs", methods=["GET"])
 @api_key_required
 def list_runs(name):
     """List training run history."""
@@ -839,7 +841,7 @@ def list_runs(name):
     return api_response(data={"runs": runs})
 
 
-@api_v1_bp.route("/projects/<name>/runs/<int:run_id>")
+@api_v1_bp.route("/projects/<name>/runs/<int:run_id>", methods=["GET"])
 @api_key_required
 def get_run(name, run_id):
     """Get details for a specific run."""
@@ -858,7 +860,7 @@ def get_run(name, run_id):
     return api_response(data={"run": run})
 
 
-@api_v1_bp.route("/projects/<name>/runs/<int:run_id>/log")
+@api_v1_bp.route("/projects/<name>/runs/<int:run_id>/log", methods=["GET"])
 @api_key_required
 def download_run_log(name, run_id):
     """Download archived log for a run."""
@@ -895,7 +897,7 @@ def download_run_log(name, run_id):
     return send_file(log_path, as_attachment=True)
 
 
-@api_v1_bp.route("/projects/<name>/runs/<int:run_id>/logs")
+@api_v1_bp.route("/projects/<name>/runs/<int:run_id>/logs", methods=["GET"])
 @api_key_required
 def get_run_logs_json(name, run_id):
     """Get log content as JSON for a specific run."""
@@ -1022,7 +1024,7 @@ def cleanup_orphaned_runs(name):
     })
 
 
-@api_v1_bp.route("/projects/<name>/tensorboard/latest")
+@api_v1_bp.route("/projects/<name>/tensorboard/latest", methods=["GET"])
 @api_key_required
 def get_latest_metrics(name):
     """
@@ -1208,36 +1210,36 @@ def cleanup_tensorboard_logs(name):
 # API Documentation
 # ---------------------------------------------------------------------------
 
-@api_v1_bp.route("/docs")
+@api_v1_bp.route("/docs", methods=["GET"])
 def api_documentation():
     """Render the API documentation page."""
     from flask import render_template
     return render_template("api_docs.html")
 
 
-@api_v1_bp.route("/mcp")
+@api_v1_bp.route("/mcp", methods=["GET"])
 def mcp_documentation():
     """Render the MCP setup guide."""
     from flask import render_template
     beekeeper_home = current_app.config["BEEKEEPER_HOME"]
-    mcp_server_path = os.path.join(beekeeper_home, "mcp_server.py")
+    mcp_server_path = os.path.join(beekeeper_home, MCP_SERVER_FILE)
     return render_template("mcp.html", mcp_server_path=mcp_server_path)
 
 
-@api_v1_bp.route("/mcp/server")
+@api_v1_bp.route("/mcp/server", methods=["GET"])
 def download_mcp_server():
     """Download mcp_server.py."""
     from flask import send_file
     beekeeper_home = current_app.config["BEEKEEPER_HOME"]
-    path = os.path.join(beekeeper_home, "mcp_server.py")
-    return send_file(path, as_attachment=True, download_name="mcp_server.py", mimetype="text/x-python")
+    path = os.path.join(beekeeper_home, MCP_SERVER_FILE)
+    return send_file(path, as_attachment=True, download_name=MCP_SERVER_FILE, mimetype="text/x-python")
 
 
 # ---------------------------------------------------------------------------
 # Agent Instructions
 # ---------------------------------------------------------------------------
 
-@api_v1_bp.route("/agent/instructions")
+@api_v1_bp.route("/agent/instructions", methods=["GET"])
 @api_key_required
 def get_global_agent_instructions():
     """
@@ -1251,7 +1253,7 @@ def get_global_agent_instructions():
     projects = []
     if os.path.isdir(projects_dir):
         for pname in sorted(os.listdir(projects_dir)):
-            config_path = os.path.join(projects_dir, pname, "project.json")
+            config_path = os.path.join(projects_dir, pname, PROJECT_FILE)
             if os.path.isfile(config_path):
                 try:
                     p = Project.load(config_path)
@@ -1412,7 +1414,7 @@ output_paths defaults to [] — TensorBoard is always protected regardless.
     )
 
 
-@api_v1_bp.route("/projects/<name>/agent/instructions")
+@api_v1_bp.route("/projects/<name>/agent/instructions", methods=["GET"])
 @api_key_required
 def get_agent_instructions(name):
     """
@@ -1593,7 +1595,7 @@ logs are always protected regardless of `output_paths`.
 # Branch Management
 # ---------------------------------------------------------------------------
 
-@api_v1_bp.route("/projects/<name>/branches")
+@api_v1_bp.route("/projects/<name>/branches", methods=["GET"])
 @api_key_required
 def list_branches(name):
     """List available branches from the remote repository."""
@@ -1791,7 +1793,7 @@ def switch_branch(name):
         )
 
 
-@api_v1_bp.route("/projects/<name>/runs/<int:run_id>/metrics")
+@api_v1_bp.route("/projects/<name>/runs/<int:run_id>/metrics", methods=["GET"])
 @api_key_required
 def get_run_metrics(name, run_id):
     """
@@ -1865,7 +1867,7 @@ def get_run_metrics(name, run_id):
     return api_response(data=response_data)
 
 
-@api_v1_bp.route("/projects/<name>/agent/sdk")
+@api_v1_bp.route("/projects/<name>/agent/sdk", methods=["GET"])
 @api_key_required
 def download_agent_sdk(name):
     """Generate and download Python SDK for AI agent integration."""

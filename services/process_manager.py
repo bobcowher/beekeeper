@@ -442,7 +442,7 @@ def _append_run_footer(log_path, ret, started_at):
         pass
 
 
-def _archive_run_log(projects_dir: str, project_name: str, run_id: int, source_log_path: str) -> str:
+def _archive_run_log(projects_dir: str, project_name: str, run_id: int, source_log_path: str) -> str | None:
     """
     Copy train.log to archived location.
     Returns relative path (e.g., "run_logs/run-20260321-171532-0042.log").

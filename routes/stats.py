@@ -5,6 +5,6 @@ from services.stats_service import get_all_stats
 stats_bp = Blueprint("stats", __name__, url_prefix="/api")
 
 
-@stats_bp.route("/stats")
+@stats_bp.route("/stats", methods=["GET"])
 def stats():
     return jsonify(get_all_stats())

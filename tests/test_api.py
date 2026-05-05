@@ -1,6 +1,7 @@
 """
 JSON API endpoint tests — verify correct status codes and response shapes.
 """
+import pytest
 
 
 # --- Training status ---
@@ -85,8 +86,8 @@ def test_stats_returns_json(client, mocker):
     resp = client.get("/api/stats")
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data["cpu"] == 12.5
-    assert data["ram"] == 64.0
+    assert data["cpu"] == pytest.approx(12.5)
+    assert data["ram"] == pytest.approx(64.0)
 
 
 # --- File browser ---
