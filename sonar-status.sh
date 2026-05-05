@@ -6,6 +6,9 @@
 #   ./sonar-status.sh <project-key>             # any SonarCloud project key
 #   ./sonar-status.sh bobcowher_beekeeper main  # specific branch
 #
+# Auth: set SONAR_TOKEN env var to authenticate. Falls back to unauthenticated
+# for public projects.
+#
 # Output: plain-text summary suitable for pasting into Claude or a PR comment.
 # Requires: curl, python3 (stdlib only)
 
@@ -20,12 +23,19 @@ if [ -n "$BRANCH" ]; then
     branch_param="&branch=${BRANCH}"
 fi
 
+TOKEN="${SONAR_TOKEN:-}"
+
 fetch() {
-    curl -s "$BASE/$1"
+    if [ -n "${TOKEN:-}" ]; then
+        curl -s -u "${TOKEN}:" "$BASE/$1"
+    else
+        curl -s "$BASE/$1"
+    fi
 }
 
 echo "=== SonarCloud: ${PROJECT} ==="
 [ -n "$BRANCH" ] && echo "Branch: ${BRANCH}"
+[ -n "${TOKEN:-}" ] && echo "Auth: token" || echo "Auth: none (public)"
 echo ""
 
 # Quality gate
@@ -65,7 +75,7 @@ print(f\"  Duplication:         {measures.get('duplicated_lines_density', 'n/a')
 echo ""
 
 # Open issues by severity
-ISSUES=$(fetch "issues/search?componentKeys=${PROJECT}${branch_param}&statuses=OPEN&ps=1&facets=severities")
+ISSUES=$(fetch "issues/search?componentKeys=${PROJECT}${branch_param}&statuses=OPEN&ps=1&facets=severities,types")
 echo "$ISSUES" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
@@ -73,10 +83,17 @@ total = d.get('paging', {}).get('total', d.get('total', 0))
 print(f'Open issues: {total}')
 facets = {f['property']: f['values'] for f in d.get('facets', [])}
 if 'severities' in facets:
+    print('  By severity:')
     for sv in ['BLOCKER','CRITICAL','MAJOR','MINOR','INFO']:
         count = next((v['count'] for v in facets['severities'] if v['val'] == sv), 0)
         if count:
-            print(f'  {sv:<10} {count}')
+            print(f'    {sv:<10} {count}')
+if 'types' in facets:
+    print('  By type:')
+    for t in ['BUG','VULNERABILITY','CODE_SMELL','SECURITY_HOTSPOT']:
+        count = next((v['count'] for v in facets['types'] if v['val'] == t), 0)
+        if count:
+            print(f'    {t:<20} {count}')
 " 2>/dev/null
 
 echo ""
