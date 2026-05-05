@@ -13,6 +13,7 @@ Run only browser tests:    pytest -m browser
 Skip browser tests:        pytest -m "not browser"
 """
 import json
+import subprocess
 import threading
 import time
 
@@ -25,6 +26,13 @@ def live_server(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("browser_projects")
     projects_dir = tmp / "projects"
     projects_dir.mkdir()
+    remote_repo = tmp / "remote.git"
+    subprocess.run(
+        ["git", "init", "--bare", "--initial-branch=main", str(remote_repo)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
     # Create a ready project on disk — no mocking needed, the route will call
     # get_training_status() which just checks in-memory state and returns idle.
@@ -32,7 +40,7 @@ def live_server(tmp_path_factory):
     proj_dir.mkdir()
     (proj_dir / "project.json").write_text(json.dumps({
         "name": "demo",
-        "git_url": "https://github.com/user/repo.git",
+        "git_url": str(remote_repo),
         "branch": "main",
         "python_version": "3.11",
         "train_file": "train.py",
@@ -44,6 +52,7 @@ def live_server(tmp_path_factory):
         "train_status": "idle",
         "train_pid": 0,
         "env_vars": {},
+        "output_paths": [],
     }))
 
     from app import create_app
@@ -110,7 +119,8 @@ def test_project_detail_js_config_injected(live_server):
         config = page.evaluate("() => window.TRAINING_CONFIG")
         assert config is not None, "window.TRAINING_CONFIG was not injected"
         assert config["name"] == "demo"
-        assert config["status"] == "idle"
+        assert "tbPort" in config
+        assert config["host"] in ("localhost", "127.0.0.1")
         browser.close()
 
 
@@ -128,15 +138,17 @@ def test_project_detail_key_elements_present(live_server):
         page = browser.new_page()
         page.goto(f"{live_server}/projects/demo")
 
-        expect(page.locator("#btn-start")).to_be_visible()
-        expect(page.locator("#log-terminal")).to_be_attached()
-        expect(page.locator("#training-controls")).to_be_attached()
+        expect(page.locator("#training-section")).to_be_attached()
+        expect(page.locator("#run-list")).to_be_attached()
+        expect(page.locator("#branch-picker")).to_be_attached()
+        expect(page.locator("#btn-confirm-start")).to_be_visible()
+        expect(page.locator("#btn-start-run")).to_be_attached()
         browser.close()
 
 
 @pytest.mark.browser
-def test_collapsible_logs_section_toggles(live_server):
-    """Clicking the Logs header should expand the logs body."""
+def test_collapsible_history_section_toggles(live_server):
+    """Clicking a collapsible section header should expand and collapse the body."""
     from playwright.sync_api import sync_playwright, expect
 
     with sync_playwright() as p:
@@ -144,15 +156,15 @@ def test_collapsible_logs_section_toggles(live_server):
         page = browser.new_page()
         page.goto(f"{live_server}/projects/demo")
 
-        logs_body = page.locator("#logs-body")
+        logs_body = page.locator("#history-body")
         # Starts hidden when idle
         expect(logs_body).to_be_hidden()
 
-        page.locator("#logs-section .collapsible-header").click()
+        page.locator("#history-section .collapsible-header").click()
         expect(logs_body).to_be_visible()
 
         # Click again — should collapse
-        page.locator("#logs-section .collapsible-header").click()
+        page.locator("#history-section .collapsible-header").click()
         expect(logs_body).to_be_hidden()
         browser.close()
 

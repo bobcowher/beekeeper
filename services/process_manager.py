@@ -7,9 +7,11 @@ import subprocess
 import threading
 import time
 import logging
+import shutil
 
 from models.project import Project
 from services.db_service import get_db
+from services.project_service import validate_output_paths, validate_workspace_path
 
 log = logging.getLogger(__name__)
 
@@ -17,6 +19,116 @@ _running = {}  # {run_id: info_dict} — keyed by DB run ID (int)
 _tb_running = {}  # standalone TB processes: {name: {"tb_process": Popen, "tb_port": int, "last_access": float}}
 _lock = threading.Lock()
 _TB_IDLE_TIMEOUT = 1800  # 30 min
+_BEEKEEPER_RUN_ENV_KEYS = {
+    "BEEKEEPER_RUN_DIR",
+    "BEEKEEPER_TENSORBOARD_DIR",
+    "TENSORBOARD_LOG_DIR",
+}
+
+
+def _persistent_runs_root(projects_dir: str, name: str) -> str:
+    return os.path.join(projects_dir, name, "persistent", "runs")
+
+
+def _persistent_run_paths(projects_dir: str, name: str, run_id: int) -> tuple[str, str]:
+    rel = f"persistent/runs/run_{run_id}"
+    return rel, os.path.join(projects_dir, name, rel)
+
+
+def _dir_has_entries(path: str) -> bool:
+    try:
+        if not os.path.isdir(path):
+            return False
+        with os.scandir(path) as entries:
+            return any(entries)
+    except OSError:
+        return False
+
+
+def _tensorboard_launch_args(tb_bin: str, projects_dir: str, name: str, project: dict, port: int) -> list[str]:
+    persistent_root = _persistent_runs_root(projects_dir, name)
+    os.makedirs(persistent_root, exist_ok=True)
+
+    args = [tb_bin]
+    tb_rel = validate_workspace_path(project.get("tensorboard_log_dir") or "runs", "TensorBoard log dir")
+    legacy_root = os.path.join(projects_dir, name, "workspace", tb_rel)
+    if not os.path.islink(legacy_root) and _dir_has_entries(legacy_root):
+        args.extend(["--logdir_spec", f"persistent:{persistent_root},legacy:{legacy_root}"])
+    else:
+        args.extend(["--logdir", persistent_root])
+    args.extend(["--port", str(port), "--bind_all", "--reload_interval=5"])
+    return args
+
+
+def _ensure_workspace_symlink(workspace_dir: str, rel_path: str, target_dir: str, warnings: list[str], label: str):
+    link_path = os.path.join(workspace_dir, rel_path)
+    os.makedirs(target_dir, exist_ok=True)
+    try:
+        os.makedirs(os.path.dirname(link_path), exist_ok=True)
+    except Exception as e:
+        warnings.append(f"Could not create parent directory for {label} symlink '{rel_path}': {e}")
+        return
+
+    if os.path.lexists(link_path):
+        if os.path.islink(link_path):
+            if os.readlink(link_path) == target_dir:
+                return
+            try:
+                os.unlink(link_path)
+            except Exception as e:
+                warnings.append(f"Could not replace existing {label} symlink '{rel_path}': {e}")
+                return
+        elif os.path.isdir(link_path):
+            try:
+                os.rmdir(link_path)
+            except OSError:
+                warnings.append(
+                    f"Could not protect {label} path '{rel_path}' because a non-empty directory already exists there."
+                )
+                return
+        else:
+            warnings.append(
+                f"Could not protect {label} path '{rel_path}' because a file already exists there."
+            )
+            return
+
+    try:
+        os.symlink(target_dir, link_path)
+    except Exception as e:
+        warnings.append(f"Could not create {label} symlink '{rel_path}': {e}")
+
+
+def _delete_path(path: str, label: str):
+    try:
+        if os.path.islink(path) or os.path.isfile(path):
+            os.unlink(path)
+            log.info("Deleted %s: %s", label, path)
+        elif os.path.isdir(path):
+            shutil.rmtree(path)
+            log.info("Deleted %s: %s", label, path)
+    except Exception as e:
+        log.warning("Failed to delete %s %s: %s", label, path, e)
+
+
+def _delete_run_storage(projects_dir: str, project_name: str, run: dict):
+    if run.get("log_file_path"):
+        _delete_path(
+            os.path.join(projects_dir, project_name, run["log_file_path"]),
+            "archived log",
+        )
+
+    if run.get("persistent_dir"):
+        _delete_path(
+            os.path.join(projects_dir, project_name, run["persistent_dir"]),
+            "persistent run directory",
+        )
+    elif run.get("tensorboard_dir"):
+        project_relative = os.path.join(projects_dir, project_name, run["tensorboard_dir"])
+        workspace_relative = os.path.join(projects_dir, project_name, "workspace", run["tensorboard_dir"])
+        if os.path.lexists(project_relative):
+            _delete_path(project_relative, "TensorBoard logs")
+        else:
+            _delete_path(workspace_relative, "TensorBoard logs")
 
 
 def _resolve_python_binary(projects_dir, project):
@@ -228,10 +340,8 @@ def _monitor_process(projects_dir, name, run_id):
 
             # Clean up parallel workspace on natural completion
             if is_parallel and workspace_dir:
-                _move_tb_logs_to_primary(projects_dir, name, workspace_dir, run_id)
-                import shutil as _shutil
                 try:
-                    _shutil.rmtree(workspace_dir)
+                    shutil.rmtree(workspace_dir)
                     log.info("Deleted parallel workspace %s", workspace_dir)
                 except Exception as e:
                     log.warning("Failed to delete parallel workspace %s: %s", workspace_dir, e)
@@ -404,31 +514,11 @@ def _prune_old_runs(projects_dir: str, project_name: str, keep_last: int = 20):
     Delete runs beyond retention limit.
     Removes: DB records, archived log files, Tensorboard directories.
     """
-    import shutil
-
     db = get_db()
     deleted_runs = db.prune_old_runs(project_name, keep_last=keep_last)
 
     for run in deleted_runs:
-        # Delete archived log file
-        if run.get('log_file_path'):
-            log_path = os.path.join(projects_dir, project_name, run['log_file_path'])
-            try:
-                if os.path.isfile(log_path):
-                    os.unlink(log_path)
-                    log.info(f"Deleted archived log: {log_path}")
-            except Exception as e:
-                log.warning(f"Failed to delete archived log {log_path}: {e}")
-
-        # Delete Tensorboard directory
-        if run.get('tensorboard_dir'):
-            tb_path = os.path.join(projects_dir, project_name, "workspace", run['tensorboard_dir'])
-            try:
-                if os.path.isdir(tb_path):
-                    shutil.rmtree(tb_path)
-                    log.info(f"Deleted Tensorboard logs: {tb_path}")
-            except Exception as e:
-                log.warning(f"Failed to delete Tensorboard logs {tb_path}: {e}")
+        _delete_run_storage(projects_dir, project_name, run)
 
 
 def start_training(projects_dir, name, branch=None):
@@ -654,87 +744,77 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
     if not os.path.isfile(train_path):
         return _abort(f"Training file not found: {train_file}")
 
-    # Prepare TensorBoard paths before training starts. Fast scripts often create
-    # SummaryWriter/log files immediately, so parallel workspace redirects must
+    # Prepare persistent run storage before training starts. Fast scripts often
+    # create SummaryWriter/log files immediately, so workspace redirects must
     # exist before Popen.
     tb_process = None
     tb_port = None
-    tb_run_dir = None
-    tb_run_dir_rel = None
-    tb_logdir_base = None
+    prelaunch_warnings = []
 
-    tb_log_rel = project.get("tensorboard_log_dir") or "runs"
-    primary_tb_base = os.path.join(projects_dir, name, "workspace", tb_log_rel)
+    try:
+        tb_log_rel = validate_workspace_path(
+            project.get("tensorboard_log_dir") or "runs",
+            "TensorBoard log dir",
+        )
+        output_paths = validate_output_paths(project.get("output_paths") or [], tb_log_rel)
+    except ValueError as e:
+        return _abort(str(e))
 
-    if is_parallel:
-        parallel_tb_link = os.path.join(workspace_dir, tb_log_rel)
-        parallel_redirect_dir = os.path.join(primary_tb_base, f"run_{run_id}")
-        os.makedirs(parallel_redirect_dir, exist_ok=True)
-        os.makedirs(os.path.dirname(parallel_tb_link), exist_ok=True)
+    persistent_run_rel, persistent_run_dir = _persistent_run_paths(projects_dir, name, run_id)
+    os.makedirs(persistent_run_dir, exist_ok=True)
 
-        if os.path.lexists(parallel_tb_link):
-            try:
-                if os.path.islink(parallel_tb_link) or os.path.isfile(parallel_tb_link):
-                    os.unlink(parallel_tb_link)
-                elif os.path.isdir(parallel_tb_link):
-                    import shutil as _shutil_tb
-                    _shutil_tb.rmtree(parallel_tb_link)
-            except Exception as e:
-                log.warning("Could not clear parallel TB path %s: %s", parallel_tb_link, e)
+    _ensure_workspace_symlink(
+        workspace_dir,
+        tb_log_rel,
+        persistent_run_dir,
+        prelaunch_warnings,
+        "TensorBoard",
+    )
+    for output_rel in output_paths:
+        _ensure_workspace_symlink(
+            workspace_dir,
+            output_rel,
+            os.path.join(persistent_run_dir, output_rel),
+            prelaunch_warnings,
+            "output",
+        )
 
-        if not os.path.lexists(parallel_tb_link):
-            os.symlink(parallel_redirect_dir, parallel_tb_link)
+    get_db().update_training_run(
+        run_id,
+        persistent_dir=persistent_run_rel,
+        tensorboard_dir=persistent_run_rel,
+    )
 
-        tb_logdir_base = primary_tb_base
-        tb_run_dir = parallel_redirect_dir
-        tb_run_dir_rel = f"{tb_log_rel}/run_{run_id}"
-    else:
-        tb_logdir_base = os.path.join(workspace_dir, tb_log_rel)
-
-        tb_logs_max_runs = project.get("tb_logs_max_runs", 20)
-        if tb_logs_max_runs > 0:
-            from services.tensorboard_service import cleanup_old_tb_logs
-            protected_tb_dirs = set()
-            try:
-                for r in get_db().get_training_runs(name, limit=1000):
-                    if r.get("notable") and r.get("tensorboard_dir"):
-                        protected_tb_dirs.add(os.path.basename(r["tensorboard_dir"]))
-            except Exception:
-                pass
-            cleanup_result = cleanup_old_tb_logs(
-                tb_logdir_base, tb_logs_max_runs, protected_dirs=protected_tb_dirs
-            )
-            if cleanup_result["deleted"]:
-                log.info(f"Auto-cleanup TB: {cleanup_result['message']}")
-
-        run_timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        tb_run_dir = os.path.join(tb_logdir_base, run_timestamp)
-        os.makedirs(tb_run_dir, exist_ok=True)
-        tb_run_dir_rel = f"{tb_log_rel}/{run_timestamp}"
-
-        run_history_max_runs = project.get("run_history_max_runs", 10)
-        if run_history_max_runs > 0:
-            runs = get_db().get_training_runs(name, limit=1000)
-            runs.sort(key=lambda r: r["started_at"], reverse=True)
-            deleted_count = 0
-            for r in runs[run_history_max_runs:]:
-                if not r.get("notable", 0):
-                    get_db().delete_training_run(r["id"])
-                    deleted_count += 1
-            if deleted_count > 0:
-                log.info(f"Auto-cleanup: deleted {deleted_count} old run(s)")
-
-    if tb_run_dir_rel:
-        get_db().update_training_run(run_id, tensorboard_dir=tb_run_dir_rel)
+    run_history_max_runs = project.get("run_history_max_runs", 10)
+    if run_history_max_runs > 0:
+        runs = get_db().get_training_runs(name, limit=1000)
+        runs.sort(key=lambda r: r["started_at"], reverse=True)
+        deleted_count = 0
+        for r in runs[run_history_max_runs:]:
+            if not r.get("notable", 0):
+                _delete_run_storage(projects_dir, name, r)
+                get_db().delete_training_run(r["id"])
+                deleted_count += 1
+        if deleted_count > 0:
+            log.info(f"Auto-cleanup: deleted {deleted_count} old run(s)")
 
     log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
     _write_run_header(log_fd, run_meta, project)
+    for warning in prelaunch_warnings:
+        os.write(log_fd, f"[beekeeper] WARNING: {warning}\n".encode())
+    if prelaunch_warnings:
+        os.write(log_fd, b"\n")
 
     proc_env = os.environ.copy()
-    proc_env.update(project.get("env_vars") or {})
-    if tb_run_dir:
-        proc_env.setdefault("BEEKEEPER_TENSORBOARD_DIR", tb_run_dir)
-        proc_env.setdefault("TENSORBOARD_LOG_DIR", tb_run_dir)
+    project_env = project.get("env_vars") or {}
+    for key in sorted(_BEEKEEPER_RUN_ENV_KEYS & set(project_env)):
+        warning = f"Project env var {key} is reserved by Beekeeper and was overridden for this run."
+        prelaunch_warnings.append(warning)
+        os.write(log_fd, f"[beekeeper] WARNING: {warning}\n".encode())
+    proc_env.update(project_env)
+    proc_env["BEEKEEPER_RUN_DIR"] = persistent_run_dir
+    proc_env["BEEKEEPER_TENSORBOARD_DIR"] = persistent_run_dir
+    proc_env["TENSORBOARD_LOG_DIR"] = persistent_run_dir
 
     try:
         proc = subprocess.Popen(
@@ -757,16 +837,15 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
     if old_tb:
         _kill_tb_process(old_tb["tb_process"])
 
-    # Start TensorBoard against the project's primary log root so all active
-    # runs and historical runs share the same view.
+    # Start TensorBoard against persistent/runs so all active and historical
+    # persistent runs share the same view.
     tb_bin = _resolve_tensorboard_binary(projects_dir, project)
     if tb_bin:
         tb_port = _find_free_port()
         if tb_port:
             try:
                 tb_process = subprocess.Popen(
-                    [tb_bin, "--logdir", tb_logdir_base, "--port", str(tb_port),
-                     "--bind_all", "--reload_interval=5"],
+                    _tensorboard_launch_args(tb_bin, projects_dir, name, project, tb_port),
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     start_new_session=True,
@@ -796,30 +875,6 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
         target=_monitor_process, args=(projects_dir, name, run_id), daemon=True
     )
     thread.start()
-
-def _move_tb_logs_to_primary(projects_dir: str, name: str, workspace_dir: str, run_id: int):
-    """Move TB run dir from parallel workspace to primary workspace before deletion."""
-    import shutil
-
-    run = get_db().get_training_run(run_id)
-    if not run or not run.get("tensorboard_dir"):
-        return
-
-    tb_rel = run["tensorboard_dir"]  # e.g. "runs/20260430-123456"
-    src = os.path.join(workspace_dir, tb_rel)
-    primary_ws = os.path.join(projects_dir, name, "workspace")
-    dst = os.path.join(primary_ws, tb_rel)
-
-    if not os.path.isdir(src):
-        return
-
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
-    try:
-        shutil.move(src, dst)
-        log.info("Moved TB logs %s → %s", src, dst)
-    except Exception as e:
-        log.warning("Failed to move TB logs %s → %s: %s", src, dst, e)
-
 
 def stop_training(projects_dir, name, run_id=None):
     """Stop a training run. run_id selects which run; omit if only one is active."""
@@ -905,8 +960,6 @@ def stop_training(projects_dir, name, run_id=None):
 
     is_parallel = workspace_dir != primary_ws
     if is_parallel:
-        _move_tb_logs_to_primary(projects_dir, name, workspace_dir, run_id)
-        import shutil
         try:
             shutil.rmtree(workspace_dir)
             log.info("Deleted parallel workspace %s", workspace_dir)
@@ -983,28 +1036,19 @@ def start_tensorboard(projects_dir, name):
     if not tb_bin:
         return {"error": "Tensorboard not found in project environment"}
 
-    workspace_dir = os.path.join(projects_dir, name, "workspace")
-    tb_logdir = os.path.join(workspace_dir, project.get("tensorboard_log_dir", "runs"))
-
-    # Create the log directory if it doesn't exist
-    if not os.path.isdir(tb_logdir):
-        try:
-            os.makedirs(tb_logdir, exist_ok=True)
-        except Exception as e:
-            return {"error": f"Failed to create Tensorboard log directory: {e}"}
-
     tb_port = _find_free_port()
     if not tb_port:
         return {"error": "No free port available for Tensorboard"}
 
     try:
         tb_process = subprocess.Popen(
-            [tb_bin, "--logdir", tb_logdir, "--port", str(tb_port),
-             "--bind_all", "--reload_interval=5"],
+            _tensorboard_launch_args(tb_bin, projects_dir, name, project, tb_port),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
+    except ValueError as e:
+        return {"error": str(e)}
     except Exception as e:
         return {"error": f"Failed to start Tensorboard: {e}"}
 

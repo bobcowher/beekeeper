@@ -7,7 +7,12 @@ from flask import (
 )
 
 from models.project import Project
-from services.project_service import create_project, delete_project, retry_setup
+from services.project_service import (
+    create_project,
+    delete_project,
+    retry_setup,
+    validate_output_paths,
+)
 from services.python_versions import find_available, has_conda
 from services.process_manager import get_training_status, stop_tensorboard, get_runs_for_project
 
@@ -57,19 +62,30 @@ def create():
             flash(f"System data path '{data_dir_remote}' does not exist or is not a directory.", "error")
             return redirect(url_for("project.new"))
 
+    tensorboard_log_dir = request.form.get("tensorboard_log_dir", "runs").strip() or "runs"
+    try:
+        output_paths = validate_output_paths(
+            request.form.get("output_paths", ""),
+            tensorboard_log_dir,
+        )
+    except ValueError as e:
+        flash(str(e), "error")
+        return redirect(url_for("project.new"))
+
     data = {
         "name": name,
         "git_url": git_url,
         "branch": request.form.get("branch", "main").strip() or "main",
         "python_version": request.form.get("python_version", "3.12"),
         "train_file": request.form.get("train_file", "train.py").strip() or "train.py",
-        "tensorboard_log_dir": request.form.get("tensorboard_log_dir", "runs").strip() or "runs",
+        "tensorboard_log_dir": tensorboard_log_dir,
         "requirements_file": request.form.get("requirements_file", "requirements.txt").strip() or "requirements.txt",
         "env_type": request.form.get("env_type", "venv"),
         "setup_script": request.form.get("setup_script", "").strip(),
         "data_dir_enabled": data_dir_enabled,
         "data_dir_local": data_dir_local,
         "data_dir_remote": data_dir_remote,
+        "output_paths": output_paths,
     }
 
     create_project(projects_dir, data)
@@ -131,7 +147,7 @@ def update(name):
     # Update editable fields
     project_data["branch"] = request.form.get("branch", project_data["branch"]).strip()
     project_data["train_file"] = request.form.get("train_file", project_data["train_file"]).strip()
-    project_data["tensorboard_log_dir"] = request.form.get("tensorboard_log_dir", project_data["tensorboard_log_dir"]).strip()
+    project_data["tensorboard_log_dir"] = request.form.get("tensorboard_log_dir", project_data["tensorboard_log_dir"]).strip() or "runs"
     project_data["requirements_file"] = request.form.get("requirements_file", project_data["requirements_file"]).strip()
     project_data["setup_script"] = request.form.get("setup_script", project_data.get("setup_script", "")).strip()
     project_data["tb_logs_max_runs"] = request.form.get("tb_logs_max_runs", type=int) or project_data.get("tb_logs_max_runs", 10)
@@ -167,6 +183,15 @@ def update(name):
     project_data["data_dir_enabled"] = data_dir_enabled
     project_data["data_dir_local"] = data_dir_local
     project_data["data_dir_remote"] = data_dir_remote
+
+    try:
+        project_data["output_paths"] = validate_output_paths(
+            request.form.get("output_paths", ""),
+            project_data["tensorboard_log_dir"],
+        )
+    except ValueError as e:
+        flash(str(e), "error")
+        return redirect(url_for("project.edit", name=name))
 
     # Parse environment variables from the form
     env_keys = request.form.getlist("env_key")
@@ -256,6 +281,7 @@ def cleanup_tb_logs(name):
 @project_bp.route("/<name>/cleanup-run-history", methods=["POST"])
 def cleanup_run_history(name):
     from services.db_service import get_db
+    import shutil
     projects_dir = current_app.config["PROJECTS_DIR"]
     config_path = os.path.join(projects_dir, name, "project.json")
     if not os.path.isfile(config_path):
@@ -275,6 +301,25 @@ def cleanup_run_history(name):
     # Delete runs beyond keep_count
     deleted_count = 0
     for run in runs[keep_count:]:
+        if run.get("persistent_dir"):
+            path = os.path.join(projects_dir, name, run["persistent_dir"])
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+        elif run.get("tensorboard_dir"):
+            for path in (
+                os.path.join(projects_dir, name, run["tensorboard_dir"]),
+                os.path.join(projects_dir, name, "workspace", run["tensorboard_dir"]),
+            ):
+                if os.path.isdir(path):
+                    shutil.rmtree(path, ignore_errors=True)
+                    break
+        if run.get("log_file_path"):
+            log_path = os.path.join(projects_dir, name, run["log_file_path"])
+            if os.path.isfile(log_path):
+                try:
+                    os.unlink(log_path)
+                except Exception:
+                    pass
         db.delete_training_run(run['id'])
         deleted_count += 1
 

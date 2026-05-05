@@ -16,6 +16,7 @@ from models.project import Project
 from services.process_manager import start_training, stop_training, get_training_status, get_runs_for_project, get_run_log_path
 from services.stats_service import get_all_stats
 from services.auth_service import api_key_required
+from services.project_service import validate_output_paths
 
 # Reuse helpers from existing routes
 from routes.training import _tail_offset
@@ -154,6 +155,16 @@ def create_project():
                 status_code=400
             )
 
+    tensorboard_log_dir = data.get("tensorboard_log_dir", "runs").strip() or "runs"
+    try:
+        output_paths = validate_output_paths(data.get("output_paths", []), tensorboard_log_dir)
+    except ValueError as e:
+        return api_response(
+            error_code="INVALID_OUTPUT_PATHS",
+            error_message=str(e),
+            status_code=400,
+        )
+
     # Build project data with defaults
     project_data = {
         "name": name,
@@ -161,13 +172,14 @@ def create_project():
         "branch": data.get("branch", "main").strip() or "main",
         "python_version": data.get("python_version", "3.12"),
         "train_file": data.get("train_file", "train.py").strip() or "train.py",
-        "tensorboard_log_dir": data.get("tensorboard_log_dir", "runs").strip() or "runs",
+        "tensorboard_log_dir": tensorboard_log_dir,
         "requirements_file": data.get("requirements_file", "requirements.txt").strip() or "requirements.txt",
         "env_type": data.get("env_type", "venv"),
         "setup_script": data.get("setup_script", "").strip(),
         "data_dir_enabled": data_dir_enabled,
         "data_dir_local": data.get("data_dir_local", "data").strip() or "data",
         "data_dir_remote": data.get("data_dir_remote", "").strip(),
+        "output_paths": output_paths,
     }
 
     # Create the project
@@ -1164,8 +1176,9 @@ def cleanup_tensorboard_logs(name):
 
     # Cleanup old run history if requested
     db_cleanup_info = None
-    if cleanup_db and result['deleted']:
+    if cleanup_db:
         from services.db_service import get_db
+        import shutil
         db = get_db()
         runs = db.get_training_runs(name, limit=1000)
 
@@ -1175,6 +1188,25 @@ def cleanup_tensorboard_logs(name):
         # Delete runs beyond keep_count
         deleted_run_ids = []
         for run in runs[keep_count:]:
+            if run.get("persistent_dir"):
+                path = os.path.join(projects_dir, name, run["persistent_dir"])
+                if os.path.isdir(path):
+                    shutil.rmtree(path, ignore_errors=True)
+            elif run.get("tensorboard_dir"):
+                for path in (
+                    os.path.join(projects_dir, name, run["tensorboard_dir"]),
+                    os.path.join(projects_dir, name, "workspace", run["tensorboard_dir"]),
+                ):
+                    if os.path.isdir(path):
+                        shutil.rmtree(path, ignore_errors=True)
+                        break
+            if run.get("log_file_path"):
+                log_path = os.path.join(projects_dir, name, run["log_file_path"])
+                if os.path.isfile(log_path):
+                    try:
+                        os.unlink(log_path)
+                    except Exception:
+                        pass
             db.delete_training_run(run['id'])
             deleted_run_ids.append(run['id'])
 

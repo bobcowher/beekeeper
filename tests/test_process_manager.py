@@ -40,6 +40,7 @@ def _make_project(tmp_path, **overrides):
         "env_vars": {},
         "parallel_runs_enabled": False,
         "max_parallel_runs": 2,
+        "output_paths": [],
     }
     data.update(overrides)
     (proj_dir / "project.json").write_text(json.dumps(data))
@@ -345,12 +346,13 @@ def test_parallel_tensorboard_link_exists_before_training_process(tmp_path):
         "workspace_dir": os.path.join(projects_dir, "myproject", "workspace"),
     }
 
-    expected_target = os.path.join(projects_dir, "myproject", "workspace", "runs", "run_2")
+    expected_target = os.path.join(projects_dir, "myproject", "persistent", "runs", "run_2")
     link_path = os.path.join(parallel_ws, "runs")
 
     def fake_popen(cmd, **kwargs):
         assert os.path.islink(link_path)
         assert os.readlink(link_path) == expected_target
+        assert kwargs["env"]["BEEKEEPER_RUN_DIR"] == expected_target
         assert kwargs["env"]["BEEKEEPER_TENSORBOARD_DIR"] == expected_target
         assert kwargs["env"]["TENSORBOARD_LOG_DIR"] == expected_target
         proc = MagicMock()
@@ -368,8 +370,104 @@ def test_parallel_tensorboard_link_exists_before_training_process(tmp_path):
         result = process_manager.start_training(projects_dir, "myproject", branch="feature/x")
 
     assert "error" not in result
-    mock_db.update_training_run.assert_any_call(2, tensorboard_dir="runs/run_2")
+    mock_db.update_training_run.assert_any_call(
+        2,
+        persistent_dir="persistent/runs/run_2",
+        tensorboard_dir="persistent/runs/run_2",
+    )
     process_manager._running.clear()
+
+
+def test_output_paths_link_to_persistent_run_dir_before_training_process(tmp_path):
+    """Configured output paths are symlinked into persistent run storage before Popen."""
+    from services import process_manager
+    process_manager._running.clear()
+    projects_dir = _make_project(tmp_path, output_paths=["saved_models", "exports/checkpoints"])
+    workspace_dir = os.path.join(projects_dir, "myproject", "workspace")
+
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=42),
+                        delete_training_run=MagicMock(),
+                        get_training_runs=MagicMock(return_value=[]))
+
+    persistent_dir = os.path.join(projects_dir, "myproject", "persistent", "runs", "run_42")
+
+    def fake_popen(cmd, **kwargs):
+        assert os.path.islink(os.path.join(workspace_dir, "runs"))
+        assert os.readlink(os.path.join(workspace_dir, "runs")) == persistent_dir
+        saved_models = os.path.join(workspace_dir, "saved_models")
+        checkpoints = os.path.join(workspace_dir, "exports", "checkpoints")
+        assert os.path.islink(saved_models)
+        assert os.readlink(saved_models) == os.path.join(persistent_dir, "saved_models")
+        assert os.path.islink(checkpoints)
+        assert os.readlink(checkpoints) == os.path.join(persistent_dir, "exports", "checkpoints")
+        assert kwargs["env"]["BEEKEEPER_RUN_DIR"] == persistent_dir
+        proc = MagicMock()
+        proc.pid = 9999
+        return proc
+
+    with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
+         patch("services.process_manager._resolve_tensorboard_binary", return_value=None), \
+         patch("services.process_manager._update_project_json"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.subprocess.run", return_value=_ok_run()), \
+         patch("services.process_manager.subprocess.Popen", side_effect=fake_popen), \
+         patch("services.process_manager._monitor_process"), \
+         patch("services.process_manager.get_db", return_value=mock_db):
+        result = process_manager.start_training(projects_dir, "myproject")
+
+    assert "error" not in result
+    process_manager._running.clear()
+
+
+def test_start_tensorboard_uses_persistent_runs_root(tmp_path):
+    """Standalone TensorBoard points at persistent/runs for new run storage."""
+    from services import process_manager
+    process_manager._running.clear()
+    process_manager._tb_running.clear()
+    projects_dir = _make_project(tmp_path)
+    tb_bin = os.path.join(projects_dir, "myproject", "venv", "bin", "tensorboard")
+    os.makedirs(os.path.dirname(tb_bin), exist_ok=True)
+    open(tb_bin, "w").close()
+
+    with patch("services.process_manager._find_free_port", return_value=6006), \
+         patch("services.process_manager.subprocess.Popen") as mock_popen:
+        mock_popen.return_value = MagicMock()
+        result = process_manager.start_tensorboard(projects_dir, "myproject")
+
+    assert result["tb_port"] == 6006
+    args = mock_popen.call_args.args[0]
+    assert "--logdir" in args
+    assert args[args.index("--logdir") + 1] == os.path.join(
+        projects_dir, "myproject", "persistent", "runs"
+    )
+    process_manager._tb_running.clear()
+
+
+def test_start_tensorboard_includes_nonempty_legacy_workspace_runs(tmp_path):
+    """Standalone TensorBoard includes legacy workspace runs only when they exist."""
+    from services import process_manager
+    process_manager._running.clear()
+    process_manager._tb_running.clear()
+    projects_dir = _make_project(tmp_path)
+    tb_bin = os.path.join(projects_dir, "myproject", "venv", "bin", "tensorboard")
+    os.makedirs(os.path.dirname(tb_bin), exist_ok=True)
+    open(tb_bin, "w").close()
+    legacy_dir = os.path.join(projects_dir, "myproject", "workspace", "runs")
+    os.makedirs(legacy_dir, exist_ok=True)
+    open(os.path.join(legacy_dir, "events.out.tfevents.1"), "w").close()
+
+    with patch("services.process_manager._find_free_port", return_value=6007), \
+         patch("services.process_manager.subprocess.Popen") as mock_popen:
+        mock_popen.return_value = MagicMock()
+        result = process_manager.start_tensorboard(projects_dir, "myproject")
+
+    assert result["tb_port"] == 6007
+    args = mock_popen.call_args.args[0]
+    assert "--logdir_spec" in args
+    spec = args[args.index("--logdir_spec") + 1]
+    assert f"persistent:{os.path.join(projects_dir, 'myproject', 'persistent', 'runs')}" in spec
+    assert f"legacy:{legacy_dir}" in spec
+    process_manager._tb_running.clear()
 
 
 def test_start_training_returns_run_id(tmp_path):

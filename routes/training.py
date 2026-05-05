@@ -275,7 +275,7 @@ def clear_history(name):
     # Get all runs to delete files
     runs = get_db().get_training_runs(name, limit=None)
 
-    # Delete archived logs and Tensorboard directories
+    # Delete archived logs and run storage directories
     for run in runs:
         if run.get('log_file_path'):
             log_path = os.path.join(projects_dir, name, run['log_file_path'])
@@ -285,8 +285,17 @@ def clear_history(name):
                 except Exception:
                     pass
 
-        if run.get('tensorboard_dir'):
-            tb_path = os.path.join(projects_dir, name, "workspace", run['tensorboard_dir'])
+        if run.get('persistent_dir'):
+            persistent_path = os.path.join(projects_dir, name, run['persistent_dir'])
+            if os.path.isdir(persistent_path):
+                try:
+                    shutil.rmtree(persistent_path)
+                except Exception:
+                    pass
+        elif run.get('tensorboard_dir'):
+            project_relative = os.path.join(projects_dir, name, run['tensorboard_dir'])
+            workspace_relative = os.path.join(projects_dir, name, "workspace", run['tensorboard_dir'])
+            tb_path = project_relative if os.path.isdir(project_relative) else workspace_relative
             if os.path.isdir(tb_path):
                 try:
                     shutil.rmtree(tb_path)

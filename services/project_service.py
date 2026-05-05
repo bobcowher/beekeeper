@@ -1,5 +1,6 @@
 import os
 import json as _json
+import posixpath
 import shutil
 import subprocess
 import threading
@@ -11,6 +12,92 @@ from services.python_versions import find_python, _find_conda_bin
 log = logging.getLogger(__name__)
 
 CONDA_ENV_PREFIX = "beekeeper-"
+RESERVED_OUTPUT_PATH_ROOTS = {".git", "persistent", "run_logs"}
+
+
+def _normalize_workspace_path(path: str, label: str = "Output path") -> str:
+    raw = (path or "").strip()
+    if not raw:
+        raise ValueError(f"{label} cannot be empty.")
+    if "\\" in raw:
+        raise ValueError(f"{label} '{raw}' must use forward slashes.")
+    if raw.startswith("/"):
+        raise ValueError(f"{label} '{raw}' must be relative to the workspace.")
+    raw_parts = raw.split("/")
+    if any(part in ("", ".", "..") for part in raw_parts):
+        raise ValueError(f"{label} '{raw}' must be a workspace-relative directory path.")
+    normalized = posixpath.normpath(raw)
+    parts = normalized.split("/")
+    if normalized in ("", ".") or any(part in ("", ".", "..") for part in parts):
+        raise ValueError(f"{label} '{raw}' must be a workspace-relative directory path.")
+    return normalized
+
+
+def _paths_overlap(left: str, right: str) -> bool:
+    left_parts = left.split("/")
+    right_parts = right.split("/")
+    shorter, longer = (
+        (left_parts, right_parts)
+        if len(left_parts) <= len(right_parts)
+        else (right_parts, left_parts)
+    )
+    return shorter == longer[:len(shorter)]
+
+
+def validate_workspace_path(path: str, label: str = "Path") -> str:
+    return _normalize_workspace_path(path, label)
+
+
+def parse_output_paths(value) -> list[str]:
+    """Parse API/form output path input into normalized workspace-relative paths."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw_items = []
+        for line in value.splitlines():
+            raw_items.extend(line.split(","))
+    elif isinstance(value, (list, tuple)):
+        raw_items = []
+        for item in value:
+            if isinstance(item, str):
+                raw_items.extend(item.splitlines())
+            else:
+                raw_items.append(str(item))
+    else:
+        raise ValueError("output_paths must be a list of strings or newline-separated text.")
+
+    paths = []
+    seen = set()
+    for item in raw_items:
+        item = (item or "").strip()
+        if not item:
+            continue
+        normalized = _normalize_workspace_path(item)
+        if normalized in seen:
+            raise ValueError(f"Duplicate output path '{normalized}'.")
+        seen.add(normalized)
+        paths.append(normalized)
+    return paths
+
+
+def validate_output_paths(output_paths, tensorboard_log_dir="runs") -> list[str]:
+    """Validate protected output paths against Beekeeper-managed workspace paths."""
+    paths = parse_output_paths(output_paths)
+    tb_path = _normalize_workspace_path(tensorboard_log_dir or "runs")
+
+    for path in paths:
+        root = path.split("/", 1)[0]
+        if root in RESERVED_OUTPUT_PATH_ROOTS:
+            raise ValueError(f"Output path '{path}' is reserved by Beekeeper.")
+        if _paths_overlap(path, tb_path):
+            raise ValueError(f"Output path '{path}' overlaps TensorBoard log dir '{tb_path}'.")
+
+    for i, path in enumerate(paths):
+        for other in paths[i + 1:]:
+            if _paths_overlap(path, other):
+                raise ValueError(f"Output paths '{path}' and '{other}' overlap.")
+
+    return paths
 
 
 def _conda_env_name(project_name):
@@ -48,6 +135,7 @@ def create_project(projects_dir, data):
         data_dir_enabled=data.get("data_dir_enabled", False),
         data_dir_local=data.get("data_dir_local", "data"),
         data_dir_remote=data.get("data_dir_remote", ""),
+        output_paths=data.get("output_paths", []),
     )
     project.save(projects_dir)
 

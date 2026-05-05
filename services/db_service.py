@@ -113,6 +113,7 @@ class DatabaseService:
                 ('notes',   "TEXT NOT NULL DEFAULT ''"),
                 ('notable', 'INTEGER NOT NULL DEFAULT 0'),
                 ('tags',    "TEXT NOT NULL DEFAULT ''"),
+                ('persistent_dir', 'TEXT'),
             ]:
                 if col not in tr_columns:
                     try:
@@ -408,7 +409,7 @@ class DatabaseService:
         """Update run fields (status, timing, metadata, etc.)."""
         allowed_fields = [
             'ended_at', 'duration_seconds', 'status', 'exit_code',
-            'log_file_path', 'tensorboard_dir',
+            'log_file_path', 'tensorboard_dir', 'persistent_dir',
             'commit_sha', 'commit_message', 'python_version', 'gpu_info', 'hostname',
         ]
         updates = []

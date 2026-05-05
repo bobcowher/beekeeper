@@ -14,6 +14,24 @@ from services.db_service import get_db
 log = logging.getLogger(__name__)
 
 
+def _resolve_run_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -> str:
+    project_dir = os.path.join(projects_dir, project_name)
+    if run.get("persistent_dir"):
+        persistent_path = os.path.join(project_dir, run["persistent_dir"])
+        if os.path.isdir(persistent_path):
+            return persistent_path
+
+    tb_rel = run.get("tensorboard_dir")
+    candidates = [
+        os.path.join(project_dir, tb_rel),
+        os.path.join(project_dir, "workspace", tb_rel),
+    ]
+    for candidate in candidates:
+        if os.path.isdir(candidate):
+            return candidate
+    return candidates[0]
+
+
 def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> dict:
     """
     Parse TFEvents and cache analysis for all metrics.
@@ -35,8 +53,9 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> dict
             log.warning(f"Run {run_id} has no tensorboard_dir")
             return {'success': False, 'reason': 'no_tensorboard_dir'}
 
-        # Try the stored path first
-        tb_dir = os.path.join(projects_dir, project_name, 'workspace', run['tensorboard_dir'])
+        # Try the stored path first. New runs store project-relative persistent
+        # paths; older runs stored workspace-relative TensorBoard paths.
+        tb_dir = _resolve_run_tensorboard_dir(projects_dir, project_name, run)
 
         # If stored path doesn't exist, auto-discover TensorBoard data
         if not os.path.isdir(tb_dir):
@@ -577,6 +596,7 @@ def _discover_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -
 
     # Common TensorBoard locations to search
     search_paths = [
+        os.path.join(project_dir, 'persistent', 'runs'),
         os.path.join(project_dir, 'workspace', 'runs'),
         os.path.join(project_dir, 'workspace', 'logs'),
         os.path.join(project_dir, 'workspace', 'tensorboard'),

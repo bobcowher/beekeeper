@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS training_runs (
 
     -- Files
     log_file_path TEXT,  -- relative path: run_logs/run-{timestamp}-{id}.log
-    tensorboard_dir TEXT,  -- relative path: workspace/runs/{timestamp}
+    tensorboard_dir TEXT,  -- project-relative path for new runs, legacy workspace-relative path for old runs
+    persistent_dir TEXT,  -- project-relative path: persistent/runs/run_{id}
 
     -- Annotations
     notes      TEXT    NOT NULL DEFAULT '',

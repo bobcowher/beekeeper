@@ -68,7 +68,7 @@ def test_to_dict_contains_all_fields(tmp_path):
         "setup_script", "data_dir_enabled", "data_dir_local", "data_dir_remote",
         "setup_status", "setup_error", "train_status", "train_pid", "env_vars",
         "pinned", "last_run_at", "tb_logs_max_runs", "run_history_max_runs",
-        "parallel_runs_enabled", "max_parallel_runs",
+        "parallel_runs_enabled", "max_parallel_runs", "output_paths",
     }
     assert expected_keys == set(d.keys())
 
@@ -89,6 +89,7 @@ def test_parallel_runs_defaults(tmp_path):
     p = Project(name="x", git_url="https://example.com/repo.git")
     assert p.parallel_runs_enabled is False
     assert p.max_parallel_runs == 2
+    assert p.output_paths == []
 
 
 def test_parallel_runs_persisted(tmp_path):
@@ -118,3 +119,4 @@ def test_old_project_json_loads_without_parallel_fields(tmp_path):
     p = Project.load(str(proj_dir / "project.json"))
     assert p.parallel_runs_enabled is False
     assert p.max_parallel_runs == 2
+    assert p.output_paths == []

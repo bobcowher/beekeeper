@@ -109,6 +109,14 @@
     </div>
 
     <div class="form-group">
+        <label for="output_paths">
+            Output Paths to Protect <span class="optional-tag">optional</span>
+            <span class="tooltip-icon" title="Workspace-relative directories that should be stored outside disposable workspaces. Enter one path per line.">?</span>
+        </label>
+        <textarea id="output_paths" name="output_paths" rows="3" placeholder="saved_models&#10;exports"></textarea>
+    </div>
+
+    <div class="form-group">
         <label for="setup_script">
             Setup Script <span class="optional-tag">optional</span>
             <span class="tooltip-icon" title="Shell script run after environment creation during setup, and again before each training run (before pip install). Executed from the repository root. Not run if the file is absent. Suggested filename: setup.sh">?</span>

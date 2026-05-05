@@ -38,6 +38,7 @@ def make_project_dir(app, name="myproject", **overrides):
         "train_status": "idle",
         "train_pid": 0,
         "env_vars": {},
+        "output_paths": [],
     }
     data.update(overrides)
     with open(os.path.join(project_dir, "project.json"), "w") as f:
