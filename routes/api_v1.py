@@ -911,16 +911,15 @@ def get_run_logs_json(name, run_id):
             status_code=404
         )
 
-    if not run.get('log_file_path'):
-        return api_response(
-            error_code="NO_LOGS",
-            error_message="Log file not available",
-            status_code=404
-        )
-
     projects_dir = current_app.config["PROJECTS_DIR"]
-    log_relative_path = run['log_file_path']
-    log_path = os.path.join(projects_dir, name, log_relative_path)
+
+    if run.get('log_file_path'):
+        log_relative_path = run['log_file_path']
+        log_path = os.path.join(projects_dir, name, log_relative_path)
+    else:
+        # Run is still active — log_file_path is only written to DB on completion
+        log_path = get_run_log_path(projects_dir, name, run_id)
+        log_relative_path = os.path.relpath(log_path, os.path.join(projects_dir, name))
 
     if not os.path.isfile(log_path):
         return api_response(
