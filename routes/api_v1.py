@@ -1332,6 +1332,36 @@ Read both outputs before taking any action.
 | `get_stats()` | GPU, CPU, RAM stats |
 | `check_busy()` | Is any training currently running? |
 
+## Artifact Storage
+
+Every training run automatically gets a persistent directory outside the git workspace:
+
+```
+projects/<project>/persistent/runs/run_<id>/
+```
+
+Beekeeper sets these environment variables in every training process:
+
+| Variable | Points to |
+|----------|-----------|
+| `BEEKEEPER_RUN_DIR` | The run's persistent directory (absolute path) |
+| `BEEKEEPER_TENSORBOARD_DIR` | Same — canonical location for TensorBoard events |
+| `TENSORBOARD_LOG_DIR` | Same — generic alias for frameworks that read this |
+
+Training scripts should write to `$BEEKEEPER_RUN_DIR` (or use relative paths via
+the workspace symlinks Beekeeper creates) rather than hardcoded local paths.
+Example: `checkpoint_dir = os.environ.get("BEEKEEPER_RUN_DIR", "checkpoints")`.
+
+Additional workspace paths to protect (e.g. `saved_models`, `exports`) are set
+on the project via `output_paths`. Each listed path gets a workspace symlink pointing
+into the run's persistent directory, so code that writes relative paths still works.
+Use `get_project(<name>)` to see the current `output_paths` for a project.
+TensorBoard logs are always protected — do not add the TB log dir to `output_paths`.
+
+Run artifacts survive until the run record is explicitly deleted. When you see
+`persistent_dir` on a run in `get_project()` history, that is the project-relative
+path to its durable artifact tree.
+
 ## Common Workflows
 
 ### Check system state
@@ -1364,13 +1394,14 @@ switch_branch(<name>, <branch>)
 
 ### Create a new project
 ```
-create_project(<name>, <git_url>)
+create_project(<name>, <git_url>, output_paths=["saved_models", "exports"])
 # Setup runs in background — retry_setup polls until ready:
 retry_setup(<name>)
 start_training(<name>)
 ```
 
 Defaults: branch=main, python_version=3.12, train_file=train.py, env_type=venv.
+output_paths defaults to [] — TensorBoard is always protected regardless.
 """
 
     return Response(
@@ -1517,6 +1548,37 @@ Priority order:
 **5. Lead with the performance verdict, use losses to explain it.**
 Don't open with "reconstruction loss improved 99%." Open with where the reward/score stands,
 then use losses to explain why.
+
+## Artifact Storage
+
+Every run stores its outputs in a persistent directory that survives workspace cleanup:
+
+```
+projects/{name}/persistent/runs/run_<id>/
+```
+
+Beekeeper injects these env vars into every training process:
+
+| Variable | Value |
+|----------|-------|
+| `BEEKEEPER_RUN_DIR` | Absolute path to the run's persistent directory |
+| `BEEKEEPER_TENSORBOARD_DIR` | Same — canonical TensorBoard event location |
+| `TENSORBOARD_LOG_DIR` | Same — generic alias |
+
+If a user asks where their model weights, checkpoints, or exports are:
+1. Call `get_project("{name}")` and check `run_history` for the relevant run's `persistent_dir`.
+2. The artifact is at `<persistent_dir>/<path>` relative to the project root.
+3. They can browse or download it via the Beekeeper file browser in the UI, or with
+   `GET /api/v1/projects/{name}/files/<path>?zip=1` for a directory download.
+
+If a user asks how their training script should write checkpoints or outputs:
+- Recommend using `os.environ.get("BEEKEEPER_RUN_DIR", ".")` as the base path.
+- Alternatively, add the target directory to `output_paths` in project settings — Beekeeper
+  will create a workspace symlink so relative-path writes are automatically redirected there.
+
+The project's configured `output_paths` field (visible in `get_project("{name}")`) lists
+which workspace-relative directories are symlinked into persistent storage. TensorBoard
+logs are always protected regardless of `output_paths`.
 """
 
     return Response(

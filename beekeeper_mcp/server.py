@@ -120,20 +120,28 @@ def create_project(
     python_version: str = "3.12",
     train_file: str = "train.py",
     env_type: str = "venv",
+    output_paths: list[str] | None = None,
 ) -> dict:
     """
     Create a new project. Setup (clone, env creation, pip install) runs automatically
     in the background. Poll get_project until setup_status == 'ready', or call
     wait_for_setup to block until done.
+
+    output_paths: workspace-relative directories the training script writes to that
+    should survive workspace cleanup (e.g. ["saved_models", "exports"]).
+    TensorBoard logs are protected automatically — do not include the TB log dir here.
+    Defaults to [] (env vars still point at persistent storage; only symlinks differ).
     """
-    return _post("/projects", {
+    body: dict = {
         "name": name,
         "git_url": git_url,
         "branch": branch,
         "python_version": python_version,
         "train_file": train_file,
         "env_type": env_type,
-    })
+        "output_paths": output_paths or [],
+    }
+    return _post("/projects", body)
 
 
 @mcp.tool()
