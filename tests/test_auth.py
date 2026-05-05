@@ -6,7 +6,6 @@ Strategy: auth is disabled by default in config, so we mock
 is_auth_enabled() + get_db() to exercise the login route directly
 without a real database or active auth middleware.
 """
-from datetime import datetime
 from unittest.mock import MagicMock
 
 
