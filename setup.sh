@@ -175,4 +175,4 @@ echo ""
 echo "=== Setup complete ==="
 echo "Service status:  sudo systemctl status $SERVICE_NAME"
 echo "View logs:       journalctl -u $SERVICE_NAME -f"
-echo "App URL:         http://$(hostname -I | awk '{print $1}'):5000"
+echo "App URL:         http://$(hostname -I | awk '{print $1}'):5000" # NOSONAR
