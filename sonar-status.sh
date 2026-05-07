@@ -19,23 +19,24 @@ BRANCH="${2:-}"
 BASE="https://sonarcloud.io/api"
 
 branch_param=""
-if [ -n "$BRANCH" ]; then
+if [[ -n "$BRANCH" ]]; then
     branch_param="&branch=${BRANCH}"
 fi
 
 TOKEN="${SONAR_TOKEN:-}"
 
 fetch() {
-    if [ -n "${TOKEN:-}" ]; then
-        curl -s -u "${TOKEN}:" "$BASE/$1"
+    local endpoint="$1"
+    if [[ -n "${TOKEN:-}" ]]; then
+        curl -s -u "${TOKEN}:" "$BASE/$endpoint"
     else
-        curl -s "$BASE/$1"
+        curl -s "$BASE/$endpoint"
     fi
 }
 
 echo "=== SonarCloud: ${PROJECT} ==="
-[ -n "$BRANCH" ] && echo "Branch: ${BRANCH}"
-[ -n "${TOKEN:-}" ] && echo "Auth: token" || echo "Auth: none (public)"
+[[ -n "$BRANCH" ]] && echo "Branch: ${BRANCH}"
+[[ -n "${TOKEN:-}" ]] && echo "Auth: token" || echo "Auth: none (public)"
 echo ""
 
 # Quality gate
@@ -52,7 +53,7 @@ failed = [c for c in conditions if c['status'] == 'ERROR']
 for c in failed:
     print(f\"  FAIL  {c['metricKey']}: actual={c['actualValue']} threshold={c['errorThreshold']}\")
 " 2>/dev/null)
-[ -n "$FAILED" ] && echo "$FAILED"
+[[ -n "$FAILED" ]] && echo "$FAILED"
 
 echo ""
 
