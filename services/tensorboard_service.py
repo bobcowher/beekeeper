@@ -5,6 +5,7 @@ import json
 import logging
 from typing import Optional
 from pathlib import Path
+from datetime import datetime as dt
 
 import numpy as np
 from tbparse import SummaryReader
@@ -59,14 +60,14 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> dict
 
         # If stored path doesn't exist, auto-discover TensorBoard data
         if not os.path.isdir(tb_dir):
-            log.info(f"Stored TB path not found, attempting auto-discovery")
+            log.info("Stored TB path not found, attempting auto-discovery")
             try:
                 discovered = _discover_tensorboard_dir(projects_dir, project_name, run)
                 if discovered:
                     tb_dir = discovered
                     log.info(f"Auto-discovered TensorBoard data at: {tb_dir}")
                 else:
-                    log.warning(f"Auto-discovery found no matching TensorBoard directories")
+                    log.warning("Auto-discovery found no matching TensorBoard directories")
                     return {'success': False, 'reason': 'directory_not_found', 'path': tb_dir}
             except Exception as e:
                 log.error(f"Auto-discovery failed with exception: {e}", exc_info=True)
@@ -226,7 +227,7 @@ def analyze_metric(metric_name: str, data: list) -> dict:
     # Generate summary
     summary = _generate_summary(
         metric_name, trend, initial_value, final_value,
-        improvement_percent, convergence, anomalies
+        convergence, anomalies
     )
 
     # Raw sampled points (for debugging / high-detail view)
@@ -432,7 +433,7 @@ def smart_sample(data: list, target: int = 100) -> list:
     if len(data) > 2:
         derivatives = np.diff([d[1] for d in data])
         sign_changes = np.diff(np.sign(derivatives))
-        inflection_indices = np.where(sign_changes != 0)[0] + 1
+        inflection_indices = np.nonzero(sign_changes != 0)[0] + 1
 
         # Add inflection points (limit to avoid too many)
         for idx in inflection_indices[:20]:
@@ -684,7 +685,6 @@ def _generate_summary(
     trend: str,
     initial_value: float,
     final_value: float,
-    improvement_percent: float,
     convergence: dict,
     anomalies: list
 ) -> str:
@@ -725,7 +725,70 @@ def _generate_summary(
     return ". ".join(parts)
 
 
-def cleanup_old_tb_logs(tb_logdir: str, keep_count: int, protected_dirs: set = None) -> dict:
+def _extract_tb_timestamp(dirname: str) -> dt | None:
+    """Extract a sortable timestamp from supported TensorBoard directory names."""
+    import re
+
+    bk_match = re.match(r'^(\d{8})-(\d{6})$', dirname)
+    if bk_match:
+        try:
+            return dt.strptime(f"{bk_match.group(1)}{bk_match.group(2)}", "%Y%m%d%H%M%S")
+        except Exception:
+            return None
+
+    ts_match = re.match(r'^(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})', dirname)
+    if ts_match:
+        try:
+            return dt.strptime(ts_match.group(1), "%Y-%m-%d_%H-%M-%S")
+        except Exception:
+            return None
+
+    return None
+
+
+def _collect_tb_run_dirs(tb_logdir: str) -> list[tuple[str, str, dt]]:
+    """Return timestamped TensorBoard run directories."""
+    subdirs = []
+    # tb_logdir is an internal configured TensorBoard directory, not request input.
+    for entry in os.scandir(tb_logdir):  # NOSONAR
+        if not entry.is_dir():
+            continue
+
+        timestamp = _extract_tb_timestamp(entry.name)
+        if timestamp:
+            subdirs.append((entry.name, entry.path, timestamp))
+            log.debug(f"Found TensorBoard dir: {entry.name} -> {timestamp}")
+        else:
+            log.info(f"Skipping directory with unrecognized format: {entry.name}")
+
+    return subdirs
+
+
+def _split_protected_tb_dirs(subdirs: list[tuple[str, str, dt]], protected_dirs: set | None):
+    """Split run directories into protected and deletion candidates."""
+    if not protected_dirs:
+        return [], subdirs
+    protected = [s for s in subdirs if s[0] in protected_dirs]
+    candidates = [s for s in subdirs if s[0] not in protected_dirs]
+    return protected, candidates
+
+
+def _delete_tb_dirs(to_delete: list[tuple[str, str, dt]]) -> list[str]:
+    """Delete TensorBoard directories and return names that were removed."""
+    import shutil
+
+    deleted_names = []
+    for name, path, _ in to_delete:
+        try:
+            log.info(f"Deleting directory: {path}")
+            shutil.rmtree(path)
+            deleted_names.append(name)
+        except Exception as e:
+            log.error(f"Failed to delete {name}: {e}")
+    return deleted_names
+
+
+def cleanup_old_tb_logs(tb_logdir: str, keep_count: int, protected_dirs: set | None = None) -> dict:
     """
     Keep only the N most recent TensorBoard run directories.
     Directories in protected_dirs (e.g. from notable runs) are never deleted.
@@ -738,8 +801,6 @@ def cleanup_old_tb_logs(tb_logdir: str, keep_count: int, protected_dirs: set = N
     Returns:
         dict with 'deleted': list of deleted directory names, 'kept': list of kept directory names
     """
-    import shutil
-
     log.info(f"cleanup_old_tb_logs called: tb_logdir={tb_logdir}, keep_count={keep_count}")
 
     if keep_count <= 0:
@@ -749,43 +810,7 @@ def cleanup_old_tb_logs(tb_logdir: str, keep_count: int, protected_dirs: set = N
         log.warning(f"TensorBoard log directory not found: {tb_logdir}")
         return {'deleted': [], 'kept': [], 'message': 'TensorBoard log directory not found'}
 
-    # Get all subdirectories and extract timestamps for sorting
-    # Handles both Beekeeper format (YYYYMMDD-HHMMSS) and training script format (YYYY-MM-DD_HH-MM-SS_*)
-    import re
-    from datetime import datetime as dt
-
-    def extract_timestamp(dirname):
-        """Extract timestamp from directory name for sorting."""
-        # Beekeeper format: 20260403-124635
-        bk_match = re.match(r'^(\d{8})-(\d{6})$', dirname)
-        if bk_match:
-            try:
-                return dt.strptime(f"{bk_match.group(1)}{bk_match.group(2)}", "%Y%m%d%H%M%S")
-            except:
-                pass
-
-        # Training script format: 2026-04-03_12-46-35_tag
-        ts_match = re.match(r'^(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})', dirname)
-        if ts_match:
-            try:
-                return dt.strptime(ts_match.group(1), "%Y-%m-%d_%H-%M-%S")
-            except:
-                pass
-
-        # Fallback: use directory mtime
-        return None
-
-    subdirs = []
-    for item in os.listdir(tb_logdir):
-        path = os.path.join(tb_logdir, item)
-        if os.path.isdir(path):
-            timestamp = extract_timestamp(item)
-            if timestamp:
-                subdirs.append((item, path, timestamp))
-                log.debug(f"Found TensorBoard dir: {item} -> {timestamp}")
-            else:
-                log.info(f"Skipping directory with unrecognized format: {item}")
-
+    subdirs = _collect_tb_run_dirs(tb_logdir)
     log.info(f"Found {len(subdirs)} subdirectories: {[name for name, _, _ in subdirs]}")
 
     if len(subdirs) <= keep_count:
@@ -800,15 +825,7 @@ def cleanup_old_tb_logs(tb_logdir: str, keep_count: int, protected_dirs: set = N
     subdirs.sort(key=lambda x: x[2], reverse=True)
     log.info(f"Sorted subdirs (newest first): {[(name, ts.strftime('%Y-%m-%d %H:%M:%S')) for name, _, ts in subdirs]}")
 
-    # Separate protected dirs (notable runs) from candidates
-    if protected_dirs:
-        protected = [s for s in subdirs if s[0] in protected_dirs]
-        candidates = [s for s in subdirs if s[0] not in protected_dirs]
-    else:
-        protected = []
-        candidates = subdirs
-
-    # Apply keep_count limit only to non-protected candidates
+    protected, candidates = _split_protected_tb_dirs(subdirs, protected_dirs)
     to_keep = candidates[:keep_count] + protected
     to_delete = candidates[keep_count:]
 
@@ -817,15 +834,7 @@ def cleanup_old_tb_logs(tb_logdir: str, keep_count: int, protected_dirs: set = N
     log.info(f"Will KEEP ({len(to_keep)}): {[name for name, _, _ in to_keep]}")
     log.info(f"Will DELETE ({len(to_delete)}): {[name for name, _, _ in to_delete]}")
 
-    deleted_names = []
-    for name, path, _ in to_delete:
-        try:
-            log.info(f"Deleting directory: {path}")
-            shutil.rmtree(path)
-            deleted_names.append(name)
-        except Exception as e:
-            log.error(f"Failed to delete {name}: {e}")
-
+    deleted_names = _delete_tb_dirs(to_delete)
     return {
         'deleted': deleted_names,
         'kept': [name for name, _, _ in to_keep],

@@ -169,6 +169,22 @@ body {
     overflow-y: auto;
 }
 
+.deploy-version {
+    position: fixed;
+    right: 10px;
+    bottom: 8px;
+    z-index: 1000;
+    padding: 3px 7px;
+    background: rgba(27, 27, 27, 0.88);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.2;
+    pointer-events: none;
+}
+
 /* Page header */
 .page-header {
     display: flex;
@@ -1338,18 +1354,18 @@ label {
     padding: 1.5rem;
 }
 
-.form-group {
+.modal .form-group {
     margin-bottom: 1rem;
 }
 
-.form-group label {
+.modal .form-group label {
     display: block;
     margin-bottom: 0.5rem;
     color: var(--text-primary);
     font-weight: 500;
 }
 
-.form-group input[type="text"] {
+.modal .form-group input[type="text"] {
     width: 100%;
     padding: 8px 12px;
     background: var(--bg-input);
@@ -1360,12 +1376,12 @@ label {
     font-size: 14px;
 }
 
-.form-group input[type="text"]:focus {
+.modal .form-group input[type="text"]:focus {
     outline: none;
     border-color: var(--accent);
 }
 
-.form-actions {
+.modal .form-actions {
     display: flex;
     gap: 0.5rem;
     justify-content: flex-end;

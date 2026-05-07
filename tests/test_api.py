@@ -1,6 +1,7 @@
 """
 JSON API endpoint tests — verify correct status codes and response shapes.
 """
+import pytest
 
 
 # --- Training status ---
@@ -85,8 +86,8 @@ def test_stats_returns_json(client, mocker):
     resp = client.get("/api/stats")
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data["cpu"] == 12.5
-    assert data["ram"] == 64.0
+    assert data["cpu"] == pytest.approx(12.5)
+    assert data["ram"] == pytest.approx(64.0)
 
 
 # --- File browser ---
@@ -176,3 +177,81 @@ def test_capacity_endpoint_shape(client):
     assert "available" in body
     assert "projects" in body
     assert body["available"] == body["total_slots"] - body["running"]
+
+
+def test_api_v1_list_projects_reads_project_file_constant(client, ready_project):
+    r = client.get("/api/v1/projects", headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data["success"] is True
+    assert data["data"]["projects"][0]["name"] == "myproject"
+
+
+def test_api_v1_busy_checks_project_file_constant(client, ready_project, mocker):
+    mocker.patch("routes.api_v1.get_training_status", return_value={"status": "running"})
+
+    r = client.get("/api/v1/busy", headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 200
+    data = r.get_json()["data"]
+    assert data["busy"] is True
+    assert data["running_projects"] == ["myproject"]
+
+
+def test_api_v1_capacity_counts_ready_project(client, ready_project):
+    r = client.get("/api/v1/capacity", headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 200
+    body = r.get_json()["data"]
+    assert body["total_slots"] == 1
+    assert body["projects"][0]["name"] == "myproject"
+
+
+def test_mcp_documentation_and_download_use_mcp_server_constant(client, app, tmp_path):
+    server_file = tmp_path / "mcp_server.py"
+    server_file.write_text("print('beekeeper mcp')\n")
+    app.config["BEEKEEPER_HOME"] = str(tmp_path)
+
+    docs = client.get("/api/v1/mcp")
+    download = client.get("/api/v1/mcp/server")
+
+    assert docs.status_code == 200
+    assert download.status_code == 200
+    assert b"beekeeper mcp" in download.data
+
+
+def test_training_history_log_missing_run_uses_shared_message(client, mocker):
+    db = mocker.MagicMock()
+    db.get_training_run.return_value = None
+    mocker.patch("services.db_service.get_db", return_value=db)
+
+    r = client.get("/projects/myproject/history/9/log")
+
+    assert r.status_code == 404
+    assert r.get_json()["error"] == "Run not found"
+
+
+def test_training_history_diff_missing_runs_use_shared_message(client, mocker):
+    db = mocker.MagicMock()
+    db.get_training_run.side_effect = [
+        {"id": 1, "project_name": "myproject", "commit_sha": "a" * 40},
+        None,
+    ]
+    mocker.patch("services.db_service.get_db", return_value=db)
+
+    r = client.get("/projects/myproject/history/diff?from=1&to=2")
+
+    assert r.status_code == 404
+    assert r.get_json()["error"] == "Run not found"
+
+
+def test_training_history_update_missing_run_uses_shared_message(client, mocker):
+    db = mocker.MagicMock()
+    db.get_training_run.return_value = None
+    mocker.patch("services.db_service.get_db", return_value=db)
+
+    r = client.patch("/projects/myproject/history/9", json={"notes": "later"})
+
+    assert r.status_code == 404
+    assert r.get_json()["error"] == "Run not found"

@@ -73,7 +73,10 @@ def login():
 
     # Create session
     session_id = create_session_for_user(user.id)
-    response = make_response(redirect(request.args.get('next') or url_for('dashboard.index')))
+    next_url = request.args.get('next', '')
+    if not (next_url and next_url.startswith('/') and not next_url.startswith('//')):
+        next_url = url_for('dashboard.index')
+    response = make_response(redirect(next_url))
     response.set_cookie('session_id', session_id, httponly=True, max_age=60*60*24*7)
 
     flash(f'Welcome back, {user.name}!', 'success')

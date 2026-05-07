@@ -34,6 +34,13 @@ def test_dashboard_empty(client):
     assert b"No projects yet" in resp.data
 
 
+def test_base_layout_shows_deploy_version(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert b'class="deploy-version"' in resp.data
+    assert b"v1.0.7 " in resp.data
+
+
 def test_dashboard_shows_project(client, ready_project):
     resp = client.get("/")
     assert resp.status_code == 200

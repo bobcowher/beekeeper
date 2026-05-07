@@ -27,8 +27,8 @@ for candidate in python3.12 python3.11 python3.10 python3; do
     fi
 done
 
-if [ -z "$PYTHON_BIN" ]; then
-    echo "ERROR: No python3 found. Install Python 3.10+ and re-run."
+if [[ -z "$PYTHON_BIN" ]]; then
+    echo "ERROR: No python3 found. Install Python 3.10+ and re-run." >&2
     exit 1
 fi
 
@@ -43,35 +43,33 @@ PYTHON_VERSION=$($PYTHON_BIN -c 'import sys; print(f"{sys.version_info.major}.{s
 VENV_PACKAGE="python${PYTHON_VERSION}-venv"
 
 # Check if venv package is installed (Debian/Ubuntu specific)
-if command -v apt &>/dev/null; then
-    if ! dpkg -l | grep -q "^ii.*$VENV_PACKAGE"; then
-        echo ""
-        echo "ERROR: $VENV_PACKAGE is not installed."
-        echo ""
-        echo "On Debian/Ubuntu systems, you need to install the venv package:"
-        echo "    sudo apt update"
-        echo "    sudo apt install $VENV_PACKAGE"
-        echo ""
+if command -v apt &>/dev/null && ! dpkg -l | grep -q "^ii.*$VENV_PACKAGE"; then
+    echo ""
+    echo "ERROR: $VENV_PACKAGE is not installed." >&2
+    echo ""
+    echo "On Debian/Ubuntu systems, you need to install the venv package:"
+    echo "    sudo apt update"
+    echo "    sudo apt install $VENV_PACKAGE"
+    echo ""
 
-        if [ "$AUTO_YES" = true ]; then
-            echo "Auto-installing $VENV_PACKAGE (--yes mode)..."
+    if [[ "$AUTO_YES" = true ]]; then
+        echo "Auto-installing $VENV_PACKAGE (--yes mode)..."
+        sudo apt update -qq
+        sudo apt install -y $VENV_PACKAGE
+        echo "✓ $VENV_PACKAGE installed"
+        echo ""
+    else
+        read -p "Install $VENV_PACKAGE now? (y/N): " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            echo "Installing $VENV_PACKAGE..."
             sudo apt update -qq
             sudo apt install -y $VENV_PACKAGE
             echo "✓ $VENV_PACKAGE installed"
             echo ""
         else
-            read -p "Install $VENV_PACKAGE now? (y/N): " -n 1 -r
-            echo ""
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                echo "Installing $VENV_PACKAGE..."
-                sudo apt update -qq
-                sudo apt install -y $VENV_PACKAGE
-                echo "✓ $VENV_PACKAGE installed"
-                echo ""
-            else
-                echo "Aborted. Please install $VENV_PACKAGE and re-run setup."
-                exit 1
-            fi
+            echo "Aborted. Please install $VENV_PACKAGE and re-run setup."
+            exit 1
         fi
     fi
 fi
@@ -136,7 +134,7 @@ echo "Useful for development (e.g., quick restarts after code changes)."
 echo ""
 
 ENABLE_PASSWORDLESS=false
-if [ "$AUTO_YES" = true ]; then
+if [[ "$AUTO_YES" = true ]]; then
     echo "Skipping passwordless sudo setup (--yes mode, use interactive setup to enable)"
 else
     read -p "Enable passwordless sudo for beekeeper service? (y/N): " -n 1 -r
@@ -146,7 +144,7 @@ else
     fi
 fi
 
-if [ "$ENABLE_PASSWORDLESS" = true ]; then
+if [[ "$ENABLE_PASSWORDLESS" = true ]]; then
     SUDOERS_FILE="/etc/sudoers.d/$SERVICE_NAME"
     TEMP_SUDOERS=$(mktemp)
     SYSTEMCTL_PATH="$(command -v systemctl)"
@@ -177,4 +175,4 @@ echo ""
 echo "=== Setup complete ==="
 echo "Service status:  sudo systemctl status $SERVICE_NAME"
 echo "View logs:       journalctl -u $SERVICE_NAME -f"
-echo "App URL:         http://$(hostname -I | awk '{print $1}'):5000"
+echo "App URL:         http://$(hostname -I | awk '{print $1}'):5000" # NOSONAR

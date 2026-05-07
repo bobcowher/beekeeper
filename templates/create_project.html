@@ -65,13 +65,13 @@
 
     {% if conda_available %}
     <div class="form-group">
-        <label>
+        <label for="env_type_venv">
             Environment Type
             <span class="tooltip-icon" title="venv: lightweight Python virtual environment. conda: Anaconda/Miniconda environment with broader package support.">?</span>
         </label>
         <div class="env-toggle">
             <label class="toggle-option">
-                <input type="radio" name="env_type" value="venv" checked>
+                <input type="radio" id="env_type_venv" name="env_type" value="venv" checked>
                 <span class="toggle-label">venv</span>
             </label>
             <label class="toggle-option">

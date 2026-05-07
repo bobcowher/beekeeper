@@ -20,7 +20,7 @@ from services.run_storage_service import delete_run_storage
 project_bp = Blueprint("project", __name__, url_prefix="/projects")
 
 
-@project_bp.route("/new")
+@project_bp.route("/new", methods=["GET"])
 def new():
     python_versions = find_available()
     conda_available = has_conda()
@@ -93,7 +93,7 @@ def create():
     return redirect(url_for("project.detail", name=name))
 
 
-@project_bp.route("/<name>")
+@project_bp.route("/<name>", methods=["GET"])
 def detail(name):
     config_path = os.path.join(
         current_app.config["PROJECTS_DIR"], name, "project.json"
@@ -122,7 +122,7 @@ def detail(name):
                            mcp_server_path=mcp_server_path)
 
 
-@project_bp.route("/<name>/edit")
+@project_bp.route("/<name>/edit", methods=["GET"])
 def edit(name):
     projects_dir = current_app.config["PROJECTS_DIR"]
     config_path = os.path.join(projects_dir, name, "project.json")
