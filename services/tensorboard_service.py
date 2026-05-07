@@ -749,17 +749,16 @@ def _extract_tb_timestamp(dirname: str) -> dt | None:
 def _collect_tb_run_dirs(tb_logdir: str) -> list[tuple[str, str, dt]]:
     """Return timestamped TensorBoard run directories."""
     subdirs = []
-    for item in os.listdir(tb_logdir):
-        path = os.path.join(tb_logdir, item)
-        if not os.path.isdir(path):
+    for entry in os.scandir(tb_logdir):
+        if not entry.is_dir():
             continue
 
-        timestamp = _extract_tb_timestamp(item)
+        timestamp = _extract_tb_timestamp(entry.name)
         if timestamp:
-            subdirs.append((item, path, timestamp))
-            log.debug(f"Found TensorBoard dir: {item} -> {timestamp}")
+            subdirs.append((entry.name, entry.path, timestamp))
+            log.debug(f"Found TensorBoard dir: {entry.name} -> {timestamp}")
         else:
-            log.info(f"Skipping directory with unrecognized format: {item}")
+            log.info(f"Skipping directory with unrecognized format: {entry.name}")
 
     return subdirs
 

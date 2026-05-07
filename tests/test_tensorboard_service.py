@@ -105,6 +105,7 @@ def test_cleanup_old_tb_logs_keeps_recent_and_protected_runs(tmp_path):
         "not-a-run",
     ]:
         (tb_dir / dirname).mkdir()
+    (tb_dir / "README.txt").write_text("not a run directory")
 
     result = cleanup_old_tb_logs(
         str(tb_dir),
