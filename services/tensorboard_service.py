@@ -749,7 +749,8 @@ def _extract_tb_timestamp(dirname: str) -> dt | None:
 def _collect_tb_run_dirs(tb_logdir: str) -> list[tuple[str, str, dt]]:
     """Return timestamped TensorBoard run directories."""
     subdirs = []
-    for entry in os.scandir(tb_logdir):  # NOSONAR: tb_logdir is an internal configured TensorBoard directory.
+    # tb_logdir is an internal configured TensorBoard directory, not request input.
+    for entry in os.scandir(tb_logdir):  # NOSONAR
         if not entry.is_dir():
             continue
 
