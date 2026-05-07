@@ -1,8 +1,41 @@
 import os
 import random
+import subprocess
 from flask import Flask
 
 BEEKEEPER_HOME = os.path.dirname(os.path.abspath(__file__))
+APP_VERSION = "1.0.7"
+
+
+def _git_value(args, default="unknown"):
+    """Return a short git value for deployment visibility."""
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=BEEKEEPER_HOME,
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except Exception:
+        return default
+    if result.returncode != 0:
+        return default
+    return result.stdout.strip() or default
+
+
+def get_deploy_version():
+    """Build the UI version label shown on deployed pages."""
+    version = os.environ.get("BEEKEEPER_VERSION", APP_VERSION)
+    branch = os.environ.get("BEEKEEPER_GIT_BRANCH") or _git_value(["rev-parse", "--abbrev-ref", "HEAD"])
+    commit = os.environ.get("BEEKEEPER_GIT_SHA") or _git_value(["rev-parse", "--short", "HEAD"])
+    return {
+        "version": version,
+        "branch": branch,
+        "commit": commit,
+        "label": f"v{version} {branch}@{commit}",
+    }
 
 
 def create_app():
@@ -10,6 +43,7 @@ def create_app():
     app.secret_key = os.environ.get("BEEKEEPER_SECRET", "dev-secret-change-me")
     app.config["BEEKEEPER_HOME"] = BEEKEEPER_HOME
     app.config["PROJECTS_DIR"] = os.path.join(BEEKEEPER_HOME, "projects")
+    app.config["DEPLOY_VERSION"] = get_deploy_version()
 
     os.makedirs(app.config["PROJECTS_DIR"], exist_ok=True)
 
@@ -44,6 +78,10 @@ def create_app():
     # Register middleware
     from middleware.auth_middleware import register_middleware
     register_middleware(app)
+
+    @app.context_processor
+    def inject_deploy_version():
+        return {"deploy_version": app.config["DEPLOY_VERSION"]}
 
     # Periodic cleanup of expired sessions
     @app.before_request

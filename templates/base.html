@@ -45,6 +45,7 @@
             {% block content %}{% endblock %}
         </main>
     </div>
+    <div class="deploy-version" title="Deployed version">{{ deploy_version.label }}</div>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
     <script>
     (function() {

@@ -169,6 +169,22 @@ body {
     overflow-y: auto;
 }
 
+.deploy-version {
+    position: fixed;
+    right: 10px;
+    bottom: 8px;
+    z-index: 1000;
+    padding: 3px 7px;
+    background: rgba(27, 27, 27, 0.88);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.2;
+    pointer-events: none;
+}
+
 /* Page header */
 .page-header {
     display: flex;
