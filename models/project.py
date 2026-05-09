@@ -25,6 +25,7 @@ class Project:
     env_vars: dict = field(default_factory=dict)
     pinned: bool = False
     last_run_at: float = 0.0
+    created_at: float = 0.0
     tb_logs_max_runs: int = 10  # Keep only N most recent TensorBoard run directories (0 = unlimited)
     run_history_max_runs: int = 10  # Keep only N most recent run records in database (0 = unlimited)
     parallel_runs_enabled: bool = False

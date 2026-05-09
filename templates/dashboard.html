@@ -31,7 +31,8 @@
         <div class="project-row"
              data-name="{{ p.name }}"
              data-pinned="{{ 'true' if p.get('pinned') else 'false' }}"
-             data-last-run="{{ p.get('last_run_at', 0) }}">
+             data-last-run="{{ p.get('last_run_at', 0) }}"
+             data-created-at="{{ p.get('created_at', 0) }}">
             <a href="/projects/{{ p.name }}" class="project-item">
                 <span class="project-name">{{ p.name }}</span>
                 <span class="project-meta">

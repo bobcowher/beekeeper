@@ -54,9 +54,9 @@
             if (currentSort === "alpha") {
                 return a.dataset.name.localeCompare(b.dataset.name);
             }
-            // recent: higher timestamp first; never-run (0) sinks to bottom
-            const ta = parseFloat(a.dataset.lastRun) || 0;
-            const tb = parseFloat(b.dataset.lastRun) || 0;
+            // recent: use last_run_at, fall back to created_at for never-run projects
+            const ta = parseFloat(a.dataset.lastRun) || parseFloat(a.dataset.createdAt) || 0;
+            const tb = parseFloat(b.dataset.lastRun) || parseFloat(b.dataset.createdAt) || 0;
             if (ta === 0 && tb === 0) return a.dataset.name.localeCompare(b.dataset.name);
             return tb - ta;
         });

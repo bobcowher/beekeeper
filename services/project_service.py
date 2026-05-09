@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import threading
 import logging
+import time
 
 from models.project import Project
 from services.python_versions import find_python, _find_conda_bin
@@ -136,6 +137,7 @@ def create_project(projects_dir, data):
         data_dir_local=data.get("data_dir_local", "data"),
         data_dir_remote=data.get("data_dir_remote", ""),
         output_paths=data.get("output_paths", []),
+        created_at=time.time(),
     )
     project.save(projects_dir)
 

@@ -352,6 +352,70 @@ def delete_project_api(name):
     return api_response(data={"deleted": name})
 
 
+@api_v1_bp.route("/projects/<name>", methods=["PATCH"])
+@api_key_required
+def update_project_api(name):
+    """
+    Update editable project settings. Only the fields you include are changed.
+    Training must be stopped before calling this.
+
+    Editable fields: branch, train_file, tensorboard_log_dir, requirements_file,
+    setup_script, env_vars (dict), tb_logs_max_runs (int), run_history_max_runs (int).
+    """
+    project = load_project(name)
+    data = request.get_json() or {}
+
+    status = get_training_status(name)
+    if status["status"] == "running":
+        return api_response(
+            error_code="TRAINING_RUNNING",
+            error_message="Cannot update project while training is running — stop training first",
+            status_code=409
+        )
+
+    if "branch" in data:
+        project.branch = data["branch"].strip() or project.branch
+    if "train_file" in data:
+        project.train_file = data["train_file"].strip() or project.train_file
+    if "tensorboard_log_dir" in data:
+        project.tensorboard_log_dir = data["tensorboard_log_dir"].strip() or project.tensorboard_log_dir
+    if "requirements_file" in data:
+        project.requirements_file = data["requirements_file"].strip() or project.requirements_file
+    if "setup_script" in data:
+        project.setup_script = data["setup_script"].strip()
+    if "env_vars" in data:
+        if not isinstance(data["env_vars"], dict):
+            return api_response(
+                error_code="INVALID_ENV_VARS",
+                error_message="env_vars must be a JSON object",
+                status_code=400
+            )
+        project.env_vars = data["env_vars"]
+    if "tb_logs_max_runs" in data:
+        try:
+            project.tb_logs_max_runs = max(1, int(data["tb_logs_max_runs"]))
+        except (ValueError, TypeError):
+            return api_response(
+                error_code="INVALID_TB_LOGS_MAX_RUNS",
+                error_message="tb_logs_max_runs must be an integer",
+                status_code=400
+            )
+    if "run_history_max_runs" in data:
+        try:
+            project.run_history_max_runs = max(1, int(data["run_history_max_runs"]))
+        except (ValueError, TypeError):
+            return api_response(
+                error_code="INVALID_RUN_HISTORY_MAX_RUNS",
+                error_message="run_history_max_runs must be an integer",
+                status_code=400
+            )
+
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    project.save(projects_dir)
+
+    return api_response(data={"project": project.to_dict()})
+
+
 # ---------------------------------------------------------------------------
 # Training
 # ---------------------------------------------------------------------------

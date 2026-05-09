@@ -61,6 +61,13 @@ def _post(path: str, body: dict | None = None, timeout: int = 30) -> dict:
     return r.json()
 
 
+def _patch(path: str, body: dict | None = None) -> dict:
+    url = f"{BEEKEEPER_HOST}/api/v1{path}"
+    r = requests.patch(url, json=body or {}, headers=_headers(), timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
 def _delete(path: str) -> dict:
     url = f"{BEEKEEPER_HOST}/api/v1{path}"
     r = requests.delete(url, headers=_headers(), timeout=30)
@@ -142,6 +149,44 @@ def create_project(
         "output_paths": output_paths or [],
     }
     return _post("/projects", body)
+
+
+@mcp.tool()
+def update_project(
+    name: str,
+    branch: str | None = None,
+    train_file: str | None = None,
+    tensorboard_log_dir: str | None = None,
+    requirements_file: str | None = None,
+    setup_script: str | None = None,
+    env_vars: dict | None = None,
+    tb_logs_max_runs: int | None = None,
+    run_history_max_runs: int | None = None,
+) -> dict:
+    """
+    Update editable settings for an existing project. Only the fields you provide
+    are changed — omitted fields are left as-is. Training must be stopped first.
+
+    env_vars replaces the entire env_vars dict; pass the full desired set of variables.
+    """
+    body = {}
+    if branch is not None:
+        body["branch"] = branch
+    if train_file is not None:
+        body["train_file"] = train_file
+    if tensorboard_log_dir is not None:
+        body["tensorboard_log_dir"] = tensorboard_log_dir
+    if requirements_file is not None:
+        body["requirements_file"] = requirements_file
+    if setup_script is not None:
+        body["setup_script"] = setup_script
+    if env_vars is not None:
+        body["env_vars"] = env_vars
+    if tb_logs_max_runs is not None:
+        body["tb_logs_max_runs"] = tb_logs_max_runs
+    if run_history_max_runs is not None:
+        body["run_history_max_runs"] = run_history_max_runs
+    return _patch(f"/projects/{name}", body)
 
 
 @mcp.tool()
