@@ -35,7 +35,7 @@ from fastmcp import FastMCP
 BEEKEEPER_HOST = os.environ.get("BEEKEEPER_HOST", "http://localhost:5000").rstrip("/")
 BEEKEEPER_API_KEY = os.environ.get("BEEKEEPER_API_KEY", "")
 
-MCP_VERSION = "0.1.2"
+MCP_VERSION = "0.1.3"
 
 mcp = FastMCP("Beekeeper")
 
@@ -114,14 +114,14 @@ def list_projects() -> dict:
 
 
 @mcp.tool()
-def get_project(name: str) -> dict:
+def get_project(project_name: str) -> dict:
     """Get detailed info for a single project including config, status, and run history."""
-    return _get(f"/projects/{name}")
+    return _get(f"/projects/{project_name}")
 
 
 @mcp.tool()
 def create_project(
-    name: str,
+    project_name: str,
     git_url: str,
     branch: str = "main",
     python_version: str = "3.12",
@@ -132,7 +132,7 @@ def create_project(
     """
     Create a new project. Setup (clone, env creation, pip install) runs automatically
     in the background. Poll get_project until setup_status == 'ready', or call
-    wait_for_setup to block until done.
+    retry_setup to block until done.
 
     output_paths: workspace-relative directories the training script writes to that
     should survive workspace cleanup (e.g. ["saved_models", "exports"]).
@@ -140,7 +140,7 @@ def create_project(
     Defaults to [] (env vars still point at persistent storage; only symlinks differ).
     """
     body: dict = {
-        "name": name,
+        "name": project_name,
         "git_url": git_url,
         "branch": branch,
         "python_version": python_version,
@@ -153,7 +153,7 @@ def create_project(
 
 @mcp.tool()
 def update_project(
-    name: str,
+    project_name: str,
     branch: str | None = None,
     train_file: str | None = None,
     tensorboard_log_dir: str | None = None,
@@ -186,30 +186,30 @@ def update_project(
         body["tb_logs_max_runs"] = tb_logs_max_runs
     if run_history_max_runs is not None:
         body["run_history_max_runs"] = run_history_max_runs
-    return _patch(f"/projects/{name}", body)
+    return _patch(f"/projects/{project_name}", body)
 
 
 @mcp.tool()
-def delete_project(name: str) -> dict:
+def delete_project(project_name: str) -> dict:
     """Delete a project and all its data (workspace, venv, logs). Irreversible."""
-    return _delete(f"/projects/{name}")
+    return _delete(f"/projects/{project_name}")
 
 
 @mcp.tool()
-def retry_setup(name: str, wait: bool = True, timeout_seconds: int = 600) -> dict:
+def retry_setup(project_name: str, wait: bool = True, timeout_seconds: int = 600) -> dict:
     """
     Retry a failed project setup. If wait=True (default), polls until setup completes
     or fails, returning the final status. If wait=False, returns immediately after
     triggering the retry.
     """
-    result = _post(f"/projects/{name}/setup/retry")
+    result = _post(f"/projects/{project_name}/setup/retry")
     if not wait:
         return result
 
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
         time.sleep(5)
-        info = _get(f"/projects/{name}")
+        info = _get(f"/projects/{project_name}")
         status = info.get("data", {}).get("project", {}).get("setup_status", "unknown")
         if status == "ready":
             return {"success": True, "setup_status": "ready"}
@@ -221,13 +221,13 @@ def retry_setup(name: str, wait: bool = True, timeout_seconds: int = 600) -> dic
 
 
 @mcp.tool()
-def get_project_instructions(name: str) -> str:
+def get_project_instructions(project_name: str) -> str:
     """
     Fetch project-specific agent instructions as markdown. Contains full context
     about the project's purpose, metrics, and recommended workflows. Read this
     before analyzing or managing a project you haven't worked with before.
     """
-    url = f"{BEEKEEPER_HOST}/api/v1/projects/{name}/agent/instructions"
+    url = f"{BEEKEEPER_HOST}/api/v1/projects/{project_name}/agent/instructions"
     r = requests.get(url, headers=_headers(), timeout=30)
     r.raise_for_status()
     return r.text
@@ -238,7 +238,7 @@ def get_project_instructions(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def start_training(name: str, branch: str | None = None) -> dict:
+def start_training(project_name: str, branch: str | None = None) -> dict:
     """
     Start training for a project. branch overrides the project's configured default.
     The pre-launch sequence (git sync, pip install) runs first — 30-120s.
@@ -246,7 +246,7 @@ def start_training(name: str, branch: str | None = None) -> dict:
     """
     body = {"branch": branch} if branch else {}
     try:
-        return _post(f"/projects/{name}/training/start", body, timeout=180)
+        return _post(f"/projects/{project_name}/training/start", body, timeout=180)
     except requests.exceptions.ReadTimeout:
         return {
             "success": True,
@@ -255,23 +255,23 @@ def start_training(name: str, branch: str | None = None) -> dict:
 
 
 @mcp.tool()
-def stop_training(name: str, run_id: int | None = None) -> dict:
+def stop_training(project_name: str, run_id: int | None = None) -> dict:
     """
     Stop a training run. Provide run_id when multiple runs are active on the same project.
     If only one run is active and run_id is omitted, it stops automatically.
     """
     body = {"run_id": run_id} if run_id is not None else {}
-    return _post(f"/projects/{name}/training/stop", body)
+    return _post(f"/projects/{project_name}/training/stop", body)
 
 
 @mcp.tool()
-def training_status(name: str) -> dict:
+def training_status(project_name: str) -> dict:
     """
     Get all active training runs for a project.
     Returns a list of runs, each with run_id, branch, status, elapsed seconds, pid, tb_port.
     Use run_id values when calling stop_training or get_logs for a specific run.
     """
-    return _get(f"/projects/{name}/training/status")
+    return _get(f"/projects/{project_name}/training/status")
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +279,7 @@ def training_status(name: str) -> dict:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def get_logs(name: str, run_id: int | None = None, tail: int = 100) -> str:
+def get_logs(project_name: str, run_id: int | None = None, tail: int = 100) -> str:
     """
     Fetch the last N lines of training logs for a specific run.
     Provide run_id when multiple runs are active — required to avoid ambiguity.
@@ -288,12 +288,12 @@ def get_logs(name: str, run_id: int | None = None, tail: int = 100) -> str:
     params = f"tail={tail}"
     if run_id is not None:
         params += f"&run_id={run_id}"
-    result = _get(f"/projects/{name}/logs?{params}")
+    result = _get(f"/projects/{project_name}/logs?{params}")
     return result.get("data", {}).get("content", "")
 
 
 @mcp.tool()
-def analyze_run(name: str, run_id: int | None = None) -> dict:
+def analyze_run(project_name: str, run_id: int | None = None) -> dict:
     """
     Synthesized analysis of a training run. Returns TensorBoard metrics (trends,
     peaks, convergence) plus a raw log tail. Interpret the log content yourself —
@@ -304,24 +304,24 @@ def analyze_run(name: str, run_id: int | None = None) -> dict:
     for each active run keyed by run_id.
     """
     if run_id is not None:
-        tb = _get(f"/projects/{name}/tensorboard/latest?run_id={run_id}")
-        logs = _get(f"/projects/{name}/runs/{run_id}/logs?tail_lines=300")
+        tb = _get(f"/projects/{project_name}/tensorboard/latest?run_id={run_id}")
+        logs = _get(f"/projects/{project_name}/runs/{run_id}/logs?tail_lines=300")
         return {"run_id": run_id, "tensorboard": tb, "logs": logs}
 
-    status = _get(f"/projects/{name}/training/status")
+    status = _get(f"/projects/{project_name}/training/status")
     runs = status.get("data", status).get("runs", [])
     active_ids = [r["run_id"] for r in runs if r.get("status") in ("running", "starting")]
 
     if len(active_ids) > 1:
         results = {}
         for rid in active_ids:
-            tb = _get(f"/projects/{name}/tensorboard/latest?run_id={rid}")
-            logs = _get(f"/projects/{name}/runs/{rid}/logs?tail_lines=300")
+            tb = _get(f"/projects/{project_name}/tensorboard/latest?run_id={rid}")
+            logs = _get(f"/projects/{project_name}/runs/{rid}/logs?tail_lines=300")
             results[str(rid)] = {"run_id": rid, "tensorboard": tb, "logs": logs}
         return {"parallel_runs": results}
 
-    tb = _get(f"/projects/{name}/tensorboard/latest")
-    logs = _get(f"/projects/{name}/logs?tail=300")
+    tb = _get(f"/projects/{project_name}/tensorboard/latest")
+    logs = _get(f"/projects/{project_name}/logs?tail=300")
     return {"tensorboard": tb, "logs": logs}
 
 
@@ -330,18 +330,18 @@ def analyze_run(name: str, run_id: int | None = None) -> dict:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def list_branches(name: str) -> dict:
+def list_branches(project_name: str) -> dict:
     """List all remote branches for a project and show which is currently active."""
-    return _get(f"/projects/{name}/branches")
+    return _get(f"/projects/{project_name}/branches")
 
 
 @mcp.tool()
-def switch_branch(name: str, branch: str) -> dict:
+def switch_branch(project_name: str, branch: str) -> dict:
     """
     Switch a project to a different branch. Training must be stopped first.
     The workspace is updated in-place (git fetch + reset).
     """
-    return _post(f"/projects/{name}/branch", {"branch": branch})
+    return _post(f"/projects/{project_name}/branch", {"branch": branch})
 
 
 # ---------------------------------------------------------------------------
