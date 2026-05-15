@@ -28,20 +28,26 @@
     <h3 style="margin-top: 1rem; margin-bottom: 0.5rem;">1. Install the MCP server</h3>
     <pre class="api-examples">pip install beekeeper-mcp</pre>
 
-    <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">2. Register the MCP server</h3>
-    <p style="margin-bottom: 0.5rem;">
-        <strong>Claude Code</strong> — run this once in your terminal:
-    </p>
-    <pre class="api-examples">claude mcp add beekeeper -s user -e BEEKEEPER_HOST=http://{{ request.host }} -- beekeeper-mcp</pre>
-    <p style="margin-top: 0.5rem; margin-bottom: 0.75rem; font-size: 0.9rem; color: var(--text-secondary);">
-        If auth is enabled, also add <code>-e BEEKEEPER_API_KEY=your-api-key</code> before <code>--</code>.
-        Generate an API key from the <a href="{{ url_for('admin.index') }}">Admin Panel</a>.<br>
-        If <code>beekeeper-mcp</code> isn't found (common with conda), use the full path: run <code>which beekeeper-mcp</code> and use that instead.
-    </p>
-    <p style="margin-bottom: 0.5rem;">
-        <strong>Claude Desktop</strong> — add to <code>~/.claude/claude_desktop_config.json</code>:
-    </p>
-    <pre class="api-examples">{
+    <h3 style="margin-top: 1.5rem; margin-bottom: 0.75rem;">2. Register the MCP server</h3>
+
+    <div id="mcp-register">
+        <div class="tab-bar">
+            <button class="tab-btn active" onclick="switchMcpTab(this, 'claude')">Claude</button>
+            <button class="tab-btn" onclick="switchMcpTab(this, 'codex')">Codex</button>
+            <button class="tab-btn" onclick="switchMcpTab(this, 'gemini')">Gemini</button>
+            <button class="tab-btn" onclick="switchMcpTab(this, 'qwen')">Qwen</button>
+        </div>
+
+        <div id="mcp-tab-claude" class="tab-panel">
+            <p style="margin-bottom: 0.5rem;"><strong>Claude Code</strong> — run this once in your terminal:</p>
+            <pre class="api-examples">claude mcp add beekeeper -s user -e BEEKEEPER_HOST=http://{{ request.host }} -- beekeeper-mcp</pre>
+            <p style="margin-top: 0.4rem; margin-bottom: 0.75rem; font-size: 0.875rem; color: var(--text-secondary);">
+                If auth is enabled, add <code>-e BEEKEEPER_API_KEY=your-api-key</code> before <code>--</code>.
+                API keys are generated in the <a href="{{ url_for('admin.index') }}">Admin Panel</a>.<br>
+                If <code>beekeeper-mcp</code> isn't on your PATH (common with conda), run <code>which beekeeper-mcp</code> and use the full path instead.
+            </p>
+            <p style="margin-bottom: 0.5rem;"><strong>Claude Desktop</strong> — add to <code>~/.claude/claude_desktop_config.json</code>:</p>
+            <pre class="api-examples">{
   "mcpServers": {
     "beekeeper": {
       "command": "beekeeper-mcp",
@@ -52,9 +58,64 @@
     }
   }
 }</pre>
-    <p style="margin-top: 0.5rem; font-size: 0.9rem; color: var(--text-secondary);">
-        Omit <code>BEEKEEPER_API_KEY</code> if authentication is disabled.
-    </p>
+            <p style="margin-top: 0.4rem; font-size: 0.875rem; color: var(--text-secondary);">
+                Omit <code>BEEKEEPER_API_KEY</code> if authentication is disabled.
+            </p>
+        </div>
+
+        <div id="mcp-tab-codex" class="tab-panel" style="display:none">
+            <p style="margin-bottom: 0.5rem;">Add to <code>~/.codex/config.toml</code>:</p>
+            <pre class="api-examples">[mcp_servers.beekeeper]
+command = "beekeeper-mcp"
+
+[mcp_servers.beekeeper.env]
+BEEKEEPER_HOST = "http://{{ request.host }}"
+BEEKEEPER_API_KEY = "your-api-key"</pre>
+            <p style="margin-top: 0.4rem; font-size: 0.875rem; color: var(--text-secondary);">
+                Omit <code>BEEKEEPER_API_KEY</code> if authentication is disabled.
+                If <code>beekeeper-mcp</code> isn't on your PATH, use the full path as the <code>command</code> value.
+            </p>
+        </div>
+
+        <div id="mcp-tab-gemini" class="tab-panel" style="display:none">
+            <p style="margin-bottom: 0.5rem;">Add to <code>~/.gemini/settings.json</code>:</p>
+            <pre class="api-examples">{
+  "mcpServers": {
+    "beekeeper": {
+      "command": "beekeeper-mcp",
+      "env": {
+        "BEEKEEPER_HOST": "http://{{ request.host }}",
+        "BEEKEEPER_API_KEY": "your-api-key"
+      }
+    }
+  }
+}</pre>
+            <p style="margin-top: 0.4rem; font-size: 0.875rem; color: var(--text-secondary);">
+                Restart Gemini CLI after saving.
+                Omit <code>BEEKEEPER_API_KEY</code> if authentication is disabled.
+                If <code>beekeeper-mcp</code> isn't on your PATH, use the full path as the <code>command</code> value.
+            </p>
+        </div>
+
+        <div id="mcp-tab-qwen" class="tab-panel" style="display:none">
+            <p style="margin-bottom: 0.5rem;">Add to <code>~/.qwen/settings.json</code>:</p>
+            <pre class="api-examples">{
+  "mcpServers": {
+    "beekeeper": {
+      "command": "beekeeper-mcp",
+      "env": {
+        "BEEKEEPER_HOST": "http://{{ request.host }}",
+        "BEEKEEPER_API_KEY": "your-api-key"
+      }
+    }
+  }
+}</pre>
+            <p style="margin-top: 0.4rem; font-size: 0.875rem; color: var(--text-secondary);">
+                Omit <code>BEEKEEPER_API_KEY</code> if authentication is disabled.
+                If <code>beekeeper-mcp</code> isn't on your PATH, use the full path as the <code>command</code> value.
+            </p>
+        </div>
+    </div>
 
     <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">3. Paste this into your first message</h3>
     <p style="margin-bottom: 0.5rem;">Copy and paste this into Claude to orient it at the start of a session:</p>
@@ -220,4 +281,16 @@ start_training("my-project")</pre>
 retry_setup("my-project")   # blocks until setup_status == ready
 start_training("my-project")</pre>
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function switchMcpTab(btn, name) {
+    var wrap = document.getElementById('mcp-register');
+    wrap.querySelectorAll('.tab-panel').forEach(function(el) { el.style.display = 'none'; });
+    wrap.querySelectorAll('.tab-btn').forEach(function(el) { el.classList.remove('active'); });
+    document.getElementById('mcp-tab-' + name).style.display = '';
+    btn.classList.add('active');
+}
+</script>
 {% endblock %}
