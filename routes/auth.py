@@ -37,19 +37,27 @@ def login():
         return redirect(url_for(_LOGIN_ROUTE))
 
     # Check if account is locked
-    if user.is_locked():
-        minutes_left = int((user.locked_until - datetime.now()).total_seconds() / 60) + 1
+    locked_until = user.locked_until
+    if user.is_locked() and locked_until:
+        minutes_left = int((locked_until - datetime.now()).total_seconds() / 60) + 1
         logger.warning(f"Login attempt from {client_ip} for locked account: {email}")
         flash(f'Account locked due to too many failed login attempts. Try again in {minutes_left} minute(s).', 'error')
         return redirect(url_for(_LOGIN_ROUTE))
 
     password_hash = db.get_password_hash(user.id)
+    if not password_hash:
+        logger.error("No password hash for user %s — treating as invalid credentials", email)
+        flash('Invalid email or password', 'error')
+        return redirect(url_for(_LOGIN_ROUTE))
     if not verify_password(password, password_hash):
         # Record failed login attempt
         db.record_failed_login(user.id)
 
         # Re-fetch user to get updated failed attempts count
         user = db.get_user_by_email(email)
+        if not user:
+            flash('Invalid email or password', 'error')
+            return redirect(url_for(_LOGIN_ROUTE))
         attempts_left = 5 - user.failed_login_attempts
 
         logger.warning(
