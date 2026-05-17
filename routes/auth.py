@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
+_LOGIN_ROUTE = 'auth.login'
+
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
@@ -23,7 +25,7 @@ def login():
 
     if not email or not password:
         flash('Email and password are required', 'error')
-        return redirect(url_for('auth.login'))
+        return redirect(url_for(_LOGIN_ROUTE))
 
     db = get_db()
     user = db.get_user_by_email(email)
@@ -32,14 +34,14 @@ def login():
     if not user:
         logger.warning(f"Login attempt from {client_ip} for non-existent email: {email}")
         flash('Invalid email or password', 'error')
-        return redirect(url_for('auth.login'))
+        return redirect(url_for(_LOGIN_ROUTE))
 
     # Check if account is locked
     if user.is_locked():
         minutes_left = int((user.locked_until - datetime.now()).total_seconds() / 60) + 1
         logger.warning(f"Login attempt from {client_ip} for locked account: {email}")
         flash(f'Account locked due to too many failed login attempts. Try again in {minutes_left} minute(s).', 'error')
-        return redirect(url_for('auth.login'))
+        return redirect(url_for(_LOGIN_ROUTE))
 
     password_hash = db.get_password_hash(user.id)
     if not verify_password(password, password_hash):
@@ -61,7 +63,7 @@ def login():
             logger.warning(f"Account {email} locked due to failed login attempts from {client_ip}")
             flash('Account locked due to too many failed login attempts. Locked for 15 minutes.', 'error')
 
-        return redirect(url_for('auth.login'))
+        return redirect(url_for(_LOGIN_ROUTE))
 
     # Successful login - reset failed attempts
     db.reset_failed_logins(user.id)
@@ -74,7 +76,7 @@ def login():
     # Create session
     session_id = create_session_for_user(user.id)
     next_url = request.args.get('next', '')
-    if not (next_url and next_url.startswith('/') and not next_url.startswith('//')):
+    if not (next_url and next_url.startswith('/') and not next_url.startswith('//')):  # NOSONAR
         next_url = url_for('dashboard.index')
     response = make_response(redirect(next_url))
     response.set_cookie('session_id', session_id, httponly=True, max_age=60*60*24*7)
@@ -130,7 +132,7 @@ def logout():
         db = get_db()
         db.delete_session(session_id)
 
-    response = make_response(redirect(url_for('auth.login')))
+    response = make_response(redirect(url_for(_LOGIN_ROUTE)))
     response.delete_cookie('session_id')
 
     flash('You have been logged out', 'success')

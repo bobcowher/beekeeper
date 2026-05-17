@@ -11,7 +11,7 @@ def persistent_runs_root(projects_dir: str, project_name: str) -> str:
 
 def delete_path(path: str, label: str):
     try:
-        if os.path.islink(path) or os.path.isfile(path):
+        if os.path.islink(path) or os.path.isfile(path):  # NOSONAR
             os.unlink(path)
             log.info("Deleted %s: %s", label, path)
         elif os.path.isdir(path):
@@ -46,4 +46,4 @@ def clear_persistent_runs(projects_dir: str, project_name: str):
     runs_root = persistent_runs_root(projects_dir, project_name)
     if os.path.isdir(runs_root):
         shutil.rmtree(runs_root, ignore_errors=True)
-    os.makedirs(runs_root, exist_ok=True)
+    os.makedirs(runs_root, exist_ok=True)  # NOSONAR

@@ -7,6 +7,9 @@ from services.db_service import get_db
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
+_PWD_MIN_LEN_KEY = 'password.min_length'
+_INDEX_ROUTE = 'admin.index'
+
 
 @admin_bp.route('/', methods=['GET'])
 @admin_required
@@ -18,7 +21,7 @@ def index():
     config = {
         'auth_enabled': is_auth_enabled(),
         'session_lifetime_days': get_config_int('session.lifetime_days', 7),
-        'password_min_length': get_config_int('password.min_length', 8),
+        'password_min_length': get_config_int(_PWD_MIN_LEN_KEY, 8),
         'api_rate_limit': get_config_int('api.rate_limit_per_minute', 100),
     }
 
@@ -43,16 +46,16 @@ def update_settings():
                 set_config('session.lifetime_days', str(days))
         except ValueError:
             flash('Invalid session lifetime', 'error')
-            return redirect(url_for('admin.index'))
+            return redirect(url_for(_INDEX_ROUTE))
 
     if 'password_min_length' in request.form:
         try:
             min_len = int(request.form['password_min_length'])
             if min_len >= 6:
-                set_config('password.min_length', str(min_len))
+                set_config(_PWD_MIN_LEN_KEY, str(min_len))
         except ValueError:
             flash('Invalid password minimum length', 'error')
-            return redirect(url_for('admin.index'))
+            return redirect(url_for(_INDEX_ROUTE))
 
     if 'api_rate_limit' in request.form:
         try:
@@ -61,14 +64,14 @@ def update_settings():
                 set_config('api.rate_limit_per_minute', str(rate_limit))
             else:
                 flash('API rate limit must be greater than 0', 'error')
-                return redirect(url_for('admin.index'))
+                return redirect(url_for(_INDEX_ROUTE))
         except ValueError:
             flash('Invalid API rate limit', 'error')
-            return redirect(url_for('admin.index'))
+            return redirect(url_for(_INDEX_ROUTE))
 
     save_config()
     flash('Settings updated successfully', 'success')
-    return redirect(url_for('admin.index'))
+    return redirect(url_for(_INDEX_ROUTE))
 
 
 @admin_bp.route('/users/<int:user_id>/toggle-admin', methods=['POST'])
@@ -86,12 +89,12 @@ def toggle_admin(user_id):
         admin_count = db.count_admins()
         if admin_count <= 1:
             flash('Cannot remove the last administrator', 'error')
-            return redirect(url_for('admin.index'))
+            return redirect(url_for(_INDEX_ROUTE))
 
     db.update_user(user_id, is_admin=not user.is_admin)
     action = 'removed admin privileges from' if user.is_admin else 'granted admin privileges to'
     flash(f'Successfully {action} {user.email}', 'success')
-    return redirect(url_for('admin.index'))
+    return redirect(url_for(_INDEX_ROUTE))
 
 
 @admin_bp.route('/users/<int:user_id>/delete', methods=['POST'])
@@ -108,18 +111,18 @@ def delete_user(user_id):
     # Prevent deleting self
     if user.id == current_user.id:
         flash('Cannot delete your own account', 'error')
-        return redirect(url_for('admin.index'))
+        return redirect(url_for(_INDEX_ROUTE))
 
     # Prevent deleting last admin
     if user.is_admin:
         admin_count = db.count_admins()
         if admin_count <= 1:
             flash('Cannot delete the last administrator', 'error')
-            return redirect(url_for('admin.index'))
+            return redirect(url_for(_INDEX_ROUTE))
 
     db.delete_user(user_id)
     flash(f'Successfully deleted user {user.email}', 'success')
-    return redirect(url_for('admin.index'))
+    return redirect(url_for(_INDEX_ROUTE))
 
 
 @admin_bp.route('/api-keys', methods=['POST'])
@@ -138,7 +141,7 @@ def create_api_key():
     # Show key once (can't retrieve later)
     flash(f'API Key created: {key}', 'success')
     flash('Save this key now - you won\'t be able to see it again!', 'warning')
-    return redirect(url_for('admin.index'))
+    return redirect(url_for(_INDEX_ROUTE))
 
 
 @admin_bp.route('/api-keys/<key_hash>', methods=['POST'])
@@ -149,7 +152,7 @@ def delete_api_key(key_hash):
     db.delete_api_key(key_hash)
 
     flash('API key deleted successfully', 'success')
-    return redirect(url_for('admin.index'))
+    return redirect(url_for(_INDEX_ROUTE))
 
 
 @admin_bp.route('/users/create', methods=['POST'])
@@ -165,22 +168,22 @@ def create_user():
 
     if not email or not name or not password:
         flash('All fields are required', 'error')
-        return redirect(url_for('admin.index'))
+        return redirect(url_for(_INDEX_ROUTE))
 
-    min_length = get_config_int('password.min_length', 8)
+    min_length = get_config_int(_PWD_MIN_LEN_KEY, 8)
     if len(password) < min_length:
         flash(f'Password must be at least {min_length} characters', 'error')
-        return redirect(url_for('admin.index'))
+        return redirect(url_for(_INDEX_ROUTE))
 
     db = get_db()
 
     # Check if user already exists
     if db.get_user_by_email(email):
         flash(f'User with email {email} already exists', 'error')
-        return redirect(url_for('admin.index'))
+        return redirect(url_for(_INDEX_ROUTE))
 
     password_hash = hash_password(password)
     db.create_user(email, name, password_hash, is_admin)
 
     flash(f'Successfully created user {email}', 'success')
-    return redirect(url_for('admin.index'))
+    return redirect(url_for(_INDEX_ROUTE))

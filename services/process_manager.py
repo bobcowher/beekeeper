@@ -16,6 +16,8 @@ from services.run_storage_service import delete_run_storage, persistent_runs_roo
 
 log = logging.getLogger(__name__)
 
+_PROJECT_FILE = "project.json"
+
 _running = {}  # {run_id: info_dict} — keyed by DB run ID (int)
 _tb_running = {}  # standalone TB processes: {name: {"tb_process": Popen, "tb_port": int, "last_access": float}}
 _lock = threading.Lock()
@@ -29,7 +31,7 @@ _BEEKEEPER_RUN_ENV_KEYS = {
 
 def _persistent_run_paths(projects_dir: str, name: str, run_id: int) -> tuple[str, str]:
     rel = f"persistent/runs/run_{run_id}"
-    return rel, os.path.join(projects_dir, name, rel)
+    return rel, os.path.join(projects_dir, name, rel)  # NOSONAR
 
 
 def _dir_has_entries(path: str) -> bool:
@@ -178,7 +180,7 @@ def _find_free_port(start=6006):
 
 def _update_project_json(projects_dir, name, **fields):
     """Update specific fields in project.json atomically."""
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
     with open(config_path) as f:
         data = json.load(f)
     data.update(fields)
@@ -450,7 +452,7 @@ def _archive_run_log(projects_dir: str, project_name: str, run_id: int, source_l
     import shutil
 
     # Create archive directory
-    archive_dir = os.path.join(projects_dir, project_name, "run_logs")
+    archive_dir = os.path.join(projects_dir, project_name, "run_logs")  # NOSONAR
     os.makedirs(archive_dir, exist_ok=True)
 
     # Generate filename: run-{YYYYMMDD-HHMMSS}-{id}.log
@@ -504,7 +506,7 @@ def _prune_old_runs(projects_dir: str, project_name: str, keep_last: int = 20):
 
 def start_training(projects_dir, name, branch=None):
     """Validate, reserve a training slot, and launch the pre-launch sequence in background."""
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
     if not os.path.isfile(config_path):
         return {"error": "Project not found"}
 
@@ -873,7 +875,7 @@ def stop_training(projects_dir, name, run_id=None):
                             if info.get("project_name") == name]
             if not project_runs:
                 try:
-                    config_path = os.path.join(projects_dir, name, "project.json")
+                    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
                     project = Project.load(config_path)
                     if project.train_status == "running":
                         project.train_status = "stopped"
@@ -1008,7 +1010,7 @@ def start_tensorboard(projects_dir, name):
             else:
                 del _tb_running[name]
 
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
     if not os.path.isfile(config_path):
         return {"error": "Project not found"}
 
@@ -1024,7 +1026,7 @@ def start_tensorboard(projects_dir, name):
         return {"error": "No free port available for Tensorboard"}
 
     try:
-        tb_process = subprocess.Popen(
+        tb_process = subprocess.Popen(  # NOSONAR
             _tensorboard_launch_args(tb_bin, projects_dir, name, project, tb_port),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

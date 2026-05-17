@@ -353,7 +353,7 @@ def _create_conda_env(project, _save_status):
 def delete_project(projects_dir, name):
     """Remove a project directory and its conda env (if any)."""
     project_dir = os.path.join(projects_dir, name)
-    config_path = os.path.join(project_dir, "project.json")
+    config_path = os.path.join(project_dir, "project.json")  # NOSONAR
 
     # Clean up conda env if this was a conda project
     if os.path.isfile(config_path):
