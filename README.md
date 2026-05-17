@@ -1,72 +1,86 @@
-### Intro
-Beekeeper is a lightweight web app designed to allow you to do AI training on a remote server as part of your home lab. At its core, it's designed to handle:
+# Beekeeper
 
-1. Cloning a repository
-2. Setting up the python environment (based on your requirements.txt)
-3. Remote log streaming
-4. Tensorboard display
-5. File downloads
-6. Optional user authentication and API keys
+Beekeeper is a lightweight web app for managing AI training runs on a remote server. It handles cloning your repo, setting up the Python environment, streaming live logs, displaying TensorBoard, browsing output files, and optionally gating access behind user authentication and API keys.
 
+---
 
-### Setup
-git clone https://github.com/bobcowher/beekeeper.git 
-cd beekeeper 
+## Setup
+
+```bash
+git clone https://github.com/bobcowher/beekeeper.git
+cd beekeeper
 bash setup.sh
+```
 
-*Note - This product has been tested on Ubuntu only, so far. 
+> Tested on Ubuntu. Other Debian-based distros should work; other Linux distributions are untested.
 
+---
 
-### Authentication
+## Authentication
 
-Beekeeper includes **optional authentication** (disabled by default for backward compatibility):
-- Email/password authentication with bcrypt hashing
+Authentication is **optional and disabled by default**.
+
+When enabled:
+- Email/password login with bcrypt hashing
 - Admin panel for user management
-- API key system for programmatic access
-- Session-based web authentication
+- API keys for agent/programmatic access
+- Session-based web auth with lockout after 5 failed attempts
 
-See [AUTH_README.md](AUTH_README.md) for complete authentication documentation.
+See [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) for setup and configuration.
 
-### Current Limitations
+---
 
-1. **GitHub auth** - Beekeeper has no method of authenticating with your remote repo. It only works on repos you've made public.
-2. **HTTPS** - For HTTPS, you'll need to put Beekeeper behind a reverse proxy (nginx, Caddy, etc).
-3. **Multi-server support** - This is a single-server product. Multi-server coordination is not currently supported.
+## Known Limitations
 
-For more information, visit the site below - 
+- **Private repos** — Beekeeper clones over HTTPS with no credential support. Use public repos, or configure SSH agent forwarding on the server.
+- **HTTPS** — Run Beekeeper behind a reverse proxy (nginx, Caddy, etc.) for TLS.
+- **Single server** — One Beekeeper instance manages one server. Multi-server coordination is not supported.
 
-https://www.teaandrobots.com/software/beekeeper/
+---
 
+## Troubleshooting
 
-### 1.0 Release Notes/Initial Software Specification
+### Service won't start or keeps restarting
+```bash
+journalctl -u beekeeper -n 50
+```
+Common causes: port 5000 already in use, missing Python dependency, bad `BEEKEEPER_SECRET`.
 
-Non-functional requirements:
-- Should be written in Python with Flask
-- Should be light weight & performant
-- Code should be simple, with clear structure, wherever possible. 
-- The application will set its home directory to its install/checkout location. We will refer to this as BEEKEEPER_HOME. 
+### Port 5000 already in use
+Find and kill the conflicting process, or edit the `--bind` line in the systemd service file (`/etc/systemd/system/beekeeper.service`) and re-run `sudo systemctl daemon-reload && sudo systemctl restart beekeeper`.
 
-Theme:
-- Designed to be a yellow VSCode spinoff. Simple, clear structure, with minimal logos. 
+### Project setup is stuck or failed
+A red error card appears on the project page. Hit **Retry Setup** — it skips steps that already completed (clone, env creation). Check `setup_error` in `projects/<name>/project.json` for the raw error.
 
-Core Functional Requirements:
-- Users should be able to create Projects in the UI. A project will require 
-    - A project name(no spaces)
-    - A Git url
-    - Default branch (default should be main)
-    - A target Python version(dropdown)
-    - The python file for training (default should be train.py)
-    - The tensorboard log dir (default should be "runs")
-    - Pip requirements file (default should be requirements.txt)
-- Once the project is created, it should create a folder for the project under $BEEKEEPER_HOME/projects/$projectname
-- Code will be checked out to $BEEKEEPER_HOME/projects/$projectname/src
-- A virtual environment should be created for the project to run in. 
-- Clicking on a project in the dashboard should result in going to a page for that project, with a clear back button. 
-- Once a project is created, the user should have the ability to run or stop the project from the project page. 
-- While the project is running, the user should have the option to see logs on the project page. 
-- The user should have the option to see Tensorboard results for a project, in realtime, on the project page. 
-- On the main page, the user should have the option to see the current GPU, CPU, and memory statistics for the host.
+### Training crashes immediately
+Open the log — it's the first place the pre-launch sequence writes failure details. Most common causes: `pip install` failed (missing system dependency, bad requirements.txt), or the training file path is wrong.
 
-Things for later:
-- We'll eventually need to figure out logins and security. For V1, we don't care. 
-- Auth to GitHub. For now, all GitHub projects used will be public. 
+### TensorBoard won't load
+TensorBoard starts automatically on the first training run. If it doesn't appear:
+- Check that `tensorboard` is in your project's `requirements.txt`
+- The TB log dir setting must match what your training script writes to
+- Ports 6006–6099 must be reachable from your browser — check firewall rules
+
+### Locked out of your account
+```bash
+./admin.sh reset-password your@email.com
+```
+
+### MCP agent can't connect to Beekeeper
+- Check `BEEKEEPER_HOST` is set correctly in your MCP config (format: `http://<host>:5000`)
+- If auth is enabled, the agent needs `BEEKEEPER_API_KEY` set — generate one in the admin panel
+- Verify Beekeeper is reachable: `curl http://<host>:5000/api/v1/version`
+
+### Python version not available in the dropdown
+Beekeeper discovers Python versions via conda or the system. Run `conda env list` or `python3 --version` on the server to confirm what's available. The dropdown caches on page load — refresh after installing a new version.
+
+### Git clone times out
+Large repos can exceed the 300s clone timeout. Consider a shallow clone in your repo, or pre-clone the workspace manually to `projects/<name>/workspace/` before hitting Retry Setup.
+
+---
+
+## Further Reading
+
+- [Changelog](CHANGELOG.md)
+- [Authentication](docs/AUTHENTICATION.md)
+- [Site & documentation](https://www.teaandrobots.com/software/beekeeper/)
