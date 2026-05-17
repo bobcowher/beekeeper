@@ -87,6 +87,15 @@ echo ""
 # --- Create projects directory ---
 mkdir -p "$BEEKEEPER_HOME/projects"
 
+# --- Generate secret key ---
+SECRET_FILE="$BEEKEEPER_HOME/.secret_key"
+if [ ! -f "$SECRET_FILE" ]; then
+    python3 -c "import secrets; print(secrets.token_hex(32))" > "$SECRET_FILE"
+    chmod 600 "$SECRET_FILE"
+    echo "--- Generated secret key at $SECRET_FILE ---"
+fi
+BEEKEEPER_SECRET=$(cat "$SECRET_FILE")
+
 # --- Generate systemd service file ---
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 TEMP_SERVICE=$(mktemp)
@@ -107,7 +116,7 @@ ExecStart=$VENV_DIR/bin/gunicorn \\
     "app:create_app()"
 Restart=on-failure
 RestartSec=5
-Environment=BEEKEEPER_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+Environment=BEEKEEPER_SECRET=$BEEKEEPER_SECRET
 Environment=PATH=$VENV_DIR/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=PYTHONPATH=
 Environment=PYTHONHOME=

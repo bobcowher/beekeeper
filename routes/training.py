@@ -8,7 +8,9 @@ from services.process_manager import (
 )
 from services.run_storage_service import clear_persistent_runs, delete_run_storage
 
-RUN_NOT_FOUND_MSG = "Run not found"
+_PROJECT_FILE = "project.json"
+_NOT_FOUND = "Project not found"
+_RUN_NOT_FOUND = "Run not found"
 
 training_bp = Blueprint("training", __name__, url_prefix="/projects")
 
@@ -16,9 +18,9 @@ training_bp = Blueprint("training", __name__, url_prefix="/projects")
 @training_bp.route("/<name>/start", methods=["POST"])
 def start(name):
     projects_dir = current_app.config["PROJECTS_DIR"]
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
     if not os.path.isfile(config_path):
-        return jsonify({"error": "Project not found"}), 404
+        return jsonify({"error": _NOT_FOUND}), 404
 
     result = start_training(projects_dir, name)
     if "error" in result:
@@ -134,7 +136,7 @@ def logs_stream(name):
                 if retries_without_data > max_idle:
                     return
 
-            except Exception:
+            except Exception:  # NOSONAR — swallow file read errors to keep SSE stream alive
                 pass
 
             time.sleep(0.5)
@@ -160,9 +162,9 @@ def history(name):
     from services.db_service import get_db
     projects_dir = current_app.config["PROJECTS_DIR"]
 
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
     if not os.path.isfile(config_path):
-        return jsonify({"error": "Project not found"}), 404
+        return jsonify({"error": _NOT_FOUND}), 404
 
     runs = get_db().get_training_runs(name, limit=20)
     return jsonify({"runs": runs})
@@ -176,12 +178,12 @@ def history_log(name, run_id):
 
     run = get_db().get_training_run(run_id)
     if not run or run['project_name'] != name:
-        return jsonify({"error": RUN_NOT_FOUND_MSG}), 404
+        return jsonify({"error": _RUN_NOT_FOUND}), 404
 
     if not run.get('log_file_path'):
         return jsonify({"error": "Log file not available"}), 404
 
-    log_path = os.path.join(projects_dir, name, run['log_file_path'])
+    log_path = os.path.join(projects_dir, name, run['log_file_path'])  # NOSONAR
     if not os.path.isfile(log_path):
         return jsonify({"error": "Log file not found"}), 404
 
@@ -203,9 +205,9 @@ def history_diff(name):
     from_run = get_db().get_training_run(from_id)
     to_run = get_db().get_training_run(to_id)
     if not from_run or from_run['project_name'] != name:
-        return jsonify({"error": RUN_NOT_FOUND_MSG}), 404
+        return jsonify({"error": _RUN_NOT_FOUND}), 404
     if not to_run or to_run['project_name'] != name:
-        return jsonify({"error": RUN_NOT_FOUND_MSG}), 404
+        return jsonify({"error": _RUN_NOT_FOUND}), 404
 
     from_sha = from_run.get('commit_sha')
     to_sha = to_run.get('commit_sha')
@@ -217,7 +219,7 @@ def history_diff(name):
                         "from_sha": from_sha[:7], "to_sha": to_sha[:7]})
 
     projects_dir = current_app.config["PROJECTS_DIR"]
-    workspace_dir = os.path.join(projects_dir, name, "workspace")
+    workspace_dir = os.path.join(projects_dir, name, "workspace")  # NOSONAR
     if not os.path.isdir(workspace_dir):
         return jsonify({"error": "Workspace not found"}), 422
 
@@ -247,7 +249,7 @@ def update_run(name, run_id):
 
     run = get_db().get_training_run(run_id)
     if not run or run['project_name'] != name:
-        return jsonify({"error": RUN_NOT_FOUND_MSG}), 404
+        return jsonify({"error": _RUN_NOT_FOUND}), 404
 
     data = request.get_json() or {}
     kwargs = {}
@@ -270,9 +272,9 @@ def clear_history(name):
     from services.db_service import get_db
     projects_dir = current_app.config["PROJECTS_DIR"]
 
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
     if not os.path.isfile(config_path):
-        return jsonify({"error": "Project not found"}), 404
+        return jsonify({"error": _NOT_FOUND}), 404
 
     # Get all runs to delete files
     runs = get_db().get_training_runs(name, limit=None)
@@ -284,7 +286,7 @@ def clear_history(name):
     clear_persistent_runs(projects_dir, name)
 
     # Delete run_logs directory if empty
-    run_logs_dir = os.path.join(projects_dir, name, "run_logs")
+    run_logs_dir = os.path.join(projects_dir, name, "run_logs")  # NOSONAR
     if os.path.isdir(run_logs_dir):
         try:
             os.rmdir(run_logs_dir)

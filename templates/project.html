@@ -210,18 +210,23 @@ curl http://{{ host }}/api/v1/stats</pre>
                 <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1.25rem;">pip install beekeeper-mcp</pre>
 
                 <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 2 — Register the MCP server:</strong></p>
-                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.4rem;">
-                    <strong>Claude Code</strong> — run once in your terminal:
-                </p>
-                <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 0.5rem;">claude mcp add beekeeper -s user -e BEEKEEPER_HOST=http://{{ host }} -- beekeeper-mcp</pre>
-                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
-                    If auth is enabled, add <code>-e BEEKEEPER_API_KEY=your-api-key</code> before <code>--</code>.
-                    If <code>beekeeper-mcp</code> isn't found, run <code>which beekeeper-mcp</code> and use the full path.
-                </p>
-                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.4rem;">
-                    <strong>Claude Desktop</strong> — add to <code>~/.claude/claude_desktop_config.json</code>:
-                </p>
-                <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1.25rem;">{
+                <div id="proj-mcp-register">
+                    <div class="tab-bar">
+                        <button class="tab-btn active" onclick="switchProjMcpTab(this, 'claude')">Claude</button>
+                        <button class="tab-btn" onclick="switchProjMcpTab(this, 'codex')">Codex</button>
+                        <button class="tab-btn" onclick="switchProjMcpTab(this, 'gemini')">Gemini</button>
+                        <button class="tab-btn" onclick="switchProjMcpTab(this, 'qwen')">Qwen</button>
+                    </div>
+
+                    <div id="proj-mcp-tab-claude" class="tab-panel">
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.4rem;"><strong>Claude Code</strong> — run once in your terminal:</p>
+                        <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 0.5rem;">claude mcp add beekeeper -s user -e BEEKEEPER_HOST=http://{{ host }} -- beekeeper-mcp</pre>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                            If auth is enabled, add <code>-e BEEKEEPER_API_KEY=your-api-key</code> before <code>--</code>.
+                            If <code>beekeeper-mcp</code> isn't found, run <code>which beekeeper-mcp</code> and use the full path.
+                        </p>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.4rem;"><strong>Claude Desktop</strong> — add to <code>~/.claude/claude_desktop_config.json</code>:</p>
+                        <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 1.25rem;">{
   "mcpServers": {
     "beekeeper": {
       "command": "beekeeper-mcp",
@@ -232,8 +237,59 @@ curl http://{{ host }}/api/v1/stats</pre>
     }
   }
 }</pre>
+                    </div>
 
-                <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 3 — Paste this into Claude to start a session:</strong></p>
+                    <div id="proj-mcp-tab-codex" class="tab-panel" style="display:none">
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.4rem;">Add to <code>~/.codex/config.toml</code>:</p>
+                        <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 0.5rem;">[mcp_servers.beekeeper]
+command = "beekeeper-mcp"
+
+[mcp_servers.beekeeper.env]
+BEEKEEPER_HOST = "http://{{ host }}"
+BEEKEEPER_API_KEY = "your-api-key"</pre>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1.25rem;">
+                            Omit <code>BEEKEEPER_API_KEY</code> if auth is disabled. Use the full path for <code>command</code> if <code>beekeeper-mcp</code> isn't on your PATH.
+                        </p>
+                    </div>
+
+                    <div id="proj-mcp-tab-gemini" class="tab-panel" style="display:none">
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.4rem;">Add to <code>~/.gemini/settings.json</code>:</p>
+                        <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 0.5rem;">{
+  "mcpServers": {
+    "beekeeper": {
+      "command": "beekeeper-mcp",
+      "env": {
+        "BEEKEEPER_HOST": "http://{{ host }}",
+        "BEEKEEPER_API_KEY": "your-api-key"
+      }
+    }
+  }
+}</pre>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1.25rem;">
+                            Restart Gemini CLI after saving. Omit <code>BEEKEEPER_API_KEY</code> if auth is disabled.
+                        </p>
+                    </div>
+
+                    <div id="proj-mcp-tab-qwen" class="tab-panel" style="display:none">
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.4rem;">Add to <code>~/.qwen/settings.json</code>:</p>
+                        <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 0.5rem;">{
+  "mcpServers": {
+    "beekeeper": {
+      "command": "beekeeper-mcp",
+      "env": {
+        "BEEKEEPER_HOST": "http://{{ host }}",
+        "BEEKEEPER_API_KEY": "your-api-key"
+      }
+    }
+  }
+}</pre>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1.25rem;">
+                            Omit <code>BEEKEEPER_API_KEY</code> if auth is disabled.
+                        </p>
+                    </div>
+                </div>
+
+                <p style="font-size: 0.9rem; margin-bottom: 0.5rem;"><strong>Step 3 — Paste this into your agent to start a session:</strong></p>
                 <pre class="api-examples" style="font-size: 0.85rem; margin-bottom: 0.5rem;">You have the Beekeeper MCP server connected. Beekeeper manages ML training jobs on a remote GPU server.
 
 Get oriented on the {{ project.name }} project:
@@ -290,6 +346,15 @@ Get oriented on the {{ project.name }} project:
 {% endblock %}
 
 {% block scripts %}
+<script>
+function switchProjMcpTab(btn, name) {
+    var wrap = document.getElementById('proj-mcp-register');
+    wrap.querySelectorAll('.tab-panel').forEach(function(el) { el.style.display = 'none'; });
+    wrap.querySelectorAll('.tab-btn').forEach(function(el) { el.classList.remove('active'); });
+    document.getElementById('proj-mcp-tab-' + name).style.display = '';
+    btn.classList.add('active');
+}
+</script>
 <script>
     // Clone project modal
     const cloneBtn = document.getElementById('btn-clone-project');

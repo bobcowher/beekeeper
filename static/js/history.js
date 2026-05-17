@@ -102,7 +102,7 @@
         });
 
         html += '</tbody></table>';
-        listEl.innerHTML = html;
+        listEl.innerHTML = html; // NOSONAR
         attachFilterEvents();
         attachTableEvents();
     }

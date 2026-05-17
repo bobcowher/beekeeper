@@ -1,5 +1,6 @@
 import os
 import random
+import secrets
 import subprocess
 from flask import Flask
 
@@ -38,9 +39,23 @@ def get_deploy_version():
     }
 
 
+def _get_secret_key() -> str:
+    env_secret = os.environ.get("BEEKEEPER_SECRET")
+    if env_secret:
+        return env_secret
+    secret_file = os.path.join(BEEKEEPER_HOME, ".secret_key")
+    if os.path.exists(secret_file):
+        return open(secret_file).read().strip()
+    key = secrets.token_hex(32)
+    with open(secret_file, "w") as f:
+        f.write(key)
+    os.chmod(secret_file, 0o600)
+    return key
+
+
 def create_app():
     app = Flask(__name__)
-    app.secret_key = os.environ.get("BEEKEEPER_SECRET", "dev-secret-change-me")
+    app.secret_key = _get_secret_key()
     app.config["BEEKEEPER_HOME"] = BEEKEEPER_HOME
     app.config["PROJECTS_DIR"] = os.path.join(BEEKEEPER_HOME, "projects")
     app.config["DEPLOY_VERSION"] = get_deploy_version()

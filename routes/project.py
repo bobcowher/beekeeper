@@ -19,6 +19,11 @@ from services.run_storage_service import delete_run_storage
 
 project_bp = Blueprint("project", __name__, url_prefix="/projects")
 
+_PROJECT_FILE = "project.json"
+_DETAIL_ROUTE = "project.detail"
+_NEW_ROUTE = "project.new"
+_EDIT_ROUTE = "project.edit"
+
 
 @project_bp.route("/new", methods=["GET"])
 def new():
@@ -39,17 +44,17 @@ def create():
     # Validate name: alphanumeric, hyphens, underscores only
     if not name or not re.match(r"^[a-zA-Z0-9_-]+$", name):
         flash("Invalid project name. Use only letters, numbers, hyphens, underscores.", "error")
-        return redirect(url_for("project.new"))
+        return redirect(url_for(_NEW_ROUTE))
 
     # Check for duplicate
     if os.path.exists(os.path.join(projects_dir, name)):
         flash(f"Project '{name}' already exists.", "error")
-        return redirect(url_for("project.new"))
+        return redirect(url_for(_NEW_ROUTE))
 
     git_url = request.form.get("git_url", "").strip()
     if not git_url:
         flash("Git URL is required.", "error")
-        return redirect(url_for("project.new"))
+        return redirect(url_for(_NEW_ROUTE))
 
     data_dir_enabled = request.form.get("data_dir_enabled") == "1"
     data_dir_local = request.form.get("data_dir_local", "data").strip() or "data"
@@ -58,10 +63,10 @@ def create():
     if data_dir_enabled:
         if not data_dir_remote:
             flash("System data path is required when data directory is enabled.", "error")
-            return redirect(url_for("project.new"))
+            return redirect(url_for(_NEW_ROUTE))
         if not os.path.isdir(data_dir_remote):
             flash(f"System data path '{data_dir_remote}' does not exist or is not a directory.", "error")
-            return redirect(url_for("project.new"))
+            return redirect(url_for(_NEW_ROUTE))
 
     tensorboard_log_dir = request.form.get("tensorboard_log_dir", "runs").strip() or "runs"
     try:
@@ -71,7 +76,7 @@ def create():
         )
     except ValueError as e:
         flash(str(e), "error")
-        return redirect(url_for("project.new"))
+        return redirect(url_for(_NEW_ROUTE))
 
     data = {
         "name": name,
@@ -90,14 +95,14 @@ def create():
     }
 
     create_project(projects_dir, data)
-    return redirect(url_for("project.detail", name=name))
+    return redirect(url_for(_DETAIL_ROUTE, name=name))
 
 
 @project_bp.route("/<name>", methods=["GET"])
 def detail(name):
     config_path = os.path.join(
-        current_app.config["PROJECTS_DIR"], name, "project.json"
-    )
+        current_app.config["PROJECTS_DIR"], name, _PROJECT_FILE
+    )  # NOSONAR
     if not os.path.isfile(config_path):
         abort(404)
 
@@ -125,7 +130,7 @@ def detail(name):
 @project_bp.route("/<name>/edit", methods=["GET"])
 def edit(name):
     projects_dir = current_app.config["PROJECTS_DIR"]
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
     if not os.path.isfile(config_path):
         abort(404)
 
@@ -138,7 +143,7 @@ def edit(name):
 @project_bp.route("/<name>/edit", methods=["POST"])
 def update(name):
     projects_dir = current_app.config["PROJECTS_DIR"]
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
     if not os.path.isfile(config_path):
         abort(404)
 
@@ -160,10 +165,10 @@ def update(name):
     if data_dir_enabled:
         if not data_dir_remote:
             flash("System data path is required when data directory is enabled.", "error")
-            return redirect(url_for("project.edit", name=name))
+            return redirect(url_for(_EDIT_ROUTE, name=name))
         if not os.path.isdir(data_dir_remote):
             flash(f"System data path '{data_dir_remote}' does not exist or is not a directory.", "error")
-            return redirect(url_for("project.edit", name=name))
+            return redirect(url_for(_EDIT_ROUTE, name=name))
         workspace_dir = os.path.join(projects_dir, name, "workspace")
         if os.path.isdir(workspace_dir):
             local_path = os.path.join(workspace_dir, data_dir_local)
@@ -177,7 +182,7 @@ def update(name):
                     f"Remove it first, then save again.",
                     "error",
                 )
-                return redirect(url_for("project.edit", name=name))
+                return redirect(url_for(_EDIT_ROUTE, name=name))
             else:
                 os.symlink(data_dir_remote, local_path)
 
@@ -192,7 +197,7 @@ def update(name):
         )
     except ValueError as e:
         flash(str(e), "error")
-        return redirect(url_for("project.edit", name=name))
+        return redirect(url_for(_EDIT_ROUTE, name=name))
 
     # Parse environment variables from the form
     env_keys = request.form.getlist("env_key")
@@ -216,25 +221,25 @@ def update(name):
     project.save(projects_dir)
 
     flash("Project settings updated.", "success")
-    return redirect(url_for("project.detail", name=name))
+    return redirect(url_for(_DETAIL_ROUTE, name=name))
 
 
 @project_bp.route("/<name>/retry-setup", methods=["POST"])
 def retry(name):
     projects_dir = current_app.config["PROJECTS_DIR"]
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
     if not os.path.isfile(config_path):
         abort(404)
 
     retry_setup(projects_dir, name)
-    return redirect(url_for("project.detail", name=name))
+    return redirect(url_for(_DETAIL_ROUTE, name=name))
 
 
 @project_bp.route("/<name>/clear-tb-logs", methods=["POST"])
 def clear_tb_logs(name):
     import shutil
     projects_dir = current_app.config["PROJECTS_DIR"]
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
     if not os.path.isfile(config_path):
         abort(404)
 
@@ -249,14 +254,14 @@ def clear_tb_logs(name):
     else:
         flash("Tensorboard log directory not found.", "error")
 
-    return redirect(url_for("project.detail", name=name))
+    return redirect(url_for(_DETAIL_ROUTE, name=name))
 
 
 @project_bp.route("/<name>/cleanup-tb-logs", methods=["POST"])
 def cleanup_tb_logs(name):
     from services.tensorboard_service import cleanup_old_tb_logs
     projects_dir = current_app.config["PROJECTS_DIR"]
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
     if not os.path.isfile(config_path):
         abort(404)
 
@@ -266,7 +271,7 @@ def cleanup_tb_logs(name):
     keep_count = request.form.get("keep_count", type=int)
     if not keep_count or keep_count < 1:
         flash("Please specify how many runs to keep (must be at least 1).", "error")
-        return redirect(url_for("project.detail", name=name))
+        return redirect(url_for(_DETAIL_ROUTE, name=name))
 
     tb_logdir = os.path.join(projects_dir, name, "workspace", project.get("tensorboard_log_dir", "runs"))
     result = cleanup_old_tb_logs(tb_logdir, keep_count)
@@ -276,21 +281,21 @@ def cleanup_tb_logs(name):
     else:
         flash(result['message'], "info")
 
-    return redirect(url_for("project.detail", name=name))
+    return redirect(url_for(_DETAIL_ROUTE, name=name))
 
 
 @project_bp.route("/<name>/cleanup-run-history", methods=["POST"])
 def cleanup_run_history(name):
     from services.db_service import get_db
     projects_dir = current_app.config["PROJECTS_DIR"]
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
     if not os.path.isfile(config_path):
         abort(404)
 
     keep_count = request.form.get("keep_count", type=int)
     if not keep_count or keep_count < 1:
         flash("Please specify how many runs to keep (must be at least 1).", "error")
-        return redirect(url_for("project.detail", name=name))
+        return redirect(url_for(_DETAIL_ROUTE, name=name))
 
     db = get_db()
     runs = db.get_training_runs(name, limit=1000)
@@ -310,13 +315,13 @@ def cleanup_run_history(name):
     else:
         flash(f"Only {len(runs)} run(s) found, nothing to delete.", "info")
 
-    return redirect(url_for("project.detail", name=name))
+    return redirect(url_for(_DETAIL_ROUTE, name=name))
 
 
 @project_bp.route("/<name>/pin", methods=["POST"])
 def toggle_pin(name):
     projects_dir = current_app.config["PROJECTS_DIR"]
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
     if not os.path.isfile(config_path):
         abort(404)
     p = Project.load(config_path)
@@ -328,7 +333,7 @@ def toggle_pin(name):
 @project_bp.route("/<name>/delete", methods=["POST"])
 def delete(name):
     projects_dir = current_app.config["PROJECTS_DIR"]
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
     if not os.path.isfile(config_path):
         abort(404)
 

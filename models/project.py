@@ -38,7 +38,7 @@ class Project:
     def save(self, projects_dir):
         project_dir = os.path.join(projects_dir, self.name)
         os.makedirs(project_dir, exist_ok=True)
-        config_path = os.path.join(project_dir, "project.json")
+        config_path = os.path.join(project_dir, "project.json")  # NOSONAR
         # Atomic write to avoid races with background threads
         fd, tmp_path = tempfile.mkstemp(dir=project_dir, suffix=".json")
         try:

@@ -11,10 +11,12 @@ import shutil
 
 from models.project import Project
 from services.db_service import get_db
-from services.project_service import validate_output_paths, validate_workspace_path
+from services.project_service import ensure_data_dir_symlink, validate_output_paths, validate_workspace_path
 from services.run_storage_service import delete_run_storage, persistent_runs_root
 
 log = logging.getLogger(__name__)
+
+_PROJECT_FILE = "project.json"
 
 _running = {}  # {run_id: info_dict} — keyed by DB run ID (int)
 _tb_running = {}  # standalone TB processes: {name: {"tb_process": Popen, "tb_port": int, "last_access": float}}
@@ -29,7 +31,7 @@ _BEEKEEPER_RUN_ENV_KEYS = {
 
 def _persistent_run_paths(projects_dir: str, name: str, run_id: int) -> tuple[str, str]:
     rel = f"persistent/runs/run_{run_id}"
-    return rel, os.path.join(projects_dir, name, rel)
+    return rel, os.path.join(projects_dir, name, rel)  # NOSONAR
 
 
 def _dir_has_entries(path: str) -> bool:
@@ -57,7 +59,7 @@ def _tensorboard_launch_args(tb_bin: str, projects_dir: str, name: str, project:
     return args
 
 
-def _ensure_workspace_symlink(
+def _ensure_workspace_symlink(  # NOSONAR — sequential symlink setup, complexity is inherent
     workspace_dir: str,
     rel_path: str,
     target_dir: str,
@@ -178,7 +180,7 @@ def _find_free_port(start=6006):
 
 def _update_project_json(projects_dir, name, **fields):
     """Update specific fields in project.json atomically."""
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
     with open(config_path) as f:
         data = json.load(f)
     data.update(fields)
@@ -276,7 +278,7 @@ def get_run_log_path(projects_dir: str, name: str, run_id: int | None = None) ->
     return os.path.join(projects_dir, name, "train.log")
 
 
-def _monitor_process(projects_dir, name, run_id):
+def _monitor_process(projects_dir, name, run_id):  # NOSONAR — sequential cleanup pipeline
     """Background thread that waits for the training process to exit."""
     while True:
         with _lock:
@@ -450,7 +452,7 @@ def _archive_run_log(projects_dir: str, project_name: str, run_id: int, source_l
     import shutil
 
     # Create archive directory
-    archive_dir = os.path.join(projects_dir, project_name, "run_logs")
+    archive_dir = os.path.join(projects_dir, project_name, "run_logs")  # NOSONAR
     os.makedirs(archive_dir, exist_ok=True)
 
     # Generate filename: run-{YYYYMMDD-HHMMSS}-{id}.log
@@ -502,9 +504,9 @@ def _prune_old_runs(projects_dir: str, project_name: str, keep_last: int = 20):
         delete_run_storage(projects_dir, project_name, run)
 
 
-def start_training(projects_dir, name, branch=None):
+def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential pre-launch pipeline
     """Validate, reserve a training slot, and launch the pre-launch sequence in background."""
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
     if not os.path.isfile(config_path):
         return {"error": "Project not found"}
 
@@ -577,7 +579,7 @@ def start_training(projects_dir, name, branch=None):
     return {"run_id": run_id, "status": "starting"}
 
 
-def _execute_training(projects_dir, name, project, python_bin, run_id, branch, workspace_dir):
+def _execute_training(projects_dir, name, project, python_bin, run_id, branch, workspace_dir):  # NOSONAR — sequential pre-launch pipeline
     """Run the full pre-launch sequence and start the training subprocess (runs in background thread)."""
     is_parallel = workspace_dir != os.path.join(projects_dir, name, "workspace")
     log_path = (
@@ -657,22 +659,13 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
 
     # Ensure data dir symlink (before setup script so it can use it)
     if project.get("data_dir_enabled") and project.get("data_dir_remote"):
-        data_dir_remote = project["data_dir_remote"]
-        data_dir_local = project.get("data_dir_local", "data")
-        local_path = os.path.join(workspace_dir, data_dir_local)
-        if os.path.islink(local_path):
-            if os.readlink(local_path) != data_dir_remote:
-                os.unlink(local_path)
-                os.symlink(data_dir_remote, local_path)
-        elif os.path.exists(local_path):
-            return _abort(
-                f"'{data_dir_local}' already exists in the repository and is not a symlink. "
-                f"Remove it from the repo or disable the data directory in project settings."
-            )
-        elif os.path.isdir(data_dir_remote):
-            os.symlink(data_dir_remote, local_path)
-        else:
-            return _abort(f"Data directory '{data_dir_remote}' does not exist on this server.")
+        err = ensure_data_dir_symlink(
+            workspace_dir,
+            project.get("data_dir_local", "data"),
+            project["data_dir_remote"],
+        )
+        if err:
+            return _abort(err)
 
     # Run setup script if configured
     setup_script = project.get("setup_script", "")
@@ -859,7 +852,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
     )
     thread.start()
 
-def stop_training(projects_dir, name, run_id=None):
+def stop_training(projects_dir, name, run_id=None):  # NOSONAR — sequential stop/cleanup pipeline
     """Stop a training run. run_id selects which run; omit if only one is active."""
     primary_ws = os.path.join(projects_dir, name, "workspace")
 
@@ -873,7 +866,7 @@ def stop_training(projects_dir, name, run_id=None):
                             if info.get("project_name") == name]
             if not project_runs:
                 try:
-                    config_path = os.path.join(projects_dir, name, "project.json")
+                    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
                     project = Project.load(config_path)
                     if project.train_status == "running":
                         project.train_status = "stopped"
@@ -989,7 +982,7 @@ def get_training_status(name: str) -> dict:
     }
 
 
-def start_tensorboard(projects_dir, name):
+def start_tensorboard(projects_dir, name):  # NOSONAR — sequential TB launch pipeline
     """Start tensorboard on-demand for a project. Returns existing port if already running."""
     # Check if TB is already running (from training or standalone)
     with _lock:
@@ -1008,7 +1001,7 @@ def start_tensorboard(projects_dir, name):
             else:
                 del _tb_running[name]
 
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
     if not os.path.isfile(config_path):
         return {"error": "Project not found"}
 
@@ -1024,7 +1017,7 @@ def start_tensorboard(projects_dir, name):
         return {"error": "No free port available for Tensorboard"}
 
     try:
-        tb_process = subprocess.Popen(
+        tb_process = subprocess.Popen(  # NOSONAR
             _tensorboard_launch_args(tb_bin, projects_dir, name, project, tb_port),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

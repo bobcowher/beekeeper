@@ -1,6 +1,8 @@
 import os
 from typing import Any
 
+_NOT_INIT_MSG = "Config service not initialized"
+
 
 class ConfigService:
     """Service for managing application configuration stored in .properties file."""
@@ -77,35 +79,35 @@ def init_config(beekeeper_home: str):
 def get_config(key: str, default: Any = None) -> str:
     """Get configuration value."""
     if _config is None:
-        raise RuntimeError("Config service not initialized")
+        raise RuntimeError(_NOT_INIT_MSG)
     return _config.get(key, default)
 
 
 def get_config_bool(key: str, default: bool = False) -> bool:
     """Get boolean configuration value."""
     if _config is None:
-        raise RuntimeError("Config service not initialized")
+        raise RuntimeError(_NOT_INIT_MSG)
     return _config.get_bool(key, default)
 
 
 def get_config_int(key: str, default: int = 0) -> int:
     """Get integer configuration value."""
     if _config is None:
-        raise RuntimeError("Config service not initialized")
+        raise RuntimeError(_NOT_INIT_MSG)
     return _config.get_int(key, default)
 
 
 def set_config(key: str, value: Any):
     """Set configuration value."""
     if _config is None:
-        raise RuntimeError("Config service not initialized")
+        raise RuntimeError(_NOT_INIT_MSG)
     _config.set(key, value)
 
 
 def save_config():
     """Save configuration to disk."""
     if _config is None:
-        raise RuntimeError("Config service not initialized")
+        raise RuntimeError(_NOT_INIT_MSG)
     _config.save()
 
 

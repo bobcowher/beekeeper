@@ -1768,6 +1768,8 @@ label {
 }
 
 .tab-btn.active {
-    color: var(--accent);
+    color: var(--bg-primary);
+    background: var(--accent);
     border-bottom-color: var(--accent);
+    border-radius: 3px 3px 0 0;
 }

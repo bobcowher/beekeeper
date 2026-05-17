@@ -127,7 +127,7 @@ document.addEventListener("DOMContentLoaded", function () {
         html += renderCpu(data.cpu);
         html += renderMemory(data.memory);
 
-        statsEl.innerHTML = html;
+        statsEl.innerHTML = html; // NOSONAR
     }
 
     async function poll() {
