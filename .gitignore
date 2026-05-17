@@ -13,6 +13,7 @@ build/
 *.egg-info/
 
 # Local/private files — not for public repo
+RELEASE.md
 CLAUDE.md
 QWEN.md
 SESSION_NOTES.md
