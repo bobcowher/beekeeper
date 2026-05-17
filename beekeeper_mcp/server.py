@@ -5,7 +5,7 @@ Beekeeper MCP Server
 Exposes Beekeeper's training management API as MCP tools for AI agents.
 
 Configuration (environment variables):
-  BEEKEEPER_HOST      Server URL, e.g. http://192.168.1.57:5000
+  BEEKEEPER_HOST      Server URL, e.g. http://beekeeper.local:5000 or http://localhost:5000
   BEEKEEPER_API_KEY   API key (required only when auth is enabled)
 
 Usage:
@@ -19,7 +19,7 @@ Claude Code / Claude Desktop config:
       "beekeeper": {
         "command": "beekeeper-mcp",
         "env": {
-          "BEEKEEPER_HOST": "http://192.168.1.57:5000",
+          "BEEKEEPER_HOST": "http://<your-beekeeper-host>:5000",
           "BEEKEEPER_API_KEY": "your-api-key"
         }
       }
