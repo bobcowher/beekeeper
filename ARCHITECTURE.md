@@ -135,6 +135,21 @@ Any path coming from project config (tensorboard log dir, train file, setup scri
 **MCP as a separate pip package**
 `beekeeper_mcp/` is a standalone package that speaks only to the `/api/v1/` HTTP API. It has no direct import dependency on the Flask app. This means agents can run on a different machine from the Beekeeper server.
 
+**Flask over FastAPI**
+The pre-launch sequence, process monitoring, and TensorBoard management are all blocking, subprocess-heavy operations running on background threads. FastAPI pushes toward async/await, which makes blocking calls awkward and requires careful bridging with `asyncio.run_in_executor`. Flask's sync-first model fits naturally. Migrating to FastAPI is not a safe drop-in refactor.
+
+**Threading over asyncio**
+Background work (git clone, pip install, process monitoring) blocks on subprocess I/O. Python threads handle this cleanly — each background operation runs in its own thread and blocks freely. Asyncio would require every blocking call to be wrapped or offloaded, adding complexity without meaningful benefit for a single-server tool.
+
+**Vanilla JS, no frontend framework**
+The UI is server-rendered Jinja2 with plain JavaScript for progressive enhancement (stats polling, SSE log streaming, file browser interactions). No React, Vue, build toolchain, or npm dependency. This keeps the frontend zero-maintenance and trivially deployable — `static/` is just files. The tradeoff is more manual DOM manipulation, which is acceptable given the UI's limited scope.
+
+**SQLite for auth and run history**
+Auth (users, sessions, API keys) and run history are relational: you query across rows, enforce uniqueness, and need atomic updates. SQLite handles this without adding an external service dependency. A single Beekeeper instance never has concurrent write load that would stress SQLite. Postgres or MySQL would be over-engineering for a single-server tool.
+
+**nvitop over nvidia-smi**
+nvitop provides per-process GPU utilization and VRAM breakdown, which nvidia-smi does not expose in a practical way. This lets Beekeeper show which training run is consuming which GPU resources. Replacing nvitop with nvidia-smi would lose per-process granularity.
+
 ---
 
 ## Invariants
