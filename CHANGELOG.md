@@ -4,27 +4,25 @@
 
 ---
 
-## [1.0.8] - 2026-05-16
+## [1.0.9] - 2026-05-16
 
 ### New Features
 
 - **Secret key auto-generation** — Beekeeper now generates and persists a secure random key in `.secret_key` on first start. No user configuration needed; `BEEKEEPER_SECRET` env var still works as an override.
-- `GET /api/v1/version` — returns `server_version` and `min_mcp_version`; no auth required
-- MCP `get_version()` tool — compares installed MCP version against server's minimum, returns `outdated` flag with reinstall message if behind
-- MCP `update_project` tool — update project settings (branch, train file, TB dir, env vars, parallel runs) from an agent
-- MCP `get_capacity` tool — returns training slot capacity: total, running, and available headroom
+- **MCP registration UI** — project page and `/api/v1/mcp` now show tabbed registration snippets for Claude Code and Claude Desktop side by side.
+- MCP `update_project` tool — update project settings (branch, train file, TB dir, env vars, parallel runs) from an agent.
 
 ### Bug Fixes
 
-- Branch switching now blocked during `starting` state — previously a switch could corrupt a run's workspace during the pre-launch git pull
-- Improved 400 error when starting a run while one is active and parallel runs are disabled — message now explains how to enable parallel runs
-- Fixed potential None-dereference crash in login path when a user record exists but has no stored password hash
+- MCP tool parameters renamed from `name` to `project_name` across all tools — resolves agents confusing the project-name argument with their own `name` parameter.
+- Fixed potential None-dereference crash in login path when a user record exists but has no stored password hash.
 
 ### Maintenance
 
-- Added `ARCHITECTURE.md` — component map, storage layout, data flows, design decisions, and invariants for maintainers and agents
-- Added `AGENT_CONTEXT.md` — navigation table, silent-failure traps, and testing conventions for AI agents working in the codebase
-- Rewrote `README.md` — removed original spec; added troubleshooting section
+- Added `ARCHITECTURE.md` — component map, storage layout, data flows, design decisions, and invariants for maintainers and agents.
+- Added `AGENT_CONTEXT.md` — navigation table, silent-failure traps, and testing conventions for AI agents working in the codebase.
+- Rewrote `README.md` — removed original spec; added troubleshooting section.
+- **License changed from MIT to BUSL 1.1** — free for personal and non-commercial use; commercial use requires a license after the Change Date. See `LICENSE` for details.
 
 ---
 

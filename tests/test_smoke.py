@@ -38,7 +38,7 @@ def test_base_layout_shows_deploy_version(client):
     resp = client.get("/")
     assert resp.status_code == 200
     assert b'class="deploy-version"' in resp.data
-    assert b"v1.0.8 " in resp.data
+    assert b"v1.0.9 " in resp.data
 
 
 def test_dashboard_shows_project(client, ready_project):
