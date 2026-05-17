@@ -136,7 +136,7 @@ def logs_stream(name):
                 if retries_without_data > max_idle:
                     return
 
-            except Exception:
+            except Exception:  # NOSONAR — swallow file read errors to keep SSE stream alive
                 pass
 
             time.sleep(0.5)

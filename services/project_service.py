@@ -12,6 +12,28 @@ from services.python_versions import find_python, _find_conda_bin
 
 log = logging.getLogger(__name__)
 
+
+def ensure_data_dir_symlink(workspace_dir: str, data_dir_local: str, data_dir_remote: str) -> str | None:
+    """Ensure the data directory symlink exists and points to the right target.
+
+    Returns an error message string on failure, or None on success.
+    """
+    local_path = os.path.join(workspace_dir, data_dir_local)
+    if os.path.islink(local_path):
+        if os.readlink(local_path) != data_dir_remote:
+            os.unlink(local_path)
+            os.symlink(data_dir_remote, local_path)
+    elif os.path.exists(local_path):
+        return (
+            f"'{data_dir_local}' already exists in the repository and is not a symlink. "
+            f"Remove it from the repo or disable the data directory in project settings."
+        )
+    elif os.path.isdir(data_dir_remote):
+        os.symlink(data_dir_remote, local_path)
+    else:
+        return f"Data directory '{data_dir_remote}' does not exist on this server."
+    return None
+
 CONDA_ENV_PREFIX = "beekeeper-"
 RESERVED_OUTPUT_PATH_ROOTS = {".git", "persistent", "run_logs"}
 
@@ -170,7 +192,7 @@ def retry_setup(projects_dir, name):
     thread.start()
 
 
-def _setup_project(projects_dir, project, is_retry=False):
+def _setup_project(projects_dir, project, is_retry=False):  # NOSONAR — sequential setup pipeline
     """Clone repo, create env, install deps. Updates project.json status as it goes."""
     log.info("Setup thread started for project: %s", project.name)
 
@@ -231,22 +253,9 @@ def _setup_project(projects_dir, project, is_retry=False):
 
         # --- Data dir symlink (before setup script so setup.sh can use it) ---
         if project.data_dir_enabled and project.data_dir_remote:
-            local_path = os.path.join(workspace_dir, project.data_dir_local)
-            if os.path.islink(local_path):
-                if os.readlink(local_path) != project.data_dir_remote:
-                    os.unlink(local_path)
-                    os.symlink(project.data_dir_remote, local_path)
-            elif os.path.exists(local_path):
-                _save_status(
-                    "error",
-                    f"'{project.data_dir_local}' already exists in the repository and is not a symlink. "
-                    f"Remove it from the repo, then re-setup the project.",
-                )
-                return
-            elif os.path.isdir(project.data_dir_remote):
-                os.symlink(project.data_dir_remote, local_path)
-            else:
-                _save_status("error", f"Data directory '{project.data_dir_remote}' does not exist on this server.")
+            err = ensure_data_dir_symlink(workspace_dir, project.data_dir_local, project.data_dir_remote)
+            if err:
+                _save_status("error", err)
                 return
 
         # --- Setup script ---
