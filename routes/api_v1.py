@@ -1443,6 +1443,10 @@ analyze_run(<name>)
 get_logs(<name>, tail=100)
 ```
 
+> **Raw logs are for error and crash diagnosis only.** Do not characterize episode reward
+> trends from `get_logs` output — RL episode variance is too high for a windowed tail sample
+> to be meaningful. For trend assessment, use `analyze_run` (TensorBoard-backed).
+
 ### Start training
 ```
 check_busy()                      # confirm nothing else is running
@@ -1536,6 +1540,10 @@ get_logs("{name}", tail=100)   # raw logs for errors or debug messages
 
 `analyze_run` combines TensorBoard and log-based episode analysis. If TensorBoard hasn't
 flushed yet, the log-based section still works.
+
+> **Raw logs are for error and crash diagnosis only.** Do not characterize episode reward
+> trends from `get_logs` output — RL episode variance is too high for a windowed tail sample
+> to be meaningful. For trend assessment, always use `analyze_run` (TensorBoard-backed).
 
 ### Start training
 ```
