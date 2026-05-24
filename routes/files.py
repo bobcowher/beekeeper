@@ -24,20 +24,28 @@ def _fmt_size(size):
 
 
 def _safe_path(projects_dir, name, subpath):
-    """Resolve and validate a path inside projects/<name>/workspace/ (or src/ for legacy projects)."""
-    project_dir = os.path.join(projects_dir, name)
+    """Resolve and validate a path inside projects/<name>/workspace/ (or src/ for legacy projects).
+
+    Also permits paths inside projects/<name>/persistent/ so that workspace symlinks
+    created by output_paths (which resolve into persistent storage) are accessible.
+    """
+    project_dir = os.path.realpath(os.path.join(projects_dir, name))
     # Support legacy projects that still use src/ instead of workspace/
     if os.path.isdir(os.path.join(project_dir, "workspace")):
         workspace_dir = os.path.realpath(os.path.join(project_dir, "workspace"))
     else:
         workspace_dir = os.path.realpath(os.path.join(project_dir, "src"))
+    persistent_dir = os.path.realpath(os.path.join(project_dir, "persistent"))
     if subpath:
         target = os.path.realpath(os.path.join(workspace_dir, subpath))
     else:
         target = workspace_dir
     # Prevent path traversal — use path-separator boundary to avoid
-    # false positives like workspace_dir="…/src" matching "…/src-evil"
-    if not (target == workspace_dir or target.startswith(workspace_dir + os.sep)):
+    # false positives like workspace_dir="…/src" matching "…/src-evil".
+    # Allow paths in workspace OR in the project's own persistent dir (for output_path symlinks).
+    in_workspace = target == workspace_dir or target.startswith(workspace_dir + os.sep)
+    in_persistent = target == persistent_dir or target.startswith(persistent_dir + os.sep)
+    if not (in_workspace or in_persistent):
         return None, None
     return workspace_dir, target
 
