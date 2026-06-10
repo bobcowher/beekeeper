@@ -77,6 +77,7 @@ def create_app():
     from routes.stats import stats_bp
     from routes.training import training_bp
     from routes.files import files_bp
+    from routes.runs import runs_bp
     from routes.api_v1 import api_v1_bp
     from routes.auth import auth_bp
     from routes.admin import admin_bp
@@ -86,6 +87,7 @@ def create_app():
     app.register_blueprint(stats_bp)
     app.register_blueprint(training_bp)
     app.register_blueprint(files_bp)
+    app.register_blueprint(runs_bp)
     app.register_blueprint(api_v1_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(admin_bp)
