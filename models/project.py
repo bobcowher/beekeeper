@@ -31,6 +31,9 @@ class Project:
     parallel_runs_enabled: bool = False
     max_parallel_runs: int = 2
     output_paths: list = field(default_factory=list)
+    gpu_enabled: bool = False
+    gpu_memory_minimum: int = 0   # MB — hard floor; run rejected if free VRAM is below this
+    gpu_memory_preferred: int = 0  # MB — full ask including offloadable allocations
 
     def to_dict(self):
         return asdict(self)

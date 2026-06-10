@@ -162,12 +162,33 @@ def update_project(
     env_vars: dict | None = None,
     tb_logs_max_runs: int | None = None,
     run_history_max_runs: int | None = None,
+    gpu_enabled: bool | None = None,
+    gpu_memory_minimum: int | None = None,
+    gpu_memory_preferred: int | None = None,
 ) -> dict:
     """
     Update editable settings for an existing project. Only the fields you provide
     are changed — omitted fields are left as-is. Training must be stopped first.
 
     env_vars replaces the entire env_vars dict; pass the full desired set of variables.
+
+    GPU memory management (opt-in per project):
+      gpu_enabled         — enable GPU management for this project (default: false)
+      gpu_memory_minimum  — MB; hard floor; run rejected if free VRAM is below this (0 = no check)
+      gpu_memory_preferred — MB; full allocation including offloadable memory like replay buffers
+                            (0 = no offload flag); if free VRAM < preferred but >= minimum,
+                            GPU_OFFLOAD=1 is injected so the script can offload soft allocations.
+
+    When gpu_enabled=True, these env vars are injected into every training run:
+      CUDA_VISIBLE_DEVICES  — physical GPU index (transparent; script always sees cuda:0)
+      GPU_DEVICE            — "cuda:0" — use directly with torch.device()
+      GPU_MEMORY_FREE       — MB free at launch time
+      GPU_MEMORY_MINIMUM    — MB, from project config
+      GPU_MEMORY_PREFERRED  — MB, from project config
+      GPU_OFFLOAD           — "0" or "1"; "1" means free VRAM < preferred, offload soft allocs
+
+    Typical script pattern:
+      buffer_device = "cpu" if os.environ.get("GPU_OFFLOAD") == "1" else "cuda"
     """
     body = {}
     if branch is not None:
@@ -186,6 +207,12 @@ def update_project(
         body["tb_logs_max_runs"] = tb_logs_max_runs
     if run_history_max_runs is not None:
         body["run_history_max_runs"] = run_history_max_runs
+    if gpu_enabled is not None:
+        body["gpu_enabled"] = gpu_enabled
+    if gpu_memory_minimum is not None:
+        body["gpu_memory_minimum"] = gpu_memory_minimum
+    if gpu_memory_preferred is not None:
+        body["gpu_memory_preferred"] = gpu_memory_preferred
     return _patch(f"/projects/{project_name}", body)
 
 
@@ -243,6 +270,11 @@ def start_training(project_name: str, branch: str | None = None) -> dict:
     Start training for a project. branch overrides the project's configured default.
     The pre-launch sequence (git sync, pip install) runs first — 30-120s.
     Returns run_id. Use training_status() to confirm the run is active.
+
+    If GPU management is enabled (gpu_enabled=True on the project), a VRAM pre-flight
+    check runs before launching. The run is rejected if free VRAM is below
+    gpu_memory_minimum. On success, GPU_DEVICE, GPU_OFFLOAD, and GPU_MEMORY_* env vars
+    are injected into the training process. See update_project() for full details.
     """
     body = {"branch": branch} if branch else {}
     try:
@@ -374,9 +406,18 @@ def check_busy() -> dict:
 @mcp.tool()
 def get_capacity() -> dict:
     """
-    System-wide training capacity. Returns total_slots, running, available, and per-project breakdown.
-    Use this before starting a new run — it tells you not just busy/free but how much headroom exists.
-    Prefer this over check_busy() for any new agent workflows.
+    System-wide training capacity and current resource utilization.
+
+    Returns:
+      - total_slots / running / available: aggregate slot counts across all projects
+      - projects: per-project breakdown (running_runs, max_runs)
+      - cpu: percent utilization, core count, current frequency (MHz)
+      - memory: percent used, used_gb, total_gb (system RAM)
+      - gpus: list of GPU dicts — index, name, gpu_util (%), mem_used/total/percent,
+              temp (°C), fan (%), power/power_limit (W); empty list if no NVIDIA GPUs
+
+    Use this before starting a new run — it shows headroom AND whether the machine
+    is already under load. Prefer over check_busy() for all new agent workflows.
     """
     return _get("/capacity")
 

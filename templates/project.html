@@ -50,6 +50,7 @@
         <dt>Req. File</dt><dd>{{ project.requirements_file }}</dd>
         <dt>Env Type</dt><dd>{{ project.get('env_type', 'venv') }}</dd>
         <dt>Setup Script</dt><dd>{{ project.get('setup_script') or '<span class="muted">none</span>'|safe }}</dd>
+        <dt>Total Runtime</dt><dd>{{ total_runtime }}</dd>
     </dl>
     {% if project.get('env_vars') %}
     <h3 class="env-vars-heading">Environment Variables</h3>

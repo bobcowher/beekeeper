@@ -36,6 +36,7 @@
             <button class="tab-btn" onclick="switchMcpTab(this, 'codex')">Codex</button>
             <button class="tab-btn" onclick="switchMcpTab(this, 'gemini')">Gemini</button>
             <button class="tab-btn" onclick="switchMcpTab(this, 'qwen')">Qwen</button>
+            <button class="tab-btn" onclick="switchMcpTab(this, 'opencode')">OpenCode</button>
         </div>
 
         <div id="mcp-tab-claude" class="tab-panel">
@@ -113,6 +114,28 @@ BEEKEEPER_API_KEY = "your-api-key"</pre>
             <p style="margin-top: 0.4rem; font-size: 0.875rem; color: var(--text-secondary);">
                 Omit <code>BEEKEEPER_API_KEY</code> if authentication is disabled.
                 If <code>beekeeper-mcp</code> isn't on your PATH, use the full path as the <code>command</code> value.
+            </p>
+        </div>
+
+        <div id="mcp-tab-opencode" class="tab-panel" style="display:none">
+            <p style="margin-bottom: 0.5rem;">Add to <code>~/.config/opencode/opencode.json</code>:</p>
+            <pre class="api-examples">{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "beekeeper": {
+      "type": "local",
+      "command": ["beekeeper-mcp"],
+      "environment": {
+        "BEEKEEPER_HOST": "http://{{ request.host }}",
+        "BEEKEEPER_API_KEY": "your-api-key"
+      }
+    }
+  }
+}</pre>
+            <p style="margin-top: 0.4rem; font-size: 0.875rem; color: var(--text-secondary);">
+                Omit <code>BEEKEEPER_API_KEY</code> if authentication is disabled.
+                OpenCode uses <code>environment</code> (not <code>env</code>) and requires <code>"type": "local"</code>.
+                If <code>beekeeper-mcp</code> isn't on your PATH, use the full path as the first element of <code>command</code>.
             </p>
         </div>
     </div>

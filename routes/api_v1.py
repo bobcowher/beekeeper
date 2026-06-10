@@ -14,7 +14,8 @@ from flask import Blueprint, abort, current_app, jsonify, request, Response
 
 from models.project import Project
 from services.process_manager import start_training, stop_training, get_training_status, get_runs_for_project, get_run_log_path
-from services.stats_service import get_all_stats
+from services.stats_service import get_all_stats, get_cpu_stats, get_memory_stats, get_gpu_stats
+from services.db_service import get_db
 from services.auth_service import api_key_required
 from services.project_service import validate_output_paths
 from services.run_storage_service import delete_run_storage
@@ -210,13 +211,14 @@ def create_project():
 def get_project(name):
     """Get detailed project info including training status."""
     project = load_project(name)
-
     status = get_training_status(name)
+    total_runtime_seconds = get_db().get_project_total_runtime(name)
 
     return api_response(data={
         "project": {
             **project.to_dict(),
             "training": status,
+            "total_runtime_seconds": total_runtime_seconds,
         }
     })
 
@@ -409,6 +411,26 @@ def update_project_api(name):
                 error_message="run_history_max_runs must be an integer",
                 status_code=400
             )
+    if "gpu_enabled" in data:
+        project.gpu_enabled = bool(data["gpu_enabled"])
+    if "gpu_memory_minimum" in data:
+        try:
+            project.gpu_memory_minimum = max(0, int(data["gpu_memory_minimum"]))
+        except (ValueError, TypeError):
+            return api_response(
+                error_code="INVALID_GPU_MEMORY_MINIMUM",
+                error_message="gpu_memory_minimum must be a non-negative integer (MB)",
+                status_code=400
+            )
+    if "gpu_memory_preferred" in data:
+        try:
+            project.gpu_memory_preferred = max(0, int(data["gpu_memory_preferred"]))
+        except (ValueError, TypeError):
+            return api_response(
+                error_code="INVALID_GPU_MEMORY_PREFERRED",
+                error_message="gpu_memory_preferred must be a non-negative integer (MB)",
+                status_code=400
+            )
 
     projects_dir = current_app.config["PROJECTS_DIR"]
     project.save(projects_dir)
@@ -454,7 +476,8 @@ def training_status(name):
     """Get active training runs for a project."""
     load_project(name)
     runs = get_runs_for_project(name)
-    return api_response(data={"runs": runs})
+    status = get_training_status(name)
+    return api_response(data={"runs": runs, "tb_port": status.get("tb_port")})
 
 
 # ---------------------------------------------------------------------------
@@ -886,6 +909,9 @@ def get_capacity():
         "running": total_running,
         "available": total_slots - total_running,
         "projects": project_list,
+        "cpu": get_cpu_stats(),
+        "memory": get_memory_stats(),
+        "gpus": get_gpu_stats(),
     })
 
 
@@ -1769,22 +1795,6 @@ def switch_branch(name):
         )
 
     try:
-        # Check for uncommitted changes
-        status_result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=workspace_dir,
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-
-        if status_result.stdout.strip():
-            return api_response(
-                error_code="UNCOMMITTED_CHANGES",
-                error_message="Uncommitted changes in workspace",
-                status_code=409
-            )
-
         # Fetch from origin
         fetch_result = subprocess.run(
             ["git", "fetch", "origin"],
@@ -1801,19 +1811,19 @@ def switch_branch(name):
                 status_code=500
             )
 
-        # Checkout the branch - try local first, then track remote
+        # Checkout the branch, discarding any local workspace changes
         checkout_result = subprocess.run(
-            ["git", "checkout", new_branch],
+            ["git", "checkout", "-f", new_branch],
             cwd=workspace_dir,
             capture_output=True,
             text=True,
             timeout=30
         )
 
-        # If local checkout failed, try to track remote branch
+        # If local branch doesn't exist, track remote
         if checkout_result.returncode != 0:
             checkout_result = subprocess.run(
-                ["git", "checkout", "--track", f"origin/{new_branch}"],
+                ["git", "checkout", "-f", "--track", f"origin/{new_branch}"],
                 cwd=workspace_dir,
                 capture_output=True,
                 text=True,

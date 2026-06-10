@@ -164,12 +164,69 @@
     });
     </script>
 
+    <h2>GPU Memory Management</h2>
+    <p class="muted" style="margin-bottom: 12px">
+        When enabled, Beekeeper selects a GPU and injects memory state as environment variables
+        before each training run. Use these in your script to decide where to place
+        memory-intensive allocations like replay buffers.
+    </p>
+
+    <div class="form-group">
+        <label class="checkbox-label">
+            <input type="checkbox" name="gpu_enabled" id="gpu-enabled" value="1"
+                   {% if project.get('gpu_enabled') %}checked{% endif %}>
+            <span>Enable GPU memory management</span>
+            <span class="tooltip-icon"
+                  title="Injects GPU_DEVICE, GPU_OFFLOAD, GPU_MEMORY_FREE, GPU_MEMORY_MINIMUM, and GPU_MEMORY_PREFERRED into the training process. Also sets CUDA_VISIBLE_DEVICES to the selected GPU index.">?</span>
+        </label>
+    </div>
+
+    <div id="gpu-fields" style="display:none">
+        <div class="form-row">
+            <div class="form-group">
+                <label for="gpu_memory_minimum">
+                    Minimum VRAM (MB)
+                    <span class="tooltip-icon"
+                          title="Hard floor. Run is rejected before starting if free VRAM is below this. Set to 0 to skip the pre-flight check and always inject env vars.">?</span>
+                </label>
+                <input type="number" id="gpu_memory_minimum" name="gpu_memory_minimum"
+                       min="0" value="{{ project.get('gpu_memory_minimum', 0) }}">
+            </div>
+            <div class="form-group">
+                <label for="gpu_memory_preferred">
+                    Preferred VRAM (MB)
+                    <span class="tooltip-icon"
+                          title="Full allocation including offloadable memory (e.g. replay buffers). If free VRAM is below this but above minimum, GPU_OFFLOAD=1 is injected. Set to 0 to disable the offload flag.">?</span>
+                </label>
+                <input type="number" id="gpu_memory_preferred" name="gpu_memory_preferred"
+                       min="0" value="{{ project.get('gpu_memory_preferred', 0) }}">
+            </div>
+        </div>
+        <p class="muted" style="margin-top: -8px; font-size: 0.85em">
+            Example usage in your training script:<br>
+            <code>buffer_device = "cpu" if os.environ.get("GPU_OFFLOAD") == "1" else "cuda"</code>
+        </p>
+    </div>
+
     <div class="form-actions">
         <button type="submit" class="btn btn-primary">Save Changes</button>
         <a href="{{ url_for('project.detail', name=project.name) }}" class="btn btn-cancel">Cancel</a>
     </div>
 </form>
 {% endblock %}
+
+<form action="{{ url_for('project.rename', name=project.name) }}" method="POST" class="card" style="margin-top: 16px">
+    <h2>Rename Project</h2>
+    <p class="muted" style="margin-bottom: 12px">Only allowed when training is idle and setup is complete. All run history will be updated.</p>
+    <div class="form-group">
+        <label for="new_name">New Name</label>
+        <input type="text" id="new_name" name="new_name" value="{{ project.name }}"
+               pattern="[a-zA-Z0-9_\-]+" title="Letters, numbers, hyphens, underscores only">
+    </div>
+    <div class="form-actions">
+        <button type="submit" class="btn btn-danger">Rename</button>
+    </div>
+</form>
 
 {% block scripts %}
 <script>
@@ -197,6 +254,15 @@
             e.target.closest(".env-var-row").remove();
         }
     });
+
+    // Show/hide GPU fields
+    const gpuCheckbox = document.getElementById("gpu-enabled");
+    const gpuFields = document.getElementById("gpu-fields");
+    function toggleGpuFields() {
+        gpuFields.style.display = gpuCheckbox.checked ? "" : "none";
+    }
+    gpuCheckbox.addEventListener("change", toggleGpuFields);
+    toggleGpuFields();
 
     // Show/hide data dir fields
     const dataDirCheckbox = document.getElementById("data_dir_enabled");

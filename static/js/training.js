@@ -246,6 +246,17 @@ async function loadHistoricalLog(runId, terminalEl) {
 // ============================================================
 // Refresh runs from API
 // ============================================================
+function syncTbPort(responseData) {
+    const newPort = responseData?.tb_port ?? null;
+    if (newPort && newPort !== tbConfig.tbPort) {
+        tbConfig.tbPort = newPort;
+        renderTensorboard(newPort);
+    } else if (!newPort && tbConfig.tbPort) {
+        tbConfig.tbPort = null;
+        renderTbLauncher();
+    }
+}
+
 async function refreshRuns() {
     if (!runListEl) return;
     try {
@@ -254,6 +265,7 @@ async function refreshRuns() {
         const runs = data?.data?.runs || [];
         reconcileRunList(runs);
         updateStartButton(runs);
+        syncTbPort(data?.data);
     } catch (e) {
         console.warn('Could not refresh runs:', e);
     }
