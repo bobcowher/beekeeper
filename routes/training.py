@@ -1,6 +1,6 @@
 import os
 import time
-from flask import Blueprint, current_app, jsonify, request, Response, send_file
+from flask import Blueprint, current_app, jsonify, render_template, request, Response, send_file
 
 from services.process_manager import (
     start_training, stop_training, get_training_status,
@@ -172,6 +172,32 @@ def history(name):
 
 @training_bp.route("/<name>/history/<int:run_id>/log", methods=["GET"])
 def history_log(name, run_id):
+    """Display archived log for a specific run."""
+    from services.db_service import get_db
+    projects_dir = current_app.config["PROJECTS_DIR"]
+
+    run = get_db().get_training_run(run_id)
+    if not run or run['project_name'] != name:
+        return jsonify({"error": _RUN_NOT_FOUND}), 404
+
+    if not run.get('log_file_path'):
+        return jsonify({"error": "Log file not available"}), 404
+
+    log_path = os.path.join(projects_dir, name, run['log_file_path'])  # NOSONAR
+    if not os.path.isfile(log_path):
+        return jsonify({"error": "Log file not found"}), 404
+
+    try:
+        with open(log_path, "r", errors="replace") as f:
+            content = f.read()
+    except OSError:
+        return jsonify({"error": "Could not read log file"}), 500
+
+    return render_template("log_view.html", project_name=name, run_id=run_id, content=content)
+
+
+@training_bp.route("/<name>/history/<int:run_id>/log/download", methods=["GET"])
+def history_log_download(name, run_id):
     """Download archived log for a specific run."""
     from services.db_service import get_db
     projects_dir = current_app.config["PROJECTS_DIR"]
