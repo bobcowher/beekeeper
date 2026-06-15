@@ -213,7 +213,6 @@
         <a href="{{ url_for('project.detail', name=project.name) }}" class="btn btn-cancel">Cancel</a>
     </div>
 </form>
-{% endblock %}
 
 <form action="{{ url_for('project.rename', name=project.name) }}" method="POST" class="card" style="margin-top: 16px">
     <h2>Rename Project</h2>
@@ -227,6 +226,7 @@
         <button type="submit" class="btn btn-danger">Rename</button>
     </div>
 </form>
+{% endblock %}
 
 {% block scripts %}
 <script>
