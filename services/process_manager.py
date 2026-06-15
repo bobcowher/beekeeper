@@ -272,7 +272,7 @@ def get_runs_for_project(name: str) -> list:
 
 
 def get_run_log_path(projects_dir: str, name: str, run_id: int | None = None) -> str:
-    """Return the active log file path for a run. Falls back to train.log."""
+    """Return the log file path for a run. For completed runs, resolves via DB."""
     with _lock:
         if run_id is not None:
             info = _running.get(run_id)
@@ -285,6 +285,14 @@ def get_run_log_path(projects_dir: str, name: str, run_id: int | None = None) ->
             ]
             if len(active) == 1 and active[0].get("log_path"):
                 return active[0]["log_path"]
+
+    if run_id is not None:
+        run = get_db().get_training_run(run_id)
+        if run and run.get("log_file_path"):
+            archived = os.path.join(projects_dir, name, run["log_file_path"])
+            if os.path.isfile(archived):
+                return archived
+
     return os.path.join(projects_dir, name, "train.log")
 
 
