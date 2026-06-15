@@ -354,6 +354,75 @@ def delete_project_api(name):
     return api_response(data={"deleted": name})
 
 
+@api_v1_bp.route("/projects/<name>/rename", methods=["POST"])
+@api_key_required
+def rename_project_api(name):
+    """
+    Rename a project directory and update all run history records.
+
+    Body: {"new_name": "my-new-name"}
+    Cannot rename while setup or training is active.
+    """
+    import re
+    import json
+
+    load_project(name)
+
+    status = get_training_status(name)
+    if status["status"] != "idle":
+        return api_response(
+            error_code="TRAINING_ACTIVE",
+            error_message="Cannot rename while training is active — stop training first",
+            status_code=409
+        )
+
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    config_path = os.path.join(projects_dir, name, PROJECT_FILE)
+    with open(config_path) as f:
+        project_data = json.load(f)
+
+    setup_active = ("pending", "cloning", "installing", "running")
+    if project_data.get("setup_status") in setup_active:
+        return api_response(
+            error_code="SETUP_ACTIVE",
+            error_message="Cannot rename while setup is in progress",
+            status_code=409
+        )
+
+    body = request.get_json() or {}
+    new_name = body.get("new_name", "").strip()
+    if not new_name or not re.match(r"^[a-zA-Z0-9_-]+$", new_name):
+        return api_response(
+            error_code="INVALID_NAME",
+            error_message="Invalid project name — use only letters, numbers, hyphens, underscores",
+            status_code=400
+        )
+
+    if new_name == name:
+        return api_response(data={"name": name, "renamed": False})
+
+    new_dir = os.path.join(projects_dir, new_name)
+    if os.path.exists(new_dir):
+        return api_response(
+            error_code="NAME_CONFLICT",
+            error_message=f"A project named '{new_name}' already exists",
+            status_code=409
+        )
+
+    old_dir = os.path.join(projects_dir, name)
+    os.rename(old_dir, new_dir)
+
+    project_data["name"] = new_name
+    new_config_path = os.path.join(new_dir, PROJECT_FILE)
+    with open(new_config_path, "w") as f:
+        json.dump(project_data, f, indent=2)
+
+    from services.db_service import get_db
+    get_db().rename_project_runs(name, new_name)
+
+    return api_response(data={"old_name": name, "name": new_name, "renamed": True})
+
+
 @api_v1_bp.route("/projects/<name>", methods=["PATCH"])
 @api_key_required
 def update_project_api(name):

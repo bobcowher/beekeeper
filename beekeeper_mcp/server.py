@@ -376,6 +376,17 @@ def switch_branch(project_name: str, branch: str) -> dict:
     return _post(f"/projects/{project_name}/branch", {"branch": branch})
 
 
+@mcp.tool()
+def rename_project(project_name: str, new_name: str) -> dict:
+    """
+    Rename a project. Updates the directory name and all run history records.
+
+    Cannot rename while setup or training is active — stop training first.
+    new_name must contain only letters, numbers, hyphens, and underscores.
+    """
+    return _post(f"/projects/{project_name}/rename", {"new_name": new_name})
+
+
 # ---------------------------------------------------------------------------
 # System
 # ---------------------------------------------------------------------------
