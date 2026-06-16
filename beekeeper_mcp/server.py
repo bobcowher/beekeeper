@@ -336,9 +336,21 @@ def analyze_run(project_name: str, run_id: int | None = None) -> dict:
     for each active run keyed by run_id.
     """
     if run_id is not None:
+        run_meta = _get(f"/projects/{project_name}/runs/{run_id}")
+        run_data = run_meta.get("data", {}).get("run", {})
         tb = _get(f"/projects/{project_name}/tensorboard/latest?run_id={run_id}")
         logs = _get(f"/projects/{project_name}/runs/{run_id}/logs?tail_lines=300")
-        return {"run_id": run_id, "tensorboard": tb, "logs": logs}
+        return {
+            "run_id": run_id,
+            "branch": run_data.get("branch"),
+            "commit_sha": run_data.get("commit_sha"),
+            "status": run_data.get("status"),
+            "started_at": run_data.get("started_at"),
+            "ended_at": run_data.get("ended_at"),
+            "duration_seconds": run_data.get("duration_seconds"),
+            "tensorboard": tb,
+            "logs": logs,
+        }
 
     status = _get(f"/projects/{project_name}/training/status")
     runs = status.get("data", status).get("runs", [])
@@ -347,14 +359,32 @@ def analyze_run(project_name: str, run_id: int | None = None) -> dict:
     if len(active_ids) > 1:
         results = {}
         for rid in active_ids:
+            run_meta = _get(f"/projects/{project_name}/runs/{rid}")
+            run_data = run_meta.get("data", {}).get("run", {})
             tb = _get(f"/projects/{project_name}/tensorboard/latest?run_id={rid}")
             logs = _get(f"/projects/{project_name}/runs/{rid}/logs?tail_lines=300")
-            results[str(rid)] = {"run_id": rid, "tensorboard": tb, "logs": logs}
+            results[str(rid)] = {
+                "run_id": rid,
+                "branch": run_data.get("branch"),
+                "commit_sha": run_data.get("commit_sha"),
+                "status": run_data.get("status"),
+                "tensorboard": tb,
+                "logs": logs,
+            }
         return {"parallel_runs": results}
 
+    # Single active run — get branch from the active run list entry
+    active_run = runs[0] if runs else {}
     tb = _get(f"/projects/{project_name}/tensorboard/latest")
     logs = _get(f"/projects/{project_name}/logs?tail=300")
-    return {"tensorboard": tb, "logs": logs}
+    return {
+        "run_id": active_run.get("run_id"),
+        "branch": active_run.get("branch"),
+        "commit_sha": active_run.get("commit_sha"),
+        "status": active_run.get("status"),
+        "tensorboard": tb,
+        "logs": logs,
+    }
 
 
 # ---------------------------------------------------------------------------
