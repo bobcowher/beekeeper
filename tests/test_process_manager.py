@@ -448,7 +448,7 @@ def test_primary_workspace_output_conflict_warns_and_skips_symlink(tmp_path):
     assert "error" not in result
     assert os.path.isdir(conflict_dir)
     assert not os.path.islink(conflict_dir)
-    with open(os.path.join(projects_dir, "myproject", "train.log")) as f:
+    with open(os.path.join(projects_dir, "myproject", "train-44.log")) as f:
         log_content = f.read()
     assert "Could not protect output path 'saved_models'" in log_content
     process_manager._running.clear()
@@ -533,7 +533,7 @@ def test_reserved_run_env_var_is_overridden_and_warned(tmp_path):
         result = process_manager.start_training(projects_dir, "myproject")
 
     assert "error" not in result
-    with open(os.path.join(projects_dir, "myproject", "train.log")) as f:
+    with open(os.path.join(projects_dir, "myproject", "train-46.log")) as f:
         log_content = f.read()
     assert "Project env var BEEKEEPER_RUN_DIR is reserved by Beekeeper" in log_content
     process_manager._running.clear()
@@ -648,4 +648,50 @@ def test_start_training_returns_run_id(tmp_path):
         result = process_manager.start_training(projects_dir, "myproject")
 
     assert result.get("run_id") == 42
+
+
+def test_sequential_primary_runs_get_distinct_log_files(tmp_path):
+    """
+    Two non-parallel runs that both land on the primary workspace slot must get
+    their own log files. Previously both wrote to the same "train.log", so a
+    second run starting before the first's monitor thread archived its log
+    could truncate and overwrite it mid-archive.
+    """
+    from services import process_manager
+    process_manager._running.clear()
+    projects_dir = _make_project(tmp_path)
+
+    mock_db = MagicMock(
+        create_training_run=MagicMock(side_effect=[50, 51]),
+        delete_training_run=MagicMock(),
+        get_training_runs=MagicMock(return_value=[]),
+    )
+
+    def fake_popen(cmd, **kwargs):
+        proc = MagicMock()
+        proc.pid = 9999
+        return proc
+
+    with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
+         patch("services.process_manager._resolve_tensorboard_binary", return_value=None), \
+         patch("services.process_manager._update_project_json"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.subprocess.run", return_value=_ok_run()), \
+         patch("services.process_manager.subprocess.Popen", side_effect=fake_popen), \
+         patch("services.process_manager._monitor_process"), \
+         patch("services.process_manager.get_db", return_value=mock_db):
+        result1 = process_manager.start_training(projects_dir, "myproject")
+        # Simulate run 50's monitor thread freeing the primary slot before
+        # archiving has happened — the exact window the race lived in.
+        process_manager._running.clear()
+        result2 = process_manager.start_training(projects_dir, "myproject")
+
+    assert "error" not in result1
+    assert "error" not in result2
+
+    log1 = os.path.join(projects_dir, "myproject", "train-50.log")
+    log2 = os.path.join(projects_dir, "myproject", "train-51.log")
+    assert os.path.isfile(log1)
+    assert os.path.isfile(log2)
+    process_manager._running.clear()
     process_manager._running.clear()

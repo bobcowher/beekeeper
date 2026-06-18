@@ -694,9 +694,9 @@ def analyze_logs(name):
         if log_file_path:
             log_path = os.path.join(projects_dir, name, log_file_path)
         else:
-            log_path = os.path.join(projects_dir, name, "train.log")
+            log_path = get_run_log_path(projects_dir, name, run_id=run_id)
     else:
-        log_path = os.path.join(projects_dir, name, "train.log")
+        log_path = get_run_log_path(projects_dir, name)
 
     if not os.path.isfile(log_path):
         return api_response(

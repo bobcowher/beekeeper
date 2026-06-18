@@ -625,11 +625,7 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
 def _execute_training(projects_dir, name, project, python_bin, run_id, branch, workspace_dir, gpu_assignment=None):  # NOSONAR — sequential pre-launch pipeline
     """Run the full pre-launch sequence and start the training subprocess (runs in background thread)."""
     is_parallel = workspace_dir != os.path.join(projects_dir, name, "workspace")
-    log_path = (
-        os.path.join(projects_dir, name, f"train-{run_id}.log")
-        if is_parallel
-        else os.path.join(projects_dir, name, "train.log")
-    )
+    log_path = os.path.join(projects_dir, name, f"train-{run_id}.log")
 
     def _abort(msg):
         log.error("Pre-launch failed for %s run %d: %s", name, run_id, msg)
