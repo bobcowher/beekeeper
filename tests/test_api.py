@@ -255,3 +255,115 @@ def test_training_history_update_missing_run_uses_shared_message(client, mocker)
 
     assert r.status_code == 404
     assert r.get_json()["error"] == "Run not found"
+
+
+# --- API v1 run-scoped artifact files ---
+
+def _make_run_dir(app, name, run_id, files=None):
+    """Create projects/<name>/persistent/runs/run_<id>/ with optional file contents."""
+    import os
+    run_dir = os.path.join(app.config["PROJECTS_DIR"], name, "persistent", "runs", f"run_{run_id}")
+    os.makedirs(run_dir, exist_ok=True)
+    for rel_path, content in (files or {}).items():
+        full = os.path.join(run_dir, rel_path)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w") as f:
+            f.write(content)
+    return run_dir
+
+
+def test_api_v1_run_files_lists_directory(client, ready_project, app):
+    _make_run_dir(app, "myproject", 5, {"config.yaml": "lr: 0.001", "checkpoints/model.ckpt": "weights"})
+
+    r = client.get("/api/v1/projects/myproject/runs/5/files",
+                    headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data["success"] is True
+    names = {e["name"] for e in data["data"]["entries"]}
+    assert names == {"config.yaml", "checkpoints"}
+
+
+def test_api_v1_run_files_downloads_file(client, ready_project, app):
+    _make_run_dir(app, "myproject", 5, {"config.yaml": "lr: 0.001"})
+
+    r = client.get("/api/v1/projects/myproject/runs/5/files/config.yaml",
+                    headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 200
+    assert r.data == b"lr: 0.001"
+    assert r.headers["Content-Disposition"].startswith("attachment")
+
+
+def test_api_v1_run_files_zip_download(client, ready_project, app):
+    _make_run_dir(app, "myproject", 5, {"checkpoints/model.ckpt": "weights"})
+
+    r = client.get("/api/v1/projects/myproject/runs/5/files/checkpoints?zip=1",
+                    headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 200
+    assert r.headers["Content-Type"] == "application/zip"
+
+
+def test_api_v1_run_files_latest_resolves_to_run_with_artifacts(client, ready_project, app, mocker):
+    _make_run_dir(app, "myproject", 4, {"model.ckpt": "old"})
+    _make_run_dir(app, "myproject", 6, {"model.ckpt": "new"})
+
+    db = mocker.MagicMock()
+    db.get_training_runs.return_value = [{"id": 6}, {"id": 4}]  # newest first
+    mocker.patch("routes.runs.get_db", return_value=db)
+
+    r = client.get("/api/v1/projects/myproject/runs/latest/files/model.ckpt",
+                    headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 200
+    assert r.data == b"new"
+
+
+def test_api_v1_run_files_latest_with_no_artifacts_returns_404(client, ready_project, app, mocker):
+    db = mocker.MagicMock()
+    db.get_training_runs.return_value = [{"id": 6}]
+    mocker.patch("routes.runs.get_db", return_value=db)
+
+    r = client.get("/api/v1/projects/myproject/runs/latest/files",
+                    headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 404
+    assert r.get_json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_api_v1_run_files_unknown_run_id_returns_404(client, ready_project):
+    r = client.get("/api/v1/projects/myproject/runs/999/files",
+                    headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 404
+    assert r.get_json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_api_v1_run_files_missing_subpath_returns_404(client, ready_project, app):
+    _make_run_dir(app, "myproject", 5)
+
+    r = client.get("/api/v1/projects/myproject/runs/5/files/nope.txt",
+                    headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 404
+    assert r.get_json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_api_v1_run_files_path_traversal_returns_403(client, ready_project, app):
+    _make_run_dir(app, "myproject", 5)
+
+    r = client.get("/api/v1/projects/myproject/runs/5/files/../../../etc/passwd",
+                    headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 403
+    assert r.get_json()["error"]["code"] == "FORBIDDEN"
+
+
+def test_api_v1_run_files_unknown_project_returns_404(client):
+    r = client.get("/api/v1/projects/ghost/runs/5/files",
+                    headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 404
+    assert r.get_json()["error"]["code"] == "NOT_FOUND"

@@ -23,6 +23,7 @@ from services.run_storage_service import delete_run_storage
 # Reuse helpers from existing routes
 from routes.training import _tail_offset
 from routes.files import _safe_path, _fmt_size, _zip_directory
+from routes.runs import _resolve_run_id, _safe_run_path
 
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
@@ -1130,6 +1131,87 @@ def get_run_logs_json(name, run_id):
         )
 
 
+@api_v1_bp.route("/projects/<name>/runs/<run_id_str>/files", methods=["GET"])
+@api_v1_bp.route("/projects/<name>/runs/<run_id_str>/files/<path:subpath>", methods=["GET"])
+@api_key_required
+def run_files(name, run_id_str, subpath=""):
+    """Browse or download files from a specific run's persistent storage.
+
+    run_id_str may be an integer run id or 'latest'. Use this instead of the
+    project-level /projects/<name>/files endpoint when fetching artifacts —
+    that endpoint resolves against the current workspace symlink, which is
+    shared and can be repointed by other runs (including parallel ones).
+    """
+    load_project(name)
+
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    run_id = _resolve_run_id(projects_dir, name, run_id_str)
+    if run_id is None:
+        return api_response(
+            error_code="NOT_FOUND",
+            error_message=f"No run with artifacts found for '{run_id_str}'",
+            status_code=404
+        )
+
+    _, target = _safe_run_path(projects_dir, name, run_id, subpath)
+    if target is None:
+        return api_response(
+            error_code="FORBIDDEN",
+            error_message="Path traversal not allowed",
+            status_code=403
+        )
+
+    if not os.path.exists(target):
+        return api_response(
+            error_code="NOT_FOUND",
+            error_message=f"Path not found: {subpath or '/'}",
+            status_code=404
+        )
+
+    if os.path.isfile(target):
+        from flask import send_file
+        return send_file(target, as_attachment=True)
+
+    if request.args.get("zip") == "1":
+        label = subpath.replace("/", "-") if subpath else f"run_{run_id}"
+        return _zip_directory(target, label)
+
+    try:
+        items = sorted(os.listdir(target))
+    except PermissionError:
+        return api_response(
+            error_code="FORBIDDEN",
+            error_message="Permission denied",
+            status_code=403
+        )
+
+    entries = []
+    for item in items:
+        if item.startswith(".") or item == "__pycache__":
+            continue
+        full = os.path.join(target, item)
+        rel = os.path.join(subpath, item) if subpath else item
+        if os.path.isdir(full):
+            entries.append({
+                "name": item, "type": "dir", "path": rel,
+                "size": None, "size_h": None, "mtime": os.path.getmtime(full),
+            })
+        else:
+            sz = os.path.getsize(full)
+            entries.append({
+                "name": item, "type": "file", "path": rel,
+                "size": sz, "size_h": _fmt_size(sz), "mtime": os.path.getmtime(full),
+            })
+
+    entries.sort(key=lambda e: (0 if e["type"] == "dir" else 1, e["name"].lower()))
+
+    return api_response(data={
+        "run_id": run_id,
+        "path": subpath or "",
+        "entries": entries,
+    })
+
+
 @api_v1_bp.route("/projects/<name>/runs/clear", methods=["DELETE"])
 @api_key_required
 def clear_all_runs(name):
@@ -1734,10 +1816,15 @@ Beekeeper injects these env vars into every training process:
 | `TENSORBOARD_LOG_DIR` | Same — generic alias |
 
 If a user asks where their model weights, checkpoints, or exports are:
-1. Call `get_project("{name}")` and check `run_history` for the relevant run's `persistent_dir`.
-2. The artifact is at `<persistent_dir>/<path>` relative to the project root.
-3. They can browse or download it via the Beekeeper file browser in the UI, or with
-   `GET /api/v1/projects/{name}/files/<path>?zip=1` for a directory download.
+1. Call `get_project("{name}")` and check `run_history` for the relevant run's `id`.
+2. Fetch it with `GET /api/v1/projects/{name}/runs/<run_id>/files/<path>` — use `latest`
+   in place of `<run_id>` if no specific run was requested. Add `?zip=1` to download a
+   directory as a zip instead of listing it.
+3. Do NOT use `GET /api/v1/projects/{name}/files/<path>` for artifacts — that endpoint
+   resolves against the current workspace symlink, which is shared project-wide and can
+   be repointed by other runs (including parallel ones), so it can silently serve the
+   wrong run's data or 404 once a run's workspace is cleaned up. It's for browsing the
+   live workspace only (source code, configs), not for fetching run outputs.
 
 If a user asks how their training script should write checkpoints or outputs:
 - Recommend using `os.environ.get("BEEKEEPER_RUN_DIR", ".")` as the base path.

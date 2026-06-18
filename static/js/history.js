@@ -136,6 +136,7 @@
         if (run.log_file_path) {
             row += ` <a href="/projects/${projectName}/history/${run.id}/log" class="btn btn-secondary btn-sm">Log</a>`;
         }
+        row += ` <button class="btn btn-secondary btn-sm artifacts-btn" data-run-id="${run.id}">Artifacts</button>`;
         row += '</td>';
         row += '</tr>';
 
@@ -244,6 +245,122 @@
                 if (!run) return;
                 const cell = listEl.querySelector(`.tags-cell[data-run-id="${runId}"]`);
                 if (cell) openTagEditor(cell, run);
+            });
+        });
+
+        // Artifacts buttons
+        listEl.querySelectorAll('.artifacts-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const runId = parseInt(btn.dataset.runId);
+                openArtifacts(runId);
+            });
+        });
+    }
+
+    // ---------- Artifacts ----------
+
+    function openArtifacts(runId) {
+        document.getElementById('artifacts-modal')?.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'artifacts-modal';
+        overlay.className = 'compare-modal-overlay';
+        overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+        const modal = document.createElement('div');
+        modal.className = 'compare-modal';
+        modal.innerHTML = `
+            <div class="compare-modal-header">
+                <h3 style="margin:0;color:var(--accent)">Run #${runId} Artifacts</h3>
+                <button class="btn btn-secondary btn-sm" id="close-artifacts-btn">&#10005; Close</button>
+            </div>
+            <div id="artifacts-breadcrumbs" style="margin-bottom:8px"></div>
+            <div id="artifacts-body"><p class="muted">Loading…</p></div>
+        `;
+
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+        document.getElementById('close-artifacts-btn')?.addEventListener('click', () => overlay.remove());
+
+        loadArtifacts(runId, '');
+    }
+
+    async function loadArtifacts(runId, subpath) {
+        const body = document.getElementById('artifacts-body');
+        if (!body) return;
+        body.innerHTML = '<p class="muted">Loading…</p>';
+
+        const url = subpath
+            ? `/projects/${projectName}/runs/${runId}/files/${subpath}`
+            : `/projects/${projectName}/runs/${runId}/files/`;
+
+        try {
+            const resp = await fetch(url);
+            if (resp.status === 404) {
+                renderArtifactBreadcrumbs(runId, '');
+                body.innerHTML = '<p class="muted">No artifacts found for this run.</p>';
+                return;
+            }
+            if (!resp.ok) {
+                body.innerHTML = '<p class="muted">Failed to load artifacts.</p>';
+                return;
+            }
+            const data = await resp.json();
+            renderArtifactBreadcrumbs(runId, data.path);
+            renderArtifactListing(runId, data);
+        } catch (e) {
+            body.innerHTML = '<p class="muted">Error loading artifacts.</p>';
+        }
+    }
+
+    function renderArtifactBreadcrumbs(runId, path) {
+        const crumbs = document.getElementById('artifacts-breadcrumbs');
+        if (!crumbs) return;
+
+        let html = `<a href="#" class="fb-crumb" data-path="">artifacts</a>`;
+        if (path) {
+            const parts = path.split('/');
+            let cumulative = '';
+            for (const part of parts) {
+                cumulative = cumulative ? cumulative + '/' + part : part;
+                html += ` <span class="fb-crumb-sep">/</span> `;
+                html += `<a href="#" class="fb-crumb" data-path="${cumulative}">${escHtml(part)}</a>`;
+            }
+        }
+        crumbs.innerHTML = html;
+
+        crumbs.querySelectorAll('.fb-crumb').forEach(el => {
+            el.addEventListener('click', e => {
+                e.preventDefault();
+                loadArtifacts(runId, el.dataset.path);
+            });
+        });
+    }
+
+    function renderArtifactListing(runId, data) {
+        const body = document.getElementById('artifacts-body');
+        if (!body) return;
+
+        if (!data.entries || data.entries.length === 0) {
+            body.innerHTML = '<p class="muted">Empty directory.</p>';
+            return;
+        }
+
+        let html = '<table class="run-history-table"><tbody>';
+        data.entries.forEach(entry => {
+            if (entry.type === 'dir') {
+                html += `<tr><td>&#128193; <a href="#" class="artifact-dir-link" data-path="${entry.path}">${escHtml(entry.name)}</a></td><td class="muted"></td></tr>`;
+            } else {
+                html += `<tr><td>${escHtml(entry.name)}</td><td class="muted">${entry.size_h} <a href="${entry.url}" class="btn btn-secondary btn-sm">Download</a></td></tr>`;
+            }
+        });
+        html += '</tbody></table>';
+        body.innerHTML = html;
+
+        body.querySelectorAll('.artifact-dir-link').forEach(el => {
+            el.addEventListener('click', e => {
+                e.preventDefault();
+                loadArtifacts(runId, el.dataset.path);
             });
         });
     }
