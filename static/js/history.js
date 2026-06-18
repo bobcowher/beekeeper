@@ -274,7 +274,7 @@
                 <h3 style="margin:0;color:var(--accent)">Run #${runId} Artifacts</h3>
                 <button class="btn btn-secondary btn-sm" id="close-artifacts-btn">&#10005; Close</button>
             </div>
-            <div id="artifacts-breadcrumbs" style="margin-bottom:8px"></div>
+            <div id="artifacts-breadcrumbs" class="fb-breadcrumbs"></div>
             <div id="artifacts-body"><p class="muted">Loading…</p></div>
         `;
 
@@ -346,13 +346,20 @@
             return;
         }
 
-        let html = '<table class="run-history-table"><tbody>';
+        let html = '<table class="fb-table"><thead><tr>';
+        html += '<th class="fb-col-name">Name</th><th class="fb-col-size">Size</th><th></th>';
+        html += '</tr></thead><tbody>';
         data.entries.forEach(entry => {
+            html += '<tr class="fb-row">';
             if (entry.type === 'dir') {
-                html += `<tr><td>&#128193; <a href="#" class="artifact-dir-link" data-path="${entry.path}">${escHtml(entry.name)}</a></td><td class="muted"></td></tr>`;
+                html += `<td class="fb-col-name">&#128193; <a href="#" class="fb-link artifact-dir-link" data-path="${entry.path}">${escHtml(entry.name)}/</a></td>`;
+                html += `<td class="fb-col-size muted">&mdash;</td><td></td>`;
             } else {
-                html += `<tr><td>${escHtml(entry.name)}</td><td class="muted">${entry.size_h} <a href="${entry.url}" class="btn btn-secondary btn-sm">Download</a></td></tr>`;
+                html += `<td class="fb-col-name"><span class="fb-file">&#128196; ${escHtml(entry.name)}</span></td>`;
+                html += `<td class="fb-col-size muted">${entry.size_h}</td>`;
+                html += `<td style="text-align:right"><a href="${entry.url}" class="btn btn-secondary btn-sm">Download</a></td>`;
             }
+            html += '</tr>';
         });
         html += '</tbody></table>';
         body.innerHTML = html;
