@@ -99,6 +99,9 @@ def test_pip_install_called_with_requirements_file(tmp_path):
     assert "-m" in pip_calls[0]
     assert "pip" in pip_calls[0]
     assert "install" in pip_calls[0]
+    assert "--upgrade" in pip_calls[0]
+    assert "--upgrade-strategy" in pip_calls[0]
+    assert "only-if-needed" in pip_calls[0]
     assert "-r" in pip_calls[0]
     assert any("requirements.txt" in arg for arg in pip_calls[0])
 

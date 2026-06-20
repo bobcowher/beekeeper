@@ -743,7 +743,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
     if os.path.isfile(req_path):
         try:
             result = subprocess.run(
-                [python_bin, "-m", "pip", "install", "-r", req_path, "--quiet"],
+                [python_bin, "-m", "pip", "install", "--upgrade", "--upgrade-strategy", "only-if-needed", "-r", req_path, "--quiet"],
                 capture_output=True, text=True, timeout=300,
             )
             if result.returncode != 0:

@@ -294,7 +294,7 @@ def _setup_project(projects_dir, project, is_retry=False):  # NOSONAR — sequen
             _save_status("installing_deps")
             try:
                 subprocess.run(
-                    [pip_bin, "install", "-r", req_path],
+                    [pip_bin, "install", "--upgrade", "--upgrade-strategy", "only-if-needed", "-r", req_path],
                     check=True, capture_output=True, text=True, timeout=600,
                 )
             except subprocess.CalledProcessError as e:
