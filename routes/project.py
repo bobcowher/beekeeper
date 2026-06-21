@@ -334,9 +334,13 @@ def clear_tb_logs(name):
         project = json.load(f)
 
     tb_logdir = os.path.join(projects_dir, name, "workspace", project.get("tensorboard_log_dir", "runs"))
-    if os.path.isdir(tb_logdir):
-        shutil.rmtree(tb_logdir)
-        os.makedirs(tb_logdir, exist_ok=True)
+    # tb_logdir may be a symlink into persistent/runs/run_<id>/ (set up by
+    # _ensure_workspace_symlink for the most recent run) — shutil.rmtree refuses
+    # to operate on a symlink itself, so clear the link target instead.
+    clear_target = os.path.realpath(tb_logdir) if os.path.islink(tb_logdir) else tb_logdir
+    if os.path.isdir(clear_target):
+        shutil.rmtree(clear_target)
+        os.makedirs(clear_target, exist_ok=True)
         flash("Tensorboard logs cleared.", "success")
     else:
         flash("Tensorboard log directory not found.", "error")
