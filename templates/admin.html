@@ -63,6 +63,26 @@
         </form>
     </section>
 
+    <!-- SSH Key Section -->
+    <section class="admin-section">
+        <h2>SSH Key</h2>
+        <p class="help-text">
+            Beekeeper uses this key to clone and fetch git repositories over SSH.
+            Add the public key below to GitHub under Settings &rarr; SSH and GPG keys,
+            or as a per-repo deploy key, then use an SSH (<code>git@...</code>) URL
+            when creating a project.
+        </p>
+        {% if ssh_public_key %}
+        <pre class="api-examples">{{ ssh_public_key }}</pre>
+        {% else %}
+        <p class="help-text">No SSH key found &mdash; <code>ssh-keygen</code> may not be installed on this host.</p>
+        {% endif %}
+        <form method="POST" action="{{ url_for('admin.regenerate_ssh_key') }}"
+              onsubmit="return confirm('This creates a new keypair and discards the old one. Any project relying on the old public key will fail to clone or fetch until you add the new one to GitHub. Continue?');">
+            <button type="submit" class="btn btn-danger">Regenerate Key</button>
+        </form>
+    </section>
+
     <!-- Users Section -->
     <section class="admin-section">
         <h2>Users</h2>

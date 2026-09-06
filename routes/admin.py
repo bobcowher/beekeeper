@@ -1,8 +1,9 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
+from flask import Blueprint, current_app, render_template, request, redirect, url_for, flash, jsonify
 
 from services.auth_service import admin_required, get_current_user
 from services.config_service import get_config_bool, get_config_int, set_config, save_config, is_auth_enabled
 from services.db_service import get_db
+from services.ssh_key_service import get_public_key, regenerate_instance_key
 
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
@@ -27,8 +28,12 @@ def index():
 
     users = db.list_all_users()
     api_keys = db.list_user_api_keys(current_user.id) if current_user else []
+    ssh_public_key = get_public_key(current_app.config['BEEKEEPER_HOME'])
 
-    return render_template('admin.html', config=config, users=users, api_keys=api_keys, current_user=current_user)
+    return render_template(
+        'admin.html', config=config, users=users, api_keys=api_keys,
+        current_user=current_user, ssh_public_key=ssh_public_key,
+    )
 
 
 @admin_bp.route('/settings', methods=['POST'])
@@ -71,6 +76,19 @@ def update_settings():
 
     save_config()
     flash('Settings updated successfully', 'success')
+    return redirect(url_for(_INDEX_ROUTE))
+
+
+@admin_bp.route('/ssh-key/regenerate', methods=['POST'])
+@admin_required
+def regenerate_ssh_key():
+    """Discard the instance SSH keypair and generate a fresh one."""
+    regenerate_instance_key(current_app.config['BEEKEEPER_HOME'])
+    flash(
+        'New SSH key generated. Add the new public key to GitHub — projects using '
+        'the old key will fail to clone or fetch until it is replaced there.',
+        'warning',
+    )
     return redirect(url_for(_INDEX_ROUTE))
 
 

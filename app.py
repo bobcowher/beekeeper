@@ -62,6 +62,9 @@ def create_app():
 
     os.makedirs(app.config["PROJECTS_DIR"], exist_ok=True)
 
+    from services.ssh_key_service import ensure_instance_key
+    ensure_instance_key(BEEKEEPER_HOME)
+
     # Initialize config service
     from services.config_service import init_config
     init_config(BEEKEEPER_HOME)
