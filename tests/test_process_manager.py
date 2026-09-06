@@ -698,3 +698,68 @@ def test_sequential_primary_runs_get_distinct_log_files(tmp_path):
     assert os.path.isfile(log2)
     process_manager._running.clear()
     process_manager._running.clear()
+
+
+# --- pre-launch abort: log must remain readable afterward ---
+
+def test_prelaunch_abort_archives_log_and_records_path(tmp_path):
+    """
+    A pre-launch failure (e.g. missing train_file) writes the failure message
+    to the run's log file but must also archive it and record log_file_path,
+    same as a real process crash does — otherwise get_run_log_path() has
+    nothing to resolve once the run drops out of _running, and the failure
+    reason becomes unreadable even though the file with it still exists.
+    """
+    from services import process_manager
+    process_manager._running.clear()
+    projects_dir = _make_project(tmp_path, train_file="does_not_exist.py")
+
+    mock_db = MagicMock(
+        create_training_run=MagicMock(return_value=77),
+        delete_training_run=MagicMock(),
+        get_training_runs=MagicMock(return_value=[]),
+        update_training_run=MagicMock(),
+    )
+
+    with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
+         patch("services.process_manager.subprocess.run", return_value=_ok_run()), \
+         patch("services.process_manager.subprocess.Popen") as mock_popen, \
+         patch("services.process_manager._update_project_json"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.get_db", return_value=mock_db):
+
+        process_manager.start_training(projects_dir, "myproject")
+
+    mock_popen.assert_not_called()
+
+    _, kwargs = mock_db.update_training_run.call_args
+    assert kwargs.get("status") == "crashed"
+    assert kwargs.get("log_file_path"), "pre-launch abort must archive the log, not leave log_file_path unset"
+
+    archived_path = os.path.join(projects_dir, "myproject", kwargs["log_file_path"])
+    assert os.path.isfile(archived_path)
+    assert "does_not_exist.py" in open(archived_path).read()
+
+    process_manager._running.clear()
+
+
+def test_get_run_log_path_falls_back_to_live_file_when_unarchived(tmp_path):
+    """
+    If a run's DB record has no log_file_path (or the archive is missing),
+    get_run_log_path() must fall back to the live per-run file it's known to
+    write to, not the pre-per-run-log "train.log" name nothing writes anymore.
+    """
+    from services import process_manager
+    process_manager._running.clear()
+    projects_dir = str(tmp_path / "projects")
+    os.makedirs(os.path.join(projects_dir, "myproject"), exist_ok=True)
+    live_log = os.path.join(projects_dir, "myproject", "train-5.log")
+    with open(live_log, "w") as f:
+        f.write("[beekeeper] Pre-launch failed: Training file not found: train.py\n")
+
+    mock_db = MagicMock(get_training_run=MagicMock(return_value={"log_file_path": None}))
+
+    with patch("services.process_manager.get_db", return_value=mock_db):
+        resolved = process_manager.get_run_log_path(projects_dir, "myproject", run_id=5)
+
+    assert resolved == live_log

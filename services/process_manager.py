@@ -293,6 +293,10 @@ def get_run_log_path(projects_dir: str, name: str, run_id: int | None = None) ->
             archived = os.path.join(projects_dir, name, run["log_file_path"])
             if os.path.isfile(archived):
                 return archived
+        # Not archived (e.g. a pre-launch failure) — the live per-run file,
+        # written directly by _execute_training/_abort, is still the source
+        # of truth; nothing writes the old shared "train.log" anymore.
+        return os.path.join(projects_dir, name, f"train-{run_id}.log")
 
     return os.path.join(projects_dir, name, "train.log")
 
@@ -635,7 +639,13 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
                 lf.write(f"[beekeeper] Pre-launch failed: {msg}\n")
         except Exception:
             pass
-        get_db().update_training_run(run_id, status="crashed")
+        archived_log_path = None
+        if os.path.isfile(log_path):
+            archived_log_path = _archive_run_log(projects_dir, name, run_id, log_path)
+        get_db().update_training_run(
+            run_id, status="crashed", ended_at=datetime.datetime.now(),
+            duration_seconds=0, log_file_path=archived_log_path,
+        )
         with _lock:
             _running.pop(run_id, None)
             remaining_after = _get_runs_for_project(name)
