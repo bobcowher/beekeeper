@@ -12,7 +12,7 @@ import time
 from typing import NoReturn
 from flask import Blueprint, abort, current_app, jsonify, request, Response
 
-from models.project import Project
+from models.project import Project, SETUP_ACTIVE_STATUSES
 from services.process_manager import start_training, stop_training, get_training_status, get_runs_for_project, get_run_log_path
 from services.stats_service import get_all_stats, get_cpu_stats, get_memory_stats, get_gpu_stats
 from services.db_service import get_db
@@ -922,16 +922,20 @@ def system_stats():
 @api_key_required
 def check_busy():
     """
-    Check if any training is running (useful before deploying/restarting).
+    Check if any training or project setup is running (useful before
+    deploying/restarting — a service restart kills setup's background thread
+    mid-clone/install just as it would a training run).
 
     Returns:
       {
         "busy": true/false,
-        "running_projects": ["project1", "project2"]
+        "running_projects": ["project1", "project2"],
+        "setting_up_projects": ["project3"]
       }
     """
     projects_dir = current_app.config["PROJECTS_DIR"]
     running_projects = []
+    setting_up_projects = []
 
     if os.path.isdir(projects_dir):
         for name in os.listdir(projects_dir):
@@ -940,10 +944,17 @@ def check_busy():
                 status = get_training_status(name)
                 if status.get("status") == "running":
                     running_projects.append(name)
+                try:
+                    project = Project.load(config_path)
+                except Exception:
+                    continue
+                if project.setup_status in SETUP_ACTIVE_STATUSES:
+                    setting_up_projects.append(name)
 
     return api_response(data={
-        "busy": len(running_projects) > 0,
-        "running_projects": running_projects
+        "busy": bool(running_projects or setting_up_projects),
+        "running_projects": running_projects,
+        "setting_up_projects": setting_up_projects,
     })
 
 

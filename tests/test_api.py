@@ -197,6 +197,21 @@ def test_api_v1_busy_checks_project_file_constant(client, ready_project, mocker)
     data = r.get_json()["data"]
     assert data["busy"] is True
     assert data["running_projects"] == ["myproject"]
+    assert data["setting_up_projects"] == []
+
+
+def test_api_v1_busy_true_while_setup_in_progress(client, app, mocker):
+    from conftest import make_project_dir
+    make_project_dir(app, name="setting-up", setup_status="installing_deps")
+    mocker.patch("routes.api_v1.get_training_status", return_value={"status": "idle"})
+
+    r = client.get("/api/v1/busy", headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 200
+    data = r.get_json()["data"]
+    assert data["busy"] is True
+    assert data["running_projects"] == []
+    assert data["setting_up_projects"] == ["setting-up"]
 
 
 def test_api_v1_capacity_counts_ready_project(client, ready_project):

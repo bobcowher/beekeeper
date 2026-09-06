@@ -3,6 +3,10 @@ import os
 import tempfile
 from dataclasses import dataclass, field, asdict
 
+# setup_status values where the background setup thread (project_service._setup_project)
+# is still running — clone, env creation, setup script, or pip install in flight.
+SETUP_ACTIVE_STATUSES = {"pending", "cloning", "creating_env", "running_setup_script", "installing_deps"}
+
 
 @dataclass
 class Project:

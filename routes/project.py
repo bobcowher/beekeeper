@@ -6,7 +6,7 @@ from flask import (
     request, redirect, url_for, abort, flash, jsonify,
 )
 
-from models.project import Project
+from models.project import Project, SETUP_ACTIVE_STATUSES
 from services.project_service import (
     create_project,
     delete_project,
@@ -272,9 +272,6 @@ def update(name):
     return redirect(url_for(_DETAIL_ROUTE, name=name))
 
 
-_SETUP_ACTIVE_STATUSES = {"pending", "cloning", "creating_env", "running_setup_script", "installing_deps"}
-
-
 @project_bp.route("/<name>/rename", methods=["POST"])
 def rename(name):
     projects_dir = current_app.config["PROJECTS_DIR"]
@@ -285,7 +282,7 @@ def rename(name):
     with open(config_path) as f:
         project_data = json.load(f)
 
-    if project_data.get("setup_status") in _SETUP_ACTIVE_STATUSES:
+    if project_data.get("setup_status") in SETUP_ACTIVE_STATUSES:
         flash("Cannot rename while setup is in progress.", "error")
         return redirect(url_for(_EDIT_ROUTE, name=name))
 
