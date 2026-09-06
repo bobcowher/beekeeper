@@ -105,6 +105,25 @@ def test_create_valid_redirects_to_detail(client, mocker):
     assert b"validproject" in resp.headers.get("Location", "").encode()
 
 
+def test_create_passes_env_vars_through(client, mocker):
+    mock_create = mocker.patch("routes.project.create_project")
+    resp = client.post("/projects/create", data={
+        "name": "envproject",
+        "git_url": "https://github.com/user/repo.git",
+        "branch": "main",
+        "python_version": "3.11",
+        "train_file": "train.py",
+        "tensorboard_log_dir": "runs",
+        "requirements_file": "requirements.txt",
+        "env_type": "venv",
+        "env_key": ["WANDB_API_KEY", ""],
+        "env_val": ["abc123", "ignored"],
+    }, follow_redirects=False)
+    assert resp.status_code == 302
+    _, data_arg = mock_create.call_args[0]
+    assert data_arg["env_vars"] == {"WANDB_API_KEY": "abc123"}
+
+
 # --- Project detail ---
 
 def test_project_detail_idle(client, ready_project, mocker):

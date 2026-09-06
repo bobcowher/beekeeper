@@ -31,7 +31,7 @@
     <div class="form-group">
         <label for="git_url">
             Git URL
-            <span class="tooltip-icon" title="URL of the Git repository to clone. Must be publicly accessible (no auth support yet).">?</span>
+            <span class="tooltip-icon" title="URL of the Git repository to clone. Use an SSH URL (git@...) for private repos — see Admin > SSH Key for the key to add to GitHub.">?</span>
         </label>
         <input type="text" id="git_url" name="git_url" required
                placeholder="https://github.com/user/repo.git">
@@ -152,6 +152,12 @@
         </div>
     </div>
 
+    <h2>Environment Variables <span class="optional-tag">optional</span></h2>
+    <p class="muted" style="margin-bottom: 12px">These are passed to the training process as environment variables.</p>
+
+    <div id="env-vars-list"></div>
+    <button type="button" class="btn btn-secondary" id="btn-add-env">+ Add Variable</button>
+
     <div class="form-actions">
         <button type="submit" class="btn btn-primary">Create Project</button>
         <a href="/" class="btn btn-cancel">Cancel</a>
@@ -186,5 +192,31 @@
     }
     dataDirCheckbox.addEventListener("change", toggleDataDir);
     toggleDataDir();
+
+    // Environment variable rows
+    const envList = document.getElementById("env-vars-list");
+    const btnAddEnv = document.getElementById("btn-add-env");
+
+    btnAddEnv.addEventListener("click", () => {
+        const row = document.createElement("div");
+        row.className = "env-var-row form-row";
+        row.innerHTML = `
+            <div class="form-group">
+                <input type="text" name="env_key" placeholder="KEY">
+            </div>
+            <div class="form-group">
+                <input type="text" name="env_val" placeholder="value">
+            </div>
+            <button type="button" class="btn btn-danger btn-sm btn-remove-env">&times;</button>
+        `;
+        envList.appendChild(row);
+        row.querySelector("input").focus();
+    });
+
+    envList.addEventListener("click", (e) => {
+        if (e.target.classList.contains("btn-remove-env")) {
+            e.target.closest(".env-var-row").remove();
+        }
+    });
 </script>
 {% endblock %}

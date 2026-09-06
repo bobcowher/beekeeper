@@ -97,6 +97,14 @@ def create():
         flash(str(e), "error")
         return redirect(url_for(_NEW_ROUTE))
 
+    env_keys = request.form.getlist("env_key")
+    env_vals = request.form.getlist("env_val")
+    env_vars = {}
+    for k, v in zip(env_keys, env_vals):
+        k = k.strip()
+        if k:
+            env_vars[k] = v
+
     data = {
         "name": name,
         "git_url": git_url,
@@ -111,6 +119,7 @@ def create():
         "data_dir_local": data_dir_local,
         "data_dir_remote": data_dir_remote,
         "output_paths": output_paths,
+        "env_vars": env_vars,
     }
 
     create_project(projects_dir, data)
