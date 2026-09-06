@@ -17,6 +17,7 @@ from services.python_versions import find_available, has_conda
 from services.process_manager import get_training_status, stop_tensorboard, get_runs_for_project
 from services.run_storage_service import delete_run_storage
 from services.db_service import get_db
+from services.ssh_key_service import is_ssh_auth_error
 
 project_bp = Blueprint("project", __name__, url_prefix="/projects")
 
@@ -150,6 +151,7 @@ def detail(name):
         mcp_server_path=mcp_server_path,
         total_runtime=_format_runtime(total_runtime_seconds),
         total_runtime_seconds=total_runtime_seconds,
+        ssh_auth_error=is_ssh_auth_error(project.get("setup_error", "")),
     )
 
 

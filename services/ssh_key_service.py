@@ -58,6 +58,19 @@ def ensure_instance_key(beekeeper_home):
         log.error("Failed to generate instance SSH key: %s", e)
 
 
+_SSH_AUTH_ERROR_MARKERS = (
+    "Permission denied (publickey)",
+    "Host key verification failed",
+)
+
+
+def is_ssh_auth_error(error_text):
+    """True if a git error looks like a missing/rejected SSH key, not e.g. a bad branch name."""
+    if not error_text:
+        return False
+    return any(marker in error_text for marker in _SSH_AUTH_ERROR_MARKERS)
+
+
 def regenerate_instance_key(beekeeper_home):
     """Discard the current keypair and generate a fresh one."""
     for path in (private_key_path(beekeeper_home), public_key_path(beekeeper_home)):

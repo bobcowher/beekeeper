@@ -44,6 +44,17 @@ def test_regenerate_instance_key_replaces_keypair(tmp_path):
     assert second != first
 
 
+def test_is_ssh_auth_error_detects_known_markers():
+    assert sks.is_ssh_auth_error("git@github.com: Permission denied (publickey).")
+    assert sks.is_ssh_auth_error("Host key verification failed.")
+
+
+def test_is_ssh_auth_error_ignores_unrelated_errors():
+    assert not sks.is_ssh_auth_error("fatal: could not read Username for 'https://github.com'")
+    assert not sks.is_ssh_auth_error("")
+    assert not sks.is_ssh_auth_error(None)
+
+
 def test_ensure_instance_key_swallows_missing_binary(tmp_path, monkeypatch):
     def _boom(*args, **kwargs):
         raise FileNotFoundError("ssh-keygen not found")
