@@ -25,13 +25,16 @@
 
 {% if project.get('setup_error') %}
 <div class="card flash-card">
-    <p class="flash flash-error">{{ project.setup_error }}</p>
+    <div class="setup-error-header">
+        <span class="setup-error-icon">&#9888;</span> Setup failed
+    </div>
+    <pre class="setup-error-output">{{ project.setup_error }}</pre>
     {% if ssh_auth_error %}
-    <p class="flash flash-error">
-        This looks like a missing or unauthorized SSH key. Beekeeper's SSH public key
-        needs to be added to GitHub (or wherever this repo is hosted) before it can
-        clone over SSH &mdash; see <a href="{{ url_for('admin.index') }}#ssh-key">Admin &rarr; SSH Key</a>.
-    </p>
+    <div class="setup-error-hint">
+        <strong>Missing or unauthorized SSH key.</strong> Beekeeper's SSH public key needs
+        to be added to GitHub (or wherever this repo is hosted) before it can clone over SSH.
+        <a href="{{ url_for('admin.index') }}#ssh-key">Go to Admin &rarr; SSH Key</a>
+    </div>
     {% endif %}
     <form action="{{ url_for('project.retry', name=project.name) }}" method="POST" style="margin-top: 10px">
         <button type="submit" class="btn btn-secondary">Retry Setup</button>
