@@ -9,6 +9,7 @@ import time
 
 from models.project import Project
 from services.python_versions import find_python, _find_conda_bin
+from services.git_utils import git_env
 
 log = logging.getLogger(__name__)
 
@@ -214,6 +215,7 @@ def _setup_project(projects_dir, project, is_retry=False):  # NOSONAR — sequen
                 subprocess.run(
                     ["git", "clone", "-b", project.branch, project.git_url, workspace_dir],
                     check=True, capture_output=True, text=True, timeout=300,
+                    env=git_env(),
                 )
             except subprocess.CalledProcessError as e:
                 _save_status("error", f"Git clone failed: {e.stderr.strip()}")

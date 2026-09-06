@@ -18,6 +18,7 @@ from services.stats_service import get_all_stats, get_cpu_stats, get_memory_stat
 from services.db_service import get_db
 from services.auth_service import api_key_required
 from services.project_service import validate_output_paths
+from services.git_utils import git_env
 from services.run_storage_service import delete_run_storage
 
 # Reuse helpers from existing routes
@@ -1868,7 +1869,8 @@ def list_branches(name):
             ["git", "ls-remote", "--heads", project.git_url],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
+            env=git_env(),
         )
 
         if result.returncode != 0:
@@ -1957,7 +1959,8 @@ def switch_branch(name):
             cwd=workspace_dir,
             capture_output=True,
             text=True,
-            timeout=60
+            timeout=60,
+            env=git_env(),
         )
 
         if fetch_result.returncode != 0:

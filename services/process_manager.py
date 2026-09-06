@@ -12,6 +12,7 @@ import shutil
 from models.project import Project
 from services.db_service import get_db
 from services.project_service import ensure_data_dir_symlink, validate_output_paths, validate_workspace_path
+from services.git_utils import git_env
 from services.run_storage_service import delete_run_storage, persistent_runs_root
 from services.stats_service import get_gpu_stats
 
@@ -654,6 +655,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
             result = subprocess.run(
                 ["git", "clone", git_url, workspace_dir],
                 capture_output=True, text=True, timeout=300,
+                env=git_env(),
             )
             if result.returncode != 0:
                 return _abort(f"Git clone failed: {result.stderr.strip()[-500:]}")
@@ -668,6 +670,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
             ["git", "fetch", "origin"],
             cwd=workspace_dir,
             capture_output=True, text=True, timeout=60,
+            env=git_env(),
         )
         if fetch.returncode != 0:
             return _abort(f"Git fetch failed: {fetch.stderr.strip()[-500:]}")
