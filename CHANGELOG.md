@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### New Features
+
+- GPU stats (`get_stats`, `get_capacity` MCP tools; `/api/v1/stats`, `/api/v1/capacity`) now
+  include compute platform info: per-GPU `compute_capability`, plus a host-wide `gpu_platform`
+  block with driver version and the max CUDA version the driver supports (what `nvidia-smi`'s
+  header shows) — what an agent needs before picking a PyTorch/JAX build for a project.
+  ROCm detection via `rocm-smi` is best-effort and untested (no AMD GPUs in this fleet).
+
 ### Bug Fixes
 
 - MCP `update_project` and `PATCH /api/v1/projects/<name>` now support setting the static

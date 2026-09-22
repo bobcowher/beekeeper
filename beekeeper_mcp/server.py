@@ -440,7 +440,19 @@ def rename_project(project_name: str, new_name: str) -> dict:
 
 @mcp.tool()
 def get_stats() -> dict:
-    """Get system stats: GPU utilization, VRAM, CPU, and RAM."""
+    """
+    Get system stats: GPU utilization, VRAM, CPU, and RAM.
+
+    Each entry in gpus[] includes compute_capability (e.g. "8.6"). gpu_platform
+    gives host-wide info shared across all GPUs (one driver per host):
+      platform          — "nvidia", "rocm", or "none"
+      driver_version    — installed driver version
+      max_cuda_version  — highest CUDA version the driver supports (nvidia only;
+                           what `nvidia-smi`'s header shows — not any CUDA toolkit
+                           version installed inside a project's venv)
+      rocm_version      — best-effort, rocm-smi based (rocm only)
+    Check this before picking a PyTorch/JAX build for a project's requirements.
+    """
     return _get("/stats")
 
 
@@ -472,10 +484,15 @@ def get_capacity() -> dict:
       - cpu: percent utilization, core count, current frequency (MHz)
       - memory: percent used, used_gb, total_gb (system RAM)
       - gpus: list of GPU dicts — index, name, gpu_util (%), mem_used/total/percent,
-              temp (°C), fan (%), power/power_limit (W); empty list if no NVIDIA GPUs
+              temp (°C), fan (%), power/power_limit (W), compute_capability
+              (e.g. "8.6"); empty list if no GPUs detected
+      - gpu_platform: host-wide info shared across all GPUs — platform ("nvidia",
+              "rocm", or "none"), driver_version, max_cuda_version (highest CUDA
+              the driver supports, nvidia only), rocm_version (best-effort, rocm only)
 
     Use this before starting a new run — it shows headroom AND whether the machine
     is already under load. Prefer over check_busy() for all new agent workflows.
+    Also check gpu_platform before picking a PyTorch/JAX build for requirements.txt.
     """
     return _get("/capacity")
 

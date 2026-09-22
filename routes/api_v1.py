@@ -14,7 +14,7 @@ from flask import Blueprint, abort, current_app, jsonify, request, Response
 
 from models.project import Project, SETUP_ACTIVE_STATUSES
 from services.process_manager import start_training, stop_training, get_training_status, get_runs_for_project, get_run_log_path
-from services.stats_service import get_all_stats, get_cpu_stats, get_memory_stats, get_gpu_stats
+from services.stats_service import get_all_stats, get_cpu_stats, get_memory_stats, get_gpu_stats, get_gpu_platform_info
 from services.db_service import get_db
 from services.auth_service import api_key_required
 from services.project_service import validate_output_paths
@@ -1026,6 +1026,7 @@ def get_capacity():
         "cpu": get_cpu_stats(),
         "memory": get_memory_stats(),
         "gpus": get_gpu_stats(),
+        "gpu_platform": get_gpu_platform_info(),
     })
 
 

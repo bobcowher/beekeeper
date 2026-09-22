@@ -178,6 +178,8 @@ def test_capacity_endpoint_shape(client):
     assert "available" in body
     assert "projects" in body
     assert body["available"] == body["total_slots"] - body["running"]
+    assert "gpu_platform" in body
+    assert body["gpu_platform"]["platform"] in ("nvidia", "rocm", "none")
 
 
 def test_api_v1_list_projects_reads_project_file_constant(client, ready_project):
