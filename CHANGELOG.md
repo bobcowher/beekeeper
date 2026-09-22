@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- MCP `update_project` and `PATCH /api/v1/projects/<name>` now support setting the static
+  data directory (`data_dir_enabled`, `data_dir_local`, `data_dir_remote`) on an existing
+  project — previously only settable at project creation, so an agent had no way to enable
+  or repoint it later. Symlink is created/repaired immediately if the workspace already exists.
+
 ---
 
 ## [1.0.9] - 2026-05-16

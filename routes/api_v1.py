@@ -433,8 +433,11 @@ def update_project_api(name):
     Training must be stopped before calling this.
 
     Editable fields: branch, train_file, tensorboard_log_dir, requirements_file,
-    setup_script, env_vars (dict), tb_logs_max_runs (int), run_history_max_runs (int).
+    setup_script, env_vars (dict), tb_logs_max_runs (int), run_history_max_runs (int),
+    data_dir_enabled (bool), data_dir_local (str), data_dir_remote (str).
     """
+    from services.project_service import ensure_data_dir_symlink
+
     project = load_project(name)
     data = request.get_json() or {}
 
@@ -504,6 +507,35 @@ def update_project_api(name):
             )
 
     projects_dir = current_app.config["PROJECTS_DIR"]
+
+    if "data_dir_enabled" in data or "data_dir_local" in data or "data_dir_remote" in data:
+        data_dir_enabled = data.get("data_dir_enabled", project.data_dir_enabled)
+        data_dir_local = (data.get("data_dir_local", project.data_dir_local) or "").strip() or "data"
+        data_dir_remote = (data.get("data_dir_remote", project.data_dir_remote) or "").strip()
+
+        if data_dir_enabled:
+            if not data_dir_remote:
+                return api_response(
+                    error_code="MISSING_DATA_DIR",
+                    error_message="data_dir_remote is required when data_dir_enabled is true",
+                    status_code=400
+                )
+            if not os.path.isdir(data_dir_remote):
+                return api_response(
+                    error_code="INVALID_DATA_DIR",
+                    error_message=f"System data path '{data_dir_remote}' does not exist or is not a directory",
+                    status_code=400
+                )
+            workspace_dir = os.path.join(projects_dir, name, "workspace")
+            if os.path.isdir(workspace_dir):
+                err = ensure_data_dir_symlink(workspace_dir, data_dir_local, data_dir_remote)
+                if err:
+                    return api_response(error_code="DATA_DIR_CONFLICT", error_message=err, status_code=409)
+
+        project.data_dir_enabled = bool(data_dir_enabled)
+        project.data_dir_local = data_dir_local
+        project.data_dir_remote = data_dir_remote
+
     project.save(projects_dir)
 
     return api_response(data={"project": project.to_dict()})

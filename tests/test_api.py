@@ -1,6 +1,7 @@
 """
 JSON API endpoint tests — verify correct status codes and response shapes.
 """
+import os
 import pytest
 
 
@@ -382,3 +383,97 @@ def test_api_v1_run_files_unknown_project_returns_404(client):
 
     assert r.status_code == 404
     assert r.get_json()["error"]["code"] == "NOT_FOUND"
+
+
+# --- Update project: static data directory ---
+
+def test_api_v1_update_project_enables_data_dir(client, ready_project, app, tmp_path):
+    remote = tmp_path / "system-data"
+    remote.mkdir()
+
+    r = client.patch(
+        "/api/v1/projects/myproject",
+        json={
+            "data_dir_enabled": True,
+            "data_dir_local": "data",
+            "data_dir_remote": str(remote),
+        },
+        headers={"Authorization": "Bearer test"},
+    )
+
+    assert r.status_code == 200
+    data = r.get_json()["data"]["project"]
+    assert data["data_dir_enabled"] is True
+    assert data["data_dir_local"] == "data"
+    assert data["data_dir_remote"] == str(remote)
+
+
+def test_api_v1_update_project_data_dir_requires_remote_path(client, ready_project):
+    r = client.patch(
+        "/api/v1/projects/myproject",
+        json={"data_dir_enabled": True},
+        headers={"Authorization": "Bearer test"},
+    )
+
+    assert r.status_code == 400
+    assert r.get_json()["error"]["code"] == "MISSING_DATA_DIR"
+
+
+def test_api_v1_update_project_data_dir_rejects_missing_path(client, ready_project):
+    r = client.patch(
+        "/api/v1/projects/myproject",
+        json={"data_dir_enabled": True, "data_dir_remote": "/does/not/exist"},
+        headers={"Authorization": "Bearer test"},
+    )
+
+    assert r.status_code == 400
+    assert r.get_json()["error"]["code"] == "INVALID_DATA_DIR"
+
+
+def test_api_v1_update_project_data_dir_creates_symlink_when_workspace_exists(
+    client, ready_project, app, tmp_path
+):
+    remote = tmp_path / "system-data"
+    remote.mkdir()
+    workspace_dir = os.path.join(app.config["PROJECTS_DIR"], "myproject", "workspace")
+    os.makedirs(workspace_dir)
+
+    r = client.patch(
+        "/api/v1/projects/myproject",
+        json={
+            "data_dir_enabled": True,
+            "data_dir_local": "data",
+            "data_dir_remote": str(remote),
+        },
+        headers={"Authorization": "Bearer test"},
+    )
+
+    assert r.status_code == 200
+    link_path = os.path.join(workspace_dir, "data")
+    assert os.path.islink(link_path)
+    assert os.readlink(link_path) == str(remote)
+
+
+def test_api_v1_update_project_data_dir_conflict_returns_409(
+    client, ready_project, app, tmp_path
+):
+    remote = tmp_path / "system-data"
+    remote.mkdir()
+    workspace_dir = os.path.join(app.config["PROJECTS_DIR"], "myproject", "workspace")
+    os.makedirs(workspace_dir)
+    # Pre-existing real file (not a symlink) at the target name — conflicts.
+    with open(os.path.join(workspace_dir, "data"), "w") as f:
+        f.write("not a symlink")
+
+    r = client.patch(
+        "/api/v1/projects/myproject",
+        json={
+            "data_dir_enabled": True,
+            "data_dir_local": "data",
+            "data_dir_remote": str(remote),
+        },
+        headers={"Authorization": "Bearer test"},
+    )
+
+    assert r.status_code == 409
+    assert r.get_json()["error"]["code"] == "DATA_DIR_CONFLICT"

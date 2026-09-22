@@ -165,12 +165,23 @@ def update_project(
     gpu_enabled: bool | None = None,
     gpu_memory_minimum: int | None = None,
     gpu_memory_preferred: int | None = None,
+    data_dir_enabled: bool | None = None,
+    data_dir_local: str | None = None,
+    data_dir_remote: str | None = None,
 ) -> dict:
     """
     Update editable settings for an existing project. Only the fields you provide
     are changed — omitted fields are left as-is. Training must be stopped first.
 
     env_vars replaces the entire env_vars dict; pass the full desired set of variables.
+
+    Static data directory (mounts a read-only system path into the workspace):
+      data_dir_enabled — enable the symlink (default: false)
+      data_dir_local   — workspace-relative symlink name the training script sees (default: "data")
+      data_dir_remote  — absolute path on the server to symlink from; must already exist
+                          and be a directory. Required when data_dir_enabled=True.
+    Applied immediately if the workspace exists (symlink created/repaired on this call),
+    otherwise applied on the next setup or training start.
 
     GPU memory management (opt-in per project):
       gpu_enabled         — enable GPU management for this project (default: false)
@@ -213,6 +224,12 @@ def update_project(
         body["gpu_memory_minimum"] = gpu_memory_minimum
     if gpu_memory_preferred is not None:
         body["gpu_memory_preferred"] = gpu_memory_preferred
+    if data_dir_enabled is not None:
+        body["data_dir_enabled"] = data_dir_enabled
+    if data_dir_local is not None:
+        body["data_dir_local"] = data_dir_local
+    if data_dir_remote is not None:
+        body["data_dir_remote"] = data_dir_remote
     return _patch(f"/projects/{project_name}", body)
 
 
