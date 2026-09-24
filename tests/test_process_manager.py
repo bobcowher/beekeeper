@@ -763,3 +763,47 @@ def test_get_run_log_path_falls_back_to_live_file_when_unarchived(tmp_path):
         resolved = process_manager.get_run_log_path(projects_dir, "myproject", run_id=5)
 
     assert resolved == live_log
+
+
+# --- GPU assignment env ---
+
+def _launch_with_gpu_management(tmp_path, env_vars=None):
+    """Run a gpu_enabled launch on a fake two-GPU host; return the env given to Popen."""
+    from services import process_manager
+    process_manager._running.clear()
+    projects_dir = _make_project(tmp_path, gpu_enabled=True, env_vars=env_vars or {})
+    gib = 1024 ** 3
+    gpus = [
+        {"index": 0, "name": "small", "mem_total": 12 * gib, "mem_used": 0},
+        {"index": 1, "name": "big", "mem_total": 24 * gib, "mem_used": 0},
+    ]
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=99),
+                        delete_training_run=MagicMock(),
+                        get_training_runs=MagicMock(return_value=[]))
+
+    with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
+         patch("services.process_manager.subprocess.run", return_value=_ok_run()), \
+         patch("services.process_manager.subprocess.Popen") as mock_popen, \
+         patch("services.process_manager._update_project_json"), \
+         patch("services.process_manager._monitor_process"), \
+         patch("services.process_manager.get_gpu_stats", return_value=gpus), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.get_db", return_value=mock_db):
+        mock_popen.return_value = MagicMock(pid=9999)
+        start_training(projects_dir, "myproject")
+    process_manager._running.clear()
+    return mock_popen.call_args.kwargs["env"]
+
+
+def test_gpu_assignment_pins_cuda_device_order_to_pci_bus_id(tmp_path):
+    """The assigned index comes from NVML (PCI order); CUDA must enumerate the same way."""
+    env = _launch_with_gpu_management(tmp_path)
+
+    assert env["CUDA_VISIBLE_DEVICES"] == "1"
+    assert env["CUDA_DEVICE_ORDER"] == "PCI_BUS_ID"
+
+
+def test_gpu_assignment_overrides_project_cuda_device_order(tmp_path):
+    env = _launch_with_gpu_management(tmp_path, env_vars={"CUDA_DEVICE_ORDER": "FASTEST_FIRST"})
+
+    assert env["CUDA_DEVICE_ORDER"] == "PCI_BUS_ID"

@@ -31,6 +31,7 @@ _BEEKEEPER_RUN_ENV_KEYS = {
 }
 
 _GPU_ENV_KEYS = {
+    "CUDA_DEVICE_ORDER",
     "CUDA_VISIBLE_DEVICES",
     "GPU_DEVICE",
     "GPU_OFFLOAD",
@@ -853,6 +854,9 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
             os.write(log_fd, (
                 f"[beekeeper] WARNING: Project env var {key} is reserved by GPU management and was overridden.\n"
             ).encode())
+        # gpu_assignment["index"] is an NVML (PCI bus order) index; CUDA's default
+        # FASTEST_FIRST order would resolve it to a different card.
+        proc_env["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         proc_env["CUDA_VISIBLE_DEVICES"] = str(gpu_assignment["index"])
         proc_env["GPU_DEVICE"] = "cuda:0"
         proc_env["GPU_MEMORY_FREE"] = str(free_mb)
