@@ -12,20 +12,23 @@ import time
 from typing import NoReturn
 from flask import Blueprint, abort, current_app, jsonify, request, Response
 
-from models.project import Project
+from models.project import Project, SETUP_ACTIVE_STATUSES
 from services.process_manager import start_training, stop_training, get_training_status, get_runs_for_project, get_run_log_path
-from services.stats_service import get_all_stats
+from services.stats_service import get_all_stats, get_cpu_stats, get_memory_stats, get_gpu_stats, get_gpu_platform_info
+from services.db_service import get_db
 from services.auth_service import api_key_required
 from services.project_service import validate_output_paths
+from services.git_utils import git_env
 from services.run_storage_service import delete_run_storage
 
 # Reuse helpers from existing routes
 from routes.training import _tail_offset
 from routes.files import _safe_path, _fmt_size, _zip_directory
+from routes.runs import _resolve_run_id, _safe_run_path
 
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
-SERVER_VERSION = "1.0.7"
+SERVER_VERSION = "1.1.0"
 MIN_MCP_VERSION = "0.1.1"
 PROJECT_FILE = "project.json"
 MCP_SERVER_FILE = "mcp_server.py"
@@ -210,13 +213,14 @@ def create_project():
 def get_project(name):
     """Get detailed project info including training status."""
     project = load_project(name)
-
     status = get_training_status(name)
+    total_runtime_seconds = get_db().get_project_total_runtime(name)
 
     return api_response(data={
         "project": {
             **project.to_dict(),
             "training": status,
+            "total_runtime_seconds": total_runtime_seconds,
         }
     })
 
@@ -352,6 +356,75 @@ def delete_project_api(name):
     return api_response(data={"deleted": name})
 
 
+@api_v1_bp.route("/projects/<name>/rename", methods=["POST"])
+@api_key_required
+def rename_project_api(name):
+    """
+    Rename a project directory and update all run history records.
+
+    Body: {"new_name": "my-new-name"}
+    Cannot rename while setup or training is active.
+    """
+    import re
+    import json
+
+    load_project(name)
+
+    status = get_training_status(name)
+    if status["status"] != "idle":
+        return api_response(
+            error_code="TRAINING_ACTIVE",
+            error_message="Cannot rename while training is active — stop training first",
+            status_code=409
+        )
+
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    config_path = os.path.join(projects_dir, name, PROJECT_FILE)
+    with open(config_path) as f:
+        project_data = json.load(f)
+
+    setup_active = ("pending", "cloning", "installing", "running")
+    if project_data.get("setup_status") in setup_active:
+        return api_response(
+            error_code="SETUP_ACTIVE",
+            error_message="Cannot rename while setup is in progress",
+            status_code=409
+        )
+
+    body = request.get_json() or {}
+    new_name = body.get("new_name", "").strip()
+    if not new_name or not re.match(r"^[a-zA-Z0-9_-]+$", new_name):
+        return api_response(
+            error_code="INVALID_NAME",
+            error_message="Invalid project name — use only letters, numbers, hyphens, underscores",
+            status_code=400
+        )
+
+    if new_name == name:
+        return api_response(data={"name": name, "renamed": False})
+
+    new_dir = os.path.join(projects_dir, new_name)
+    if os.path.exists(new_dir):
+        return api_response(
+            error_code="NAME_CONFLICT",
+            error_message=f"A project named '{new_name}' already exists",
+            status_code=409
+        )
+
+    old_dir = os.path.join(projects_dir, name)
+    os.rename(old_dir, new_dir)
+
+    project_data["name"] = new_name
+    new_config_path = os.path.join(new_dir, PROJECT_FILE)
+    with open(new_config_path, "w") as f:
+        json.dump(project_data, f, indent=2)
+
+    from services.db_service import get_db
+    get_db().rename_project_runs(name, new_name)
+
+    return api_response(data={"old_name": name, "name": new_name, "renamed": True})
+
+
 @api_v1_bp.route("/projects/<name>", methods=["PATCH"])
 @api_key_required
 def update_project_api(name):
@@ -360,8 +433,11 @@ def update_project_api(name):
     Training must be stopped before calling this.
 
     Editable fields: branch, train_file, tensorboard_log_dir, requirements_file,
-    setup_script, env_vars (dict), tb_logs_max_runs (int), run_history_max_runs (int).
+    setup_script, env_vars (dict), tb_logs_max_runs (int), run_history_max_runs (int),
+    data_dir_enabled (bool), data_dir_local (str), data_dir_remote (str).
     """
+    from services.project_service import ensure_data_dir_symlink
+
     project = load_project(name)
     data = request.get_json() or {}
 
@@ -409,8 +485,57 @@ def update_project_api(name):
                 error_message="run_history_max_runs must be an integer",
                 status_code=400
             )
+    if "gpu_enabled" in data:
+        project.gpu_enabled = bool(data["gpu_enabled"])
+    if "gpu_memory_minimum" in data:
+        try:
+            project.gpu_memory_minimum = max(0, int(data["gpu_memory_minimum"]))
+        except (ValueError, TypeError):
+            return api_response(
+                error_code="INVALID_GPU_MEMORY_MINIMUM",
+                error_message="gpu_memory_minimum must be a non-negative integer (MB)",
+                status_code=400
+            )
+    if "gpu_memory_preferred" in data:
+        try:
+            project.gpu_memory_preferred = max(0, int(data["gpu_memory_preferred"]))
+        except (ValueError, TypeError):
+            return api_response(
+                error_code="INVALID_GPU_MEMORY_PREFERRED",
+                error_message="gpu_memory_preferred must be a non-negative integer (MB)",
+                status_code=400
+            )
 
     projects_dir = current_app.config["PROJECTS_DIR"]
+
+    if "data_dir_enabled" in data or "data_dir_local" in data or "data_dir_remote" in data:
+        data_dir_enabled = data.get("data_dir_enabled", project.data_dir_enabled)
+        data_dir_local = (data.get("data_dir_local", project.data_dir_local) or "").strip() or "data"
+        data_dir_remote = (data.get("data_dir_remote", project.data_dir_remote) or "").strip()
+
+        if data_dir_enabled:
+            if not data_dir_remote:
+                return api_response(
+                    error_code="MISSING_DATA_DIR",
+                    error_message="data_dir_remote is required when data_dir_enabled is true",
+                    status_code=400
+                )
+            if not os.path.isdir(data_dir_remote):
+                return api_response(
+                    error_code="INVALID_DATA_DIR",
+                    error_message=f"System data path '{data_dir_remote}' does not exist or is not a directory",
+                    status_code=400
+                )
+            workspace_dir = os.path.join(projects_dir, name, "workspace")
+            if os.path.isdir(workspace_dir):
+                err = ensure_data_dir_symlink(workspace_dir, data_dir_local, data_dir_remote)
+                if err:
+                    return api_response(error_code="DATA_DIR_CONFLICT", error_message=err, status_code=409)
+
+        project.data_dir_enabled = bool(data_dir_enabled)
+        project.data_dir_local = data_dir_local
+        project.data_dir_remote = data_dir_remote
+
     project.save(projects_dir)
 
     return api_response(data={"project": project.to_dict()})
@@ -454,7 +579,8 @@ def training_status(name):
     """Get active training runs for a project."""
     load_project(name)
     runs = get_runs_for_project(name)
-    return api_response(data={"runs": runs})
+    status = get_training_status(name)
+    return api_response(data={"runs": runs, "tb_port": status.get("tb_port")})
 
 
 # ---------------------------------------------------------------------------
@@ -601,9 +727,9 @@ def analyze_logs(name):
         if log_file_path:
             log_path = os.path.join(projects_dir, name, log_file_path)
         else:
-            log_path = os.path.join(projects_dir, name, "train.log")
+            log_path = get_run_log_path(projects_dir, name, run_id=run_id)
     else:
-        log_path = os.path.join(projects_dir, name, "train.log")
+        log_path = get_run_log_path(projects_dir, name)
 
     if not os.path.isfile(log_path):
         return api_response(
@@ -828,16 +954,20 @@ def system_stats():
 @api_key_required
 def check_busy():
     """
-    Check if any training is running (useful before deploying/restarting).
+    Check if any training or project setup is running (useful before
+    deploying/restarting — a service restart kills setup's background thread
+    mid-clone/install just as it would a training run).
 
     Returns:
       {
         "busy": true/false,
-        "running_projects": ["project1", "project2"]
+        "running_projects": ["project1", "project2"],
+        "setting_up_projects": ["project3"]
       }
     """
     projects_dir = current_app.config["PROJECTS_DIR"]
     running_projects = []
+    setting_up_projects = []
 
     if os.path.isdir(projects_dir):
         for name in os.listdir(projects_dir):
@@ -846,10 +976,17 @@ def check_busy():
                 status = get_training_status(name)
                 if status.get("status") == "running":
                     running_projects.append(name)
+                try:
+                    project = Project.load(config_path)
+                except Exception:
+                    continue
+                if project.setup_status in SETUP_ACTIVE_STATUSES:
+                    setting_up_projects.append(name)
 
     return api_response(data={
-        "busy": len(running_projects) > 0,
-        "running_projects": running_projects
+        "busy": bool(running_projects or setting_up_projects),
+        "running_projects": running_projects,
+        "setting_up_projects": setting_up_projects,
     })
 
 
@@ -886,6 +1023,10 @@ def get_capacity():
         "running": total_running,
         "available": total_slots - total_running,
         "projects": project_list,
+        "cpu": get_cpu_stats(),
+        "memory": get_memory_stats(),
+        "gpus": get_gpu_stats(),
+        "gpu_platform": get_gpu_platform_info(),
     })
 
 
@@ -1033,6 +1174,87 @@ def get_run_logs_json(name, run_id):
             error_message=f"Failed to read log file: {e}",
             status_code=500
         )
+
+
+@api_v1_bp.route("/projects/<name>/runs/<run_id_str>/files", methods=["GET"])
+@api_v1_bp.route("/projects/<name>/runs/<run_id_str>/files/<path:subpath>", methods=["GET"])
+@api_key_required
+def run_files(name, run_id_str, subpath=""):
+    """Browse or download files from a specific run's persistent storage.
+
+    run_id_str may be an integer run id or 'latest'. Use this instead of the
+    project-level /projects/<name>/files endpoint when fetching artifacts —
+    that endpoint resolves against the current workspace symlink, which is
+    shared and can be repointed by other runs (including parallel ones).
+    """
+    load_project(name)
+
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    run_id = _resolve_run_id(projects_dir, name, run_id_str)
+    if run_id is None:
+        return api_response(
+            error_code="NOT_FOUND",
+            error_message=f"No run with artifacts found for '{run_id_str}'",
+            status_code=404
+        )
+
+    _, target = _safe_run_path(projects_dir, name, run_id, subpath)
+    if target is None:
+        return api_response(
+            error_code="FORBIDDEN",
+            error_message="Path traversal not allowed",
+            status_code=403
+        )
+
+    if not os.path.exists(target):
+        return api_response(
+            error_code="NOT_FOUND",
+            error_message=f"Path not found: {subpath or '/'}",
+            status_code=404
+        )
+
+    if os.path.isfile(target):
+        from flask import send_file
+        return send_file(target, as_attachment=True)
+
+    if request.args.get("zip") == "1":
+        label = subpath.replace("/", "-") if subpath else f"run_{run_id}"
+        return _zip_directory(target, label)
+
+    try:
+        items = sorted(os.listdir(target))
+    except PermissionError:
+        return api_response(
+            error_code="FORBIDDEN",
+            error_message="Permission denied",
+            status_code=403
+        )
+
+    entries = []
+    for item in items:
+        if item.startswith(".") or item == "__pycache__":
+            continue
+        full = os.path.join(target, item)
+        rel = os.path.join(subpath, item) if subpath else item
+        if os.path.isdir(full):
+            entries.append({
+                "name": item, "type": "dir", "path": rel,
+                "size": None, "size_h": None, "mtime": os.path.getmtime(full),
+            })
+        else:
+            sz = os.path.getsize(full)
+            entries.append({
+                "name": item, "type": "file", "path": rel,
+                "size": sz, "size_h": _fmt_size(sz), "mtime": os.path.getmtime(full),
+            })
+
+    entries.sort(key=lambda e: (0 if e["type"] == "dir" else 1, e["name"].lower()))
+
+    return api_response(data={
+        "run_id": run_id,
+        "path": subpath or "",
+        "entries": entries,
+    })
 
 
 @api_v1_bp.route("/projects/<name>/runs/clear", methods=["DELETE"])
@@ -1443,6 +1665,10 @@ analyze_run(<name>)
 get_logs(<name>, tail=100)
 ```
 
+> **Raw logs are for error and crash diagnosis only.** Do not characterize episode reward
+> trends from `get_logs` output — RL episode variance is too high for a windowed tail sample
+> to be meaningful. For trend assessment, use `analyze_run` (TensorBoard-backed).
+
 ### Start training
 ```
 check_busy()                      # confirm nothing else is running
@@ -1536,6 +1762,10 @@ get_logs("{name}", tail=100)   # raw logs for errors or debug messages
 
 `analyze_run` combines TensorBoard and log-based episode analysis. If TensorBoard hasn't
 flushed yet, the log-based section still works.
+
+> **Raw logs are for error and crash diagnosis only.** Do not characterize episode reward
+> trends from `get_logs` output — RL episode variance is too high for a windowed tail sample
+> to be meaningful. For trend assessment, always use `analyze_run` (TensorBoard-backed).
 
 ### Start training
 ```
@@ -1631,10 +1861,15 @@ Beekeeper injects these env vars into every training process:
 | `TENSORBOARD_LOG_DIR` | Same — generic alias |
 
 If a user asks where their model weights, checkpoints, or exports are:
-1. Call `get_project("{name}")` and check `run_history` for the relevant run's `persistent_dir`.
-2. The artifact is at `<persistent_dir>/<path>` relative to the project root.
-3. They can browse or download it via the Beekeeper file browser in the UI, or with
-   `GET /api/v1/projects/{name}/files/<path>?zip=1` for a directory download.
+1. Call `get_project("{name}")` and check `run_history` for the relevant run's `id`.
+2. Fetch it with `GET /api/v1/projects/{name}/runs/<run_id>/files/<path>` — use `latest`
+   in place of `<run_id>` if no specific run was requested. Add `?zip=1` to download a
+   directory as a zip instead of listing it.
+3. Do NOT use `GET /api/v1/projects/{name}/files/<path>` for artifacts — that endpoint
+   resolves against the current workspace symlink, which is shared project-wide and can
+   be repointed by other runs (including parallel ones), so it can silently serve the
+   wrong run's data or 404 once a run's workspace is cleaned up. It's for browsing the
+   live workspace only (source code, configs), not for fetching run outputs.
 
 If a user asks how their training script should write checkpoints or outputs:
 - Recommend using `os.environ.get("BEEKEEPER_RUN_DIR", ".")` as the base path.
@@ -1678,7 +1913,8 @@ def list_branches(name):
             ["git", "ls-remote", "--heads", project.git_url],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
+            env=git_env(),
         )
 
         if result.returncode != 0:
@@ -1761,29 +1997,14 @@ def switch_branch(name):
         )
 
     try:
-        # Check for uncommitted changes
-        status_result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=workspace_dir,
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-
-        if status_result.stdout.strip():
-            return api_response(
-                error_code="UNCOMMITTED_CHANGES",
-                error_message="Uncommitted changes in workspace",
-                status_code=409
-            )
-
         # Fetch from origin
         fetch_result = subprocess.run(
             ["git", "fetch", "origin"],
             cwd=workspace_dir,
             capture_output=True,
             text=True,
-            timeout=60
+            timeout=60,
+            env=git_env(),
         )
 
         if fetch_result.returncode != 0:
@@ -1793,19 +2014,19 @@ def switch_branch(name):
                 status_code=500
             )
 
-        # Checkout the branch - try local first, then track remote
+        # Checkout the branch, discarding any local workspace changes
         checkout_result = subprocess.run(
-            ["git", "checkout", new_branch],
+            ["git", "checkout", "-f", new_branch],
             cwd=workspace_dir,
             capture_output=True,
             text=True,
             timeout=30
         )
 
-        # If local checkout failed, try to track remote branch
+        # If local branch doesn't exist, track remote
         if checkout_result.returncode != 0:
             checkout_result = subprocess.run(
-                ["git", "checkout", "--track", f"origin/{new_branch}"],
+                ["git", "checkout", "-f", "--track", f"origin/{new_branch}"],
                 cwd=workspace_dir,
                 capture_output=True,
                 text=True,

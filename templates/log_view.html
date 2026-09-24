@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Run #{{ run_id }} Log — {{ project_name }} — Beekeeper{% endblock %}
+{% block content %}
+<div style="display:flex; align-items:center; gap:1rem; margin-bottom:1rem; flex-wrap:wrap;">
+    <a href="/projects/{{ project_name }}" class="btn btn-secondary btn-sm">&#8592; {{ project_name }}</a>
+    <h2 style="margin:0; color:var(--accent)">Run #{{ run_id }} Log</h2>
+    <a href="{{ url_for('training.history_log_download', name=project_name, run_id=run_id) }}" class="btn btn-secondary btn-sm" style="margin-left:auto">&#8681; Download</a>
+</div>
+<div class="card" style="padding:0">
+    <pre class="run-log-terminal" style="margin:0; max-height:80vh; overflow-y:auto; border-radius:4px">{{ content }}</pre>
+</div>
+{% endblock %}

@@ -35,7 +35,7 @@ from fastmcp import FastMCP
 BEEKEEPER_HOST = os.environ.get("BEEKEEPER_HOST", "http://localhost:5000").rstrip("/")
 BEEKEEPER_API_KEY = os.environ.get("BEEKEEPER_API_KEY", "")
 
-MCP_VERSION = "0.1.3"
+MCP_VERSION = "0.2.0"
 
 mcp = FastMCP("Beekeeper")
 
@@ -162,12 +162,44 @@ def update_project(
     env_vars: dict | None = None,
     tb_logs_max_runs: int | None = None,
     run_history_max_runs: int | None = None,
+    gpu_enabled: bool | None = None,
+    gpu_memory_minimum: int | None = None,
+    gpu_memory_preferred: int | None = None,
+    data_dir_enabled: bool | None = None,
+    data_dir_local: str | None = None,
+    data_dir_remote: str | None = None,
 ) -> dict:
     """
     Update editable settings for an existing project. Only the fields you provide
     are changed — omitted fields are left as-is. Training must be stopped first.
 
     env_vars replaces the entire env_vars dict; pass the full desired set of variables.
+
+    Static data directory (mounts a read-only system path into the workspace):
+      data_dir_enabled — enable the symlink (default: false)
+      data_dir_local   — workspace-relative symlink name the training script sees (default: "data")
+      data_dir_remote  — absolute path on the server to symlink from; must already exist
+                          and be a directory. Required when data_dir_enabled=True.
+    Applied immediately if the workspace exists (symlink created/repaired on this call),
+    otherwise applied on the next setup or training start.
+
+    GPU memory management (opt-in per project):
+      gpu_enabled         — enable GPU management for this project (default: false)
+      gpu_memory_minimum  — MB; hard floor; run rejected if free VRAM is below this (0 = no check)
+      gpu_memory_preferred — MB; full allocation including offloadable memory like replay buffers
+                            (0 = no offload flag); if free VRAM < preferred but >= minimum,
+                            GPU_OFFLOAD=1 is injected so the script can offload soft allocations.
+
+    When gpu_enabled=True, these env vars are injected into every training run:
+      CUDA_VISIBLE_DEVICES  — physical GPU index (transparent; script always sees cuda:0)
+      GPU_DEVICE            — "cuda:0" — use directly with torch.device()
+      GPU_MEMORY_FREE       — MB free at launch time
+      GPU_MEMORY_MINIMUM    — MB, from project config
+      GPU_MEMORY_PREFERRED  — MB, from project config
+      GPU_OFFLOAD           — "0" or "1"; "1" means free VRAM < preferred, offload soft allocs
+
+    Typical script pattern:
+      buffer_device = "cpu" if os.environ.get("GPU_OFFLOAD") == "1" else "cuda"
     """
     body = {}
     if branch is not None:
@@ -186,6 +218,18 @@ def update_project(
         body["tb_logs_max_runs"] = tb_logs_max_runs
     if run_history_max_runs is not None:
         body["run_history_max_runs"] = run_history_max_runs
+    if gpu_enabled is not None:
+        body["gpu_enabled"] = gpu_enabled
+    if gpu_memory_minimum is not None:
+        body["gpu_memory_minimum"] = gpu_memory_minimum
+    if gpu_memory_preferred is not None:
+        body["gpu_memory_preferred"] = gpu_memory_preferred
+    if data_dir_enabled is not None:
+        body["data_dir_enabled"] = data_dir_enabled
+    if data_dir_local is not None:
+        body["data_dir_local"] = data_dir_local
+    if data_dir_remote is not None:
+        body["data_dir_remote"] = data_dir_remote
     return _patch(f"/projects/{project_name}", body)
 
 
@@ -243,6 +287,11 @@ def start_training(project_name: str, branch: str | None = None) -> dict:
     Start training for a project. branch overrides the project's configured default.
     The pre-launch sequence (git sync, pip install) runs first — 30-120s.
     Returns run_id. Use training_status() to confirm the run is active.
+
+    If GPU management is enabled (gpu_enabled=True on the project), a VRAM pre-flight
+    check runs before launching. The run is rejected if free VRAM is below
+    gpu_memory_minimum. On success, GPU_DEVICE, GPU_OFFLOAD, and GPU_MEMORY_* env vars
+    are injected into the training process. See update_project() for full details.
     """
     body = {"branch": branch} if branch else {}
     try:
@@ -304,9 +353,21 @@ def analyze_run(project_name: str, run_id: int | None = None) -> dict:
     for each active run keyed by run_id.
     """
     if run_id is not None:
+        run_meta = _get(f"/projects/{project_name}/runs/{run_id}")
+        run_data = run_meta.get("data", {}).get("run", {})
         tb = _get(f"/projects/{project_name}/tensorboard/latest?run_id={run_id}")
         logs = _get(f"/projects/{project_name}/runs/{run_id}/logs?tail_lines=300")
-        return {"run_id": run_id, "tensorboard": tb, "logs": logs}
+        return {
+            "run_id": run_id,
+            "branch": run_data.get("branch"),
+            "commit_sha": run_data.get("commit_sha"),
+            "status": run_data.get("status"),
+            "started_at": run_data.get("started_at"),
+            "ended_at": run_data.get("ended_at"),
+            "duration_seconds": run_data.get("duration_seconds"),
+            "tensorboard": tb,
+            "logs": logs,
+        }
 
     status = _get(f"/projects/{project_name}/training/status")
     runs = status.get("data", status).get("runs", [])
@@ -315,14 +376,32 @@ def analyze_run(project_name: str, run_id: int | None = None) -> dict:
     if len(active_ids) > 1:
         results = {}
         for rid in active_ids:
+            run_meta = _get(f"/projects/{project_name}/runs/{rid}")
+            run_data = run_meta.get("data", {}).get("run", {})
             tb = _get(f"/projects/{project_name}/tensorboard/latest?run_id={rid}")
             logs = _get(f"/projects/{project_name}/runs/{rid}/logs?tail_lines=300")
-            results[str(rid)] = {"run_id": rid, "tensorboard": tb, "logs": logs}
+            results[str(rid)] = {
+                "run_id": rid,
+                "branch": run_data.get("branch"),
+                "commit_sha": run_data.get("commit_sha"),
+                "status": run_data.get("status"),
+                "tensorboard": tb,
+                "logs": logs,
+            }
         return {"parallel_runs": results}
 
+    # Single active run — get branch from the active run list entry
+    active_run = runs[0] if runs else {}
     tb = _get(f"/projects/{project_name}/tensorboard/latest")
     logs = _get(f"/projects/{project_name}/logs?tail=300")
-    return {"tensorboard": tb, "logs": logs}
+    return {
+        "run_id": active_run.get("run_id"),
+        "branch": active_run.get("branch"),
+        "commit_sha": active_run.get("commit_sha"),
+        "status": active_run.get("status"),
+        "tensorboard": tb,
+        "logs": logs,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -344,13 +423,36 @@ def switch_branch(project_name: str, branch: str) -> dict:
     return _post(f"/projects/{project_name}/branch", {"branch": branch})
 
 
+@mcp.tool()
+def rename_project(project_name: str, new_name: str) -> dict:
+    """
+    Rename a project. Updates the directory name and all run history records.
+
+    Cannot rename while setup or training is active — stop training first.
+    new_name must contain only letters, numbers, hyphens, and underscores.
+    """
+    return _post(f"/projects/{project_name}/rename", {"new_name": new_name})
+
+
 # ---------------------------------------------------------------------------
 # System
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
 def get_stats() -> dict:
-    """Get system stats: GPU utilization, VRAM, CPU, and RAM."""
+    """
+    Get system stats: GPU utilization, VRAM, CPU, and RAM.
+
+    Each entry in gpus[] includes compute_capability (e.g. "8.6"). gpu_platform
+    gives host-wide info shared across all GPUs (one driver per host):
+      platform          — "nvidia", "rocm", or "none"
+      driver_version    — installed driver version
+      max_cuda_version  — highest CUDA version the driver supports (nvidia only;
+                           what `nvidia-smi`'s header shows — not any CUDA toolkit
+                           version installed inside a project's venv)
+      rocm_version      — best-effort, rocm-smi based (rocm only)
+    Check this before picking a PyTorch/JAX build for a project's requirements.
+    """
     return _get("/stats")
 
 
@@ -374,9 +476,23 @@ def check_busy() -> dict:
 @mcp.tool()
 def get_capacity() -> dict:
     """
-    System-wide training capacity. Returns total_slots, running, available, and per-project breakdown.
-    Use this before starting a new run — it tells you not just busy/free but how much headroom exists.
-    Prefer this over check_busy() for any new agent workflows.
+    System-wide training capacity and current resource utilization.
+
+    Returns:
+      - total_slots / running / available: aggregate slot counts across all projects
+      - projects: per-project breakdown (running_runs, max_runs)
+      - cpu: percent utilization, core count, current frequency (MHz)
+      - memory: percent used, used_gb, total_gb (system RAM)
+      - gpus: list of GPU dicts — index, name, gpu_util (%), mem_used/total/percent,
+              temp (°C), fan (%), power/power_limit (W), compute_capability
+              (e.g. "8.6"); empty list if no GPUs detected
+      - gpu_platform: host-wide info shared across all GPUs — platform ("nvidia",
+              "rocm", or "none"), driver_version, max_cuda_version (highest CUDA
+              the driver supports, nvidia only), rocm_version (best-effort, rocm only)
+
+    Use this before starting a new run — it shows headroom AND whether the machine
+    is already under load. Prefer over check_busy() for all new agent workflows.
+    Also check gpu_platform before picking a PyTorch/JAX build for requirements.txt.
     """
     return _get("/capacity")
 

@@ -3,6 +3,10 @@ import os
 import tempfile
 from dataclasses import dataclass, field, asdict
 
+# setup_status values where the background setup thread (project_service._setup_project)
+# is still running — clone, env creation, setup script, or pip install in flight.
+SETUP_ACTIVE_STATUSES = {"pending", "cloning", "creating_env", "running_setup_script", "installing_deps"}
+
 
 @dataclass
 class Project:
@@ -31,6 +35,9 @@ class Project:
     parallel_runs_enabled: bool = False
     max_parallel_runs: int = 2
     output_paths: list = field(default_factory=list)
+    gpu_enabled: bool = False
+    gpu_memory_minimum: int = 0   # MB — hard floor; run rejected if free VRAM is below this
+    gpu_memory_preferred: int = 0  # MB — full ask including offloadable allocations
 
     def to_dict(self):
         return asdict(self)

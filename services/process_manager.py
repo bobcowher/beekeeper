@@ -12,7 +12,9 @@ import shutil
 from models.project import Project
 from services.db_service import get_db
 from services.project_service import ensure_data_dir_symlink, validate_output_paths, validate_workspace_path
+from services.git_utils import git_env
 from services.run_storage_service import delete_run_storage, persistent_runs_root
+from services.stats_service import get_gpu_stats
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +28,16 @@ _BEEKEEPER_RUN_ENV_KEYS = {
     "BEEKEEPER_RUN_DIR",
     "BEEKEEPER_TENSORBOARD_DIR",
     "TENSORBOARD_LOG_DIR",
+}
+
+_GPU_ENV_KEYS = {
+    "CUDA_DEVICE_ORDER",
+    "CUDA_VISIBLE_DEVICES",
+    "GPU_DEVICE",
+    "GPU_OFFLOAD",
+    "GPU_MEMORY_FREE",
+    "GPU_MEMORY_MINIMUM",
+    "GPU_MEMORY_PREFERRED",
 }
 
 
@@ -262,7 +274,7 @@ def get_runs_for_project(name: str) -> list:
 
 
 def get_run_log_path(projects_dir: str, name: str, run_id: int | None = None) -> str:
-    """Return the active log file path for a run. Falls back to train.log."""
+    """Return the log file path for a run. For completed runs, resolves via DB."""
     with _lock:
         if run_id is not None:
             info = _running.get(run_id)
@@ -275,6 +287,18 @@ def get_run_log_path(projects_dir: str, name: str, run_id: int | None = None) ->
             ]
             if len(active) == 1 and active[0].get("log_path"):
                 return active[0]["log_path"]
+
+    if run_id is not None:
+        run = get_db().get_training_run(run_id)
+        if run and run.get("log_file_path"):
+            archived = os.path.join(projects_dir, name, run["log_file_path"])
+            if os.path.isfile(archived):
+                return archived
+        # Not archived (e.g. a pre-launch failure) — the live per-run file,
+        # written directly by _execute_training/_abort, is still the source
+        # of truth; nothing writes the old shared "train.log" anymore.
+        return os.path.join(projects_dir, name, f"train-{run_id}.log")
+
     return os.path.join(projects_dir, name, "train.log")
 
 
@@ -421,6 +445,10 @@ def _write_run_header(log_fd, meta, project):
     for i, g in enumerate(meta["gpu_info"]):
         label = "  gpu     :" if i == 0 else "           "
         lines.append(f"{label} {g}")
+    asgn = meta.get("gpu_assignment")
+    if asgn:
+        offload = "1" if (project.get("gpu_memory_preferred", 0) > 0 and asgn["free_mb"] < project.get("gpu_memory_preferred", 0)) else "0"
+        lines.append(f"  gpu mgmt: GPU {asgn['index']}, {asgn['free_mb']} MB free at launch, GPU_OFFLOAD={offload}")
     lines += [sep, ""]
     os.write(log_fd, ("\n".join(lines) + "\n").encode())
 
@@ -552,6 +580,27 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
             get_db().delete_training_run(run_id)
             return {"error": f"At capacity ({max_runs} parallel runs)"}
 
+        # GPU pre-flight check — atomic with slot reservation so parallel starts
+        # can't both see the same free VRAM and both pass.
+        gpu_assignment = None
+        if project.get("gpu_enabled", False):
+            gpus = get_gpu_stats()
+            if not gpus:
+                get_db().delete_training_run(run_id)
+                return {"error": "GPU management is enabled but no NVIDIA GPUs were detected"}
+            minimum_mb = project.get("gpu_memory_minimum", 0)
+            best = max(gpus, key=lambda g: g["mem_total"] - g["mem_used"])
+            free_mb = (best["mem_total"] - best["mem_used"]) // (1024 * 1024)
+            if minimum_mb > 0 and free_mb < minimum_mb:
+                get_db().delete_training_run(run_id)
+                return {
+                    "error": (
+                        f"Insufficient VRAM: {minimum_mb} MB required, "
+                        f"{free_mb} MB free on {best['name']} (GPU {best['index']})"
+                    )
+                }
+            gpu_assignment = {"index": best["index"], "free_mb": free_mb}
+
         primary_in_use = any(info.get("workspace_dir") == primary_ws for info in active_runs)
         workspace_dir = (
             primary_ws if not primary_in_use
@@ -571,7 +620,7 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
 
     thread = threading.Thread(
         target=_execute_training,
-        args=(projects_dir, name, project, python_bin, run_id, branch, workspace_dir),
+        args=(projects_dir, name, project, python_bin, run_id, branch, workspace_dir, gpu_assignment),
         daemon=True,
     )
     thread.start()
@@ -579,14 +628,10 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
     return {"run_id": run_id, "status": "starting"}
 
 
-def _execute_training(projects_dir, name, project, python_bin, run_id, branch, workspace_dir):  # NOSONAR — sequential pre-launch pipeline
+def _execute_training(projects_dir, name, project, python_bin, run_id, branch, workspace_dir, gpu_assignment=None):  # NOSONAR — sequential pre-launch pipeline
     """Run the full pre-launch sequence and start the training subprocess (runs in background thread)."""
     is_parallel = workspace_dir != os.path.join(projects_dir, name, "workspace")
-    log_path = (
-        os.path.join(projects_dir, name, f"train-{run_id}.log")
-        if is_parallel
-        else os.path.join(projects_dir, name, "train.log")
-    )
+    log_path = os.path.join(projects_dir, name, f"train-{run_id}.log")
 
     def _abort(msg):
         log.error("Pre-launch failed for %s run %d: %s", name, run_id, msg)
@@ -595,7 +640,13 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
                 lf.write(f"[beekeeper] Pre-launch failed: {msg}\n")
         except Exception:
             pass
-        get_db().update_training_run(run_id, status="crashed")
+        archived_log_path = None
+        if os.path.isfile(log_path):
+            archived_log_path = _archive_run_log(projects_dir, name, run_id, log_path)
+        get_db().update_training_run(
+            run_id, status="crashed", ended_at=datetime.datetime.now(),
+            duration_seconds=0, log_file_path=archived_log_path,
+        )
         with _lock:
             _running.pop(run_id, None)
             remaining_after = _get_runs_for_project(name)
@@ -615,6 +666,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
             result = subprocess.run(
                 ["git", "clone", git_url, workspace_dir],
                 capture_output=True, text=True, timeout=300,
+                env=git_env(),
             )
             if result.returncode != 0:
                 return _abort(f"Git clone failed: {result.stderr.strip()[-500:]}")
@@ -629,6 +681,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
             ["git", "fetch", "origin"],
             cwd=workspace_dir,
             capture_output=True, text=True, timeout=60,
+            env=git_env(),
         )
         if fetch.returncode != 0:
             return _abort(f"Git fetch failed: {fetch.stderr.strip()[-500:]}")
@@ -645,6 +698,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
         return _abort(f"Git sync failed: {e}")
 
     run_meta = _collect_run_metadata(workspace_dir, python_bin, branch)
+    run_meta["gpu_assignment"] = gpu_assignment
 
     # Update the pre-created DB record with full metadata
     get_db().update_training_run(
@@ -703,7 +757,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
     if os.path.isfile(req_path):
         try:
             result = subprocess.run(
-                [python_bin, "-m", "pip", "install", "-r", req_path, "--quiet"],
+                [python_bin, "-m", "pip", "install", "--upgrade", "--upgrade-strategy", "only-if-needed", "-r", req_path, "--quiet"],
                 capture_output=True, text=True, timeout=300,
             )
             if result.returncode != 0:
@@ -791,6 +845,24 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
     proc_env["BEEKEEPER_RUN_DIR"] = persistent_run_dir
     proc_env["BEEKEEPER_TENSORBOARD_DIR"] = persistent_run_dir
     proc_env["TENSORBOARD_LOG_DIR"] = persistent_run_dir
+
+    if gpu_assignment:
+        preferred_mb = project.get("gpu_memory_preferred", 0)
+        minimum_mb = project.get("gpu_memory_minimum", 0)
+        free_mb = gpu_assignment["free_mb"]
+        for key in sorted(_GPU_ENV_KEYS & set(project_env)):
+            os.write(log_fd, (
+                f"[beekeeper] WARNING: Project env var {key} is reserved by GPU management and was overridden.\n"
+            ).encode())
+        # gpu_assignment["index"] is an NVML (PCI bus order) index; CUDA's default
+        # FASTEST_FIRST order would resolve it to a different card.
+        proc_env["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+        proc_env["CUDA_VISIBLE_DEVICES"] = str(gpu_assignment["index"])
+        proc_env["GPU_DEVICE"] = "cuda:0"
+        proc_env["GPU_MEMORY_FREE"] = str(free_mb)
+        proc_env["GPU_MEMORY_MINIMUM"] = str(minimum_mb)
+        proc_env["GPU_MEMORY_PREFERRED"] = str(preferred_mb)
+        proc_env["GPU_OFFLOAD"] = "1" if (preferred_mb > 0 and free_mb < preferred_mb) else "0"
 
     try:
         proc = subprocess.Popen(

@@ -99,6 +99,9 @@ def test_pip_install_called_with_requirements_file(tmp_path):
     assert "-m" in pip_calls[0]
     assert "pip" in pip_calls[0]
     assert "install" in pip_calls[0]
+    assert "--upgrade" in pip_calls[0]
+    assert "--upgrade-strategy" in pip_calls[0]
+    assert "only-if-needed" in pip_calls[0]
     assert "-r" in pip_calls[0]
     assert any("requirements.txt" in arg for arg in pip_calls[0])
 
@@ -448,7 +451,7 @@ def test_primary_workspace_output_conflict_warns_and_skips_symlink(tmp_path):
     assert "error" not in result
     assert os.path.isdir(conflict_dir)
     assert not os.path.islink(conflict_dir)
-    with open(os.path.join(projects_dir, "myproject", "train.log")) as f:
+    with open(os.path.join(projects_dir, "myproject", "train-44.log")) as f:
         log_content = f.read()
     assert "Could not protect output path 'saved_models'" in log_content
     process_manager._running.clear()
@@ -533,7 +536,7 @@ def test_reserved_run_env_var_is_overridden_and_warned(tmp_path):
         result = process_manager.start_training(projects_dir, "myproject")
 
     assert "error" not in result
-    with open(os.path.join(projects_dir, "myproject", "train.log")) as f:
+    with open(os.path.join(projects_dir, "myproject", "train-46.log")) as f:
         log_content = f.read()
     assert "Project env var BEEKEEPER_RUN_DIR is reserved by Beekeeper" in log_content
     process_manager._running.clear()
@@ -648,4 +651,159 @@ def test_start_training_returns_run_id(tmp_path):
         result = process_manager.start_training(projects_dir, "myproject")
 
     assert result.get("run_id") == 42
+
+
+def test_sequential_primary_runs_get_distinct_log_files(tmp_path):
+    """
+    Two non-parallel runs that both land on the primary workspace slot must get
+    their own log files. Previously both wrote to the same "train.log", so a
+    second run starting before the first's monitor thread archived its log
+    could truncate and overwrite it mid-archive.
+    """
+    from services import process_manager
     process_manager._running.clear()
+    projects_dir = _make_project(tmp_path)
+
+    mock_db = MagicMock(
+        create_training_run=MagicMock(side_effect=[50, 51]),
+        delete_training_run=MagicMock(),
+        get_training_runs=MagicMock(return_value=[]),
+    )
+
+    def fake_popen(cmd, **kwargs):
+        proc = MagicMock()
+        proc.pid = 9999
+        return proc
+
+    with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
+         patch("services.process_manager._resolve_tensorboard_binary", return_value=None), \
+         patch("services.process_manager._update_project_json"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.subprocess.run", return_value=_ok_run()), \
+         patch("services.process_manager.subprocess.Popen", side_effect=fake_popen), \
+         patch("services.process_manager._monitor_process"), \
+         patch("services.process_manager.get_db", return_value=mock_db):
+        result1 = process_manager.start_training(projects_dir, "myproject")
+        # Simulate run 50's monitor thread freeing the primary slot before
+        # archiving has happened — the exact window the race lived in.
+        process_manager._running.clear()
+        result2 = process_manager.start_training(projects_dir, "myproject")
+
+    assert "error" not in result1
+    assert "error" not in result2
+
+    log1 = os.path.join(projects_dir, "myproject", "train-50.log")
+    log2 = os.path.join(projects_dir, "myproject", "train-51.log")
+    assert os.path.isfile(log1)
+    assert os.path.isfile(log2)
+    process_manager._running.clear()
+    process_manager._running.clear()
+
+
+# --- pre-launch abort: log must remain readable afterward ---
+
+def test_prelaunch_abort_archives_log_and_records_path(tmp_path):
+    """
+    A pre-launch failure (e.g. missing train_file) writes the failure message
+    to the run's log file but must also archive it and record log_file_path,
+    same as a real process crash does — otherwise get_run_log_path() has
+    nothing to resolve once the run drops out of _running, and the failure
+    reason becomes unreadable even though the file with it still exists.
+    """
+    from services import process_manager
+    process_manager._running.clear()
+    projects_dir = _make_project(tmp_path, train_file="does_not_exist.py")
+
+    mock_db = MagicMock(
+        create_training_run=MagicMock(return_value=77),
+        delete_training_run=MagicMock(),
+        get_training_runs=MagicMock(return_value=[]),
+        update_training_run=MagicMock(),
+    )
+
+    with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
+         patch("services.process_manager.subprocess.run", return_value=_ok_run()), \
+         patch("services.process_manager.subprocess.Popen") as mock_popen, \
+         patch("services.process_manager._update_project_json"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.get_db", return_value=mock_db):
+
+        process_manager.start_training(projects_dir, "myproject")
+
+    mock_popen.assert_not_called()
+
+    _, kwargs = mock_db.update_training_run.call_args
+    assert kwargs.get("status") == "crashed"
+    assert kwargs.get("log_file_path"), "pre-launch abort must archive the log, not leave log_file_path unset"
+
+    archived_path = os.path.join(projects_dir, "myproject", kwargs["log_file_path"])
+    assert os.path.isfile(archived_path)
+    assert "does_not_exist.py" in open(archived_path).read()
+
+    process_manager._running.clear()
+
+
+def test_get_run_log_path_falls_back_to_live_file_when_unarchived(tmp_path):
+    """
+    If a run's DB record has no log_file_path (or the archive is missing),
+    get_run_log_path() must fall back to the live per-run file it's known to
+    write to, not the pre-per-run-log "train.log" name nothing writes anymore.
+    """
+    from services import process_manager
+    process_manager._running.clear()
+    projects_dir = str(tmp_path / "projects")
+    os.makedirs(os.path.join(projects_dir, "myproject"), exist_ok=True)
+    live_log = os.path.join(projects_dir, "myproject", "train-5.log")
+    with open(live_log, "w") as f:
+        f.write("[beekeeper] Pre-launch failed: Training file not found: train.py\n")
+
+    mock_db = MagicMock(get_training_run=MagicMock(return_value={"log_file_path": None}))
+
+    with patch("services.process_manager.get_db", return_value=mock_db):
+        resolved = process_manager.get_run_log_path(projects_dir, "myproject", run_id=5)
+
+    assert resolved == live_log
+
+
+# --- GPU assignment env ---
+
+def _launch_with_gpu_management(tmp_path, env_vars=None):
+    """Run a gpu_enabled launch on a fake two-GPU host; return the env given to Popen."""
+    from services import process_manager
+    process_manager._running.clear()
+    projects_dir = _make_project(tmp_path, gpu_enabled=True, env_vars=env_vars or {})
+    gib = 1024 ** 3
+    gpus = [
+        {"index": 0, "name": "small", "mem_total": 12 * gib, "mem_used": 0},
+        {"index": 1, "name": "big", "mem_total": 24 * gib, "mem_used": 0},
+    ]
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=99),
+                        delete_training_run=MagicMock(),
+                        get_training_runs=MagicMock(return_value=[]))
+
+    with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
+         patch("services.process_manager.subprocess.run", return_value=_ok_run()), \
+         patch("services.process_manager.subprocess.Popen") as mock_popen, \
+         patch("services.process_manager._update_project_json"), \
+         patch("services.process_manager._monitor_process"), \
+         patch("services.process_manager.get_gpu_stats", return_value=gpus), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.get_db", return_value=mock_db):
+        mock_popen.return_value = MagicMock(pid=9999)
+        start_training(projects_dir, "myproject")
+    process_manager._running.clear()
+    return mock_popen.call_args.kwargs["env"]
+
+
+def test_gpu_assignment_pins_cuda_device_order_to_pci_bus_id(tmp_path):
+    """The assigned index comes from NVML (PCI order); CUDA must enumerate the same way."""
+    env = _launch_with_gpu_management(tmp_path)
+
+    assert env["CUDA_VISIBLE_DEVICES"] == "1"
+    assert env["CUDA_DEVICE_ORDER"] == "PCI_BUS_ID"
+
+
+def test_gpu_assignment_overrides_project_cuda_device_order(tmp_path):
+    env = _launch_with_gpu_management(tmp_path, env_vars={"CUDA_DEVICE_ORDER": "FASTEST_FIRST"})
+
+    assert env["CUDA_DEVICE_ORDER"] == "PCI_BUS_ID"

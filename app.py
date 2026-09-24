@@ -5,7 +5,7 @@ import subprocess
 from flask import Flask
 
 BEEKEEPER_HOME = os.path.dirname(os.path.abspath(__file__))
-APP_VERSION = "1.0.9"
+APP_VERSION = "1.1.0"
 
 
 def _git_value(args, default="unknown"):
@@ -62,6 +62,9 @@ def create_app():
 
     os.makedirs(app.config["PROJECTS_DIR"], exist_ok=True)
 
+    from services.ssh_key_service import ensure_instance_key
+    ensure_instance_key(BEEKEEPER_HOME)
+
     # Initialize config service
     from services.config_service import init_config
     init_config(BEEKEEPER_HOME)
@@ -77,6 +80,7 @@ def create_app():
     from routes.stats import stats_bp
     from routes.training import training_bp
     from routes.files import files_bp
+    from routes.runs import runs_bp
     from routes.api_v1 import api_v1_bp
     from routes.auth import auth_bp
     from routes.admin import admin_bp
@@ -86,6 +90,7 @@ def create_app():
     app.register_blueprint(stats_bp)
     app.register_blueprint(training_bp)
     app.register_blueprint(files_bp)
+    app.register_blueprint(runs_bp)
     app.register_blueprint(api_v1_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(admin_bp)

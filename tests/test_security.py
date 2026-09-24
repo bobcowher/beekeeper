@@ -74,6 +74,37 @@ def test_safe_path_blocks_sibling_directory(tmp_path):
     assert target is None
 
 
+# --- output_path symlinks into persistent/ ---
+
+def test_safe_path_allows_symlink_into_persistent(tmp_path):
+    """Workspace symlinks created by output_paths resolve into persistent/ — must be allowed."""
+    projects_dir = str(tmp_path / "projects")
+    persistent_target = os.path.join(projects_dir, "myproject", "persistent", "runs", "run_1", "checkpoints")
+    os.makedirs(persistent_target)
+    workspace = os.path.join(projects_dir, "myproject", "workspace")
+    os.makedirs(workspace)
+    symlink = os.path.join(workspace, "checkpoints")
+    os.symlink(persistent_target, symlink)
+
+    _, target = _safe_path(projects_dir, "myproject", "checkpoints")
+    assert target is not None
+    assert "persistent" in target
+
+
+def test_safe_path_blocks_symlink_outside_project(tmp_path):
+    """A symlink escaping to outside the project directory must still be blocked."""
+    projects_dir = str(tmp_path / "projects")
+    workspace = os.path.join(projects_dir, "myproject", "workspace")
+    os.makedirs(workspace)
+    outside = str(tmp_path / "outside")
+    os.makedirs(outside)
+    symlink = os.path.join(workspace, "escape")
+    os.symlink(outside, symlink)
+
+    _, target = _safe_path(projects_dir, "myproject", "escape")
+    assert target is None
+
+
 # --- Via HTTP ---
 
 def test_http_traversal_blocked(client, ready_project, app):

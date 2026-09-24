@@ -480,6 +480,46 @@ label {
     color: var(--danger);
 }
 
+.setup-error-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--danger);
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 8px;
+}
+
+.setup-error-output {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    border-left: 3px solid var(--danger);
+    border-radius: 4px;
+    padding: 10px 12px;
+    margin: 0 0 10px 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.setup-error-hint {
+    font-size: 13px;
+    color: var(--text-primary);
+    background: rgba(232, 185, 49, 0.1);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 8px 12px;
+}
+
+.setup-error-hint a {
+    color: var(--accent);
+    font-weight: 600;
+}
+
 /* Status badges */
 .status-badge {
     font-size: 11px;

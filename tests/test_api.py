@@ -1,6 +1,7 @@
 """
 JSON API endpoint tests — verify correct status codes and response shapes.
 """
+import os
 import pytest
 
 
@@ -177,6 +178,8 @@ def test_capacity_endpoint_shape(client):
     assert "available" in body
     assert "projects" in body
     assert body["available"] == body["total_slots"] - body["running"]
+    assert "gpu_platform" in body
+    assert body["gpu_platform"]["platform"] in ("nvidia", "rocm", "none")
 
 
 def test_api_v1_list_projects_reads_project_file_constant(client, ready_project):
@@ -197,6 +200,21 @@ def test_api_v1_busy_checks_project_file_constant(client, ready_project, mocker)
     data = r.get_json()["data"]
     assert data["busy"] is True
     assert data["running_projects"] == ["myproject"]
+    assert data["setting_up_projects"] == []
+
+
+def test_api_v1_busy_true_while_setup_in_progress(client, app, mocker):
+    from conftest import make_project_dir
+    make_project_dir(app, name="setting-up", setup_status="installing_deps")
+    mocker.patch("routes.api_v1.get_training_status", return_value={"status": "idle"})
+
+    r = client.get("/api/v1/busy", headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 200
+    data = r.get_json()["data"]
+    assert data["busy"] is True
+    assert data["running_projects"] == []
+    assert data["setting_up_projects"] == ["setting-up"]
 
 
 def test_api_v1_capacity_counts_ready_project(client, ready_project):
@@ -255,3 +273,209 @@ def test_training_history_update_missing_run_uses_shared_message(client, mocker)
 
     assert r.status_code == 404
     assert r.get_json()["error"] == "Run not found"
+
+
+# --- API v1 run-scoped artifact files ---
+
+def _make_run_dir(app, name, run_id, files=None):
+    """Create projects/<name>/persistent/runs/run_<id>/ with optional file contents."""
+    import os
+    run_dir = os.path.join(app.config["PROJECTS_DIR"], name, "persistent", "runs", f"run_{run_id}")
+    os.makedirs(run_dir, exist_ok=True)
+    for rel_path, content in (files or {}).items():
+        full = os.path.join(run_dir, rel_path)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w") as f:
+            f.write(content)
+    return run_dir
+
+
+def test_api_v1_run_files_lists_directory(client, ready_project, app):
+    _make_run_dir(app, "myproject", 5, {"config.yaml": "lr: 0.001", "checkpoints/model.ckpt": "weights"})
+
+    r = client.get("/api/v1/projects/myproject/runs/5/files",
+                    headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data["success"] is True
+    names = {e["name"] for e in data["data"]["entries"]}
+    assert names == {"config.yaml", "checkpoints"}
+
+
+def test_api_v1_run_files_downloads_file(client, ready_project, app):
+    _make_run_dir(app, "myproject", 5, {"config.yaml": "lr: 0.001"})
+
+    r = client.get("/api/v1/projects/myproject/runs/5/files/config.yaml",
+                    headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 200
+    assert r.data == b"lr: 0.001"
+    assert r.headers["Content-Disposition"].startswith("attachment")
+
+
+def test_api_v1_run_files_zip_download(client, ready_project, app):
+    _make_run_dir(app, "myproject", 5, {"checkpoints/model.ckpt": "weights"})
+
+    r = client.get("/api/v1/projects/myproject/runs/5/files/checkpoints?zip=1",
+                    headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 200
+    assert r.headers["Content-Type"] == "application/zip"
+
+
+def test_api_v1_run_files_latest_resolves_to_run_with_artifacts(client, ready_project, app, mocker):
+    _make_run_dir(app, "myproject", 4, {"model.ckpt": "old"})
+    _make_run_dir(app, "myproject", 6, {"model.ckpt": "new"})
+
+    db = mocker.MagicMock()
+    db.get_training_runs.return_value = [{"id": 6}, {"id": 4}]  # newest first
+    mocker.patch("routes.runs.get_db", return_value=db)
+
+    r = client.get("/api/v1/projects/myproject/runs/latest/files/model.ckpt",
+                    headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 200
+    assert r.data == b"new"
+
+
+def test_api_v1_run_files_latest_with_no_artifacts_returns_404(client, ready_project, app, mocker):
+    db = mocker.MagicMock()
+    db.get_training_runs.return_value = [{"id": 6}]
+    mocker.patch("routes.runs.get_db", return_value=db)
+
+    r = client.get("/api/v1/projects/myproject/runs/latest/files",
+                    headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 404
+    assert r.get_json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_api_v1_run_files_unknown_run_id_returns_404(client, ready_project):
+    r = client.get("/api/v1/projects/myproject/runs/999/files",
+                    headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 404
+    assert r.get_json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_api_v1_run_files_missing_subpath_returns_404(client, ready_project, app):
+    _make_run_dir(app, "myproject", 5)
+
+    r = client.get("/api/v1/projects/myproject/runs/5/files/nope.txt",
+                    headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 404
+    assert r.get_json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_api_v1_run_files_path_traversal_returns_403(client, ready_project, app):
+    _make_run_dir(app, "myproject", 5)
+
+    r = client.get("/api/v1/projects/myproject/runs/5/files/../../../etc/passwd",
+                    headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 403
+    assert r.get_json()["error"]["code"] == "FORBIDDEN"
+
+
+def test_api_v1_run_files_unknown_project_returns_404(client):
+    r = client.get("/api/v1/projects/ghost/runs/5/files",
+                    headers={"Authorization": "Bearer test"})
+
+    assert r.status_code == 404
+    assert r.get_json()["error"]["code"] == "NOT_FOUND"
+
+
+# --- Update project: static data directory ---
+
+def test_api_v1_update_project_enables_data_dir(client, ready_project, app, tmp_path):
+    remote = tmp_path / "system-data"
+    remote.mkdir()
+
+    r = client.patch(
+        "/api/v1/projects/myproject",
+        json={
+            "data_dir_enabled": True,
+            "data_dir_local": "data",
+            "data_dir_remote": str(remote),
+        },
+        headers={"Authorization": "Bearer test"},
+    )
+
+    assert r.status_code == 200
+    data = r.get_json()["data"]["project"]
+    assert data["data_dir_enabled"] is True
+    assert data["data_dir_local"] == "data"
+    assert data["data_dir_remote"] == str(remote)
+
+
+def test_api_v1_update_project_data_dir_requires_remote_path(client, ready_project):
+    r = client.patch(
+        "/api/v1/projects/myproject",
+        json={"data_dir_enabled": True},
+        headers={"Authorization": "Bearer test"},
+    )
+
+    assert r.status_code == 400
+    assert r.get_json()["error"]["code"] == "MISSING_DATA_DIR"
+
+
+def test_api_v1_update_project_data_dir_rejects_missing_path(client, ready_project):
+    r = client.patch(
+        "/api/v1/projects/myproject",
+        json={"data_dir_enabled": True, "data_dir_remote": "/does/not/exist"},
+        headers={"Authorization": "Bearer test"},
+    )
+
+    assert r.status_code == 400
+    assert r.get_json()["error"]["code"] == "INVALID_DATA_DIR"
+
+
+def test_api_v1_update_project_data_dir_creates_symlink_when_workspace_exists(
+    client, ready_project, app, tmp_path
+):
+    remote = tmp_path / "system-data"
+    remote.mkdir()
+    workspace_dir = os.path.join(app.config["PROJECTS_DIR"], "myproject", "workspace")
+    os.makedirs(workspace_dir)
+
+    r = client.patch(
+        "/api/v1/projects/myproject",
+        json={
+            "data_dir_enabled": True,
+            "data_dir_local": "data",
+            "data_dir_remote": str(remote),
+        },
+        headers={"Authorization": "Bearer test"},
+    )
+
+    assert r.status_code == 200
+    link_path = os.path.join(workspace_dir, "data")
+    assert os.path.islink(link_path)
+    assert os.readlink(link_path) == str(remote)
+
+
+def test_api_v1_update_project_data_dir_conflict_returns_409(
+    client, ready_project, app, tmp_path
+):
+    remote = tmp_path / "system-data"
+    remote.mkdir()
+    workspace_dir = os.path.join(app.config["PROJECTS_DIR"], "myproject", "workspace")
+    os.makedirs(workspace_dir)
+    # Pre-existing real file (not a symlink) at the target name — conflicts.
+    with open(os.path.join(workspace_dir, "data"), "w") as f:
+        f.write("not a symlink")
+
+    r = client.patch(
+        "/api/v1/projects/myproject",
+        json={
+            "data_dir_enabled": True,
+            "data_dir_local": "data",
+            "data_dir_remote": str(remote),
+        },
+        headers={"Authorization": "Bearer test"},
+    )
+
+    assert r.status_code == 409
+    assert r.get_json()["error"]["code"] == "DATA_DIR_CONFLICT"

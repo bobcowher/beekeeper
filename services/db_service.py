@@ -470,6 +470,16 @@ class DatabaseService:
             ).fetchone()
             return row['count']
 
+    def get_project_total_runtime(self, project_name: str) -> int:
+        """Sum of duration_seconds across all runs for a project. Returns 0 if none."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                'SELECT COALESCE(SUM(duration_seconds), 0) as total '
+                'FROM training_runs WHERE project_name = ?',
+                (project_name,)
+            ).fetchone()
+            return int(row['total']) if row else 0
+
     def update_run_annotations(self, run_id: int, **fields):
         """Update notes, notable, and/or tags on a run record."""
         allowed = {'notes': str, 'notable': int, 'tags': str}
@@ -517,6 +527,16 @@ class DatabaseService:
             cursor = conn.execute(
                 'DELETE FROM training_runs WHERE project_name = ?',
                 (project_name,)
+            )
+            conn.commit()
+            return cursor.rowcount
+
+    def rename_project_runs(self, old_name: str, new_name: str) -> int:
+        """Update project_name on all run records. Returns count updated."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                'UPDATE training_runs SET project_name = ? WHERE project_name = ?',
+                (new_name, old_name)
             )
             conn.commit()
             return cursor.rowcount

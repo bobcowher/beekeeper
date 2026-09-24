@@ -6,7 +6,7 @@ from flask import (
     request, redirect, url_for, abort, flash, jsonify,
 )
 
-from models.project import Project
+from models.project import Project, SETUP_ACTIVE_STATUSES
 from services.project_service import (
     create_project,
     delete_project,
@@ -16,6 +16,8 @@ from services.project_service import (
 from services.python_versions import find_available, has_conda
 from services.process_manager import get_training_status, stop_tensorboard, get_runs_for_project
 from services.run_storage_service import delete_run_storage
+from services.db_service import get_db
+from services.ssh_key_service import is_ssh_auth_error
 
 project_bp = Blueprint("project", __name__, url_prefix="/projects")
 
@@ -23,6 +25,23 @@ _PROJECT_FILE = "project.json"
 _DETAIL_ROUTE = "project.detail"
 _NEW_ROUTE = "project.new"
 _EDIT_ROUTE = "project.edit"
+
+
+def _format_runtime(seconds: int) -> str:
+    """Human-readable duration: '3d 2h 15m', '45m', '< 1m'."""
+    if not seconds:
+        return "—"
+    d, rem = divmod(int(seconds), 86400)
+    h, rem = divmod(rem, 3600)
+    m, _ = divmod(rem, 60)
+    parts = []
+    if d:
+        parts.append(f"{d}d")
+    if h:
+        parts.append(f"{h}h")
+    if m:
+        parts.append(f"{m}m")
+    return " ".join(parts) if parts else "< 1m"
 
 
 @project_bp.route("/new", methods=["GET"])
@@ -78,6 +97,14 @@ def create():
         flash(str(e), "error")
         return redirect(url_for(_NEW_ROUTE))
 
+    env_keys = request.form.getlist("env_key")
+    env_vals = request.form.getlist("env_val")
+    env_vars = {}
+    for k, v in zip(env_keys, env_vals):
+        k = k.strip()
+        if k:
+            env_vars[k] = v
+
     data = {
         "name": name,
         "git_url": git_url,
@@ -92,6 +119,7 @@ def create():
         "data_dir_local": data_dir_local,
         "data_dir_remote": data_dir_remote,
         "output_paths": output_paths,
+        "env_vars": env_vars,
     }
 
     create_project(projects_dir, data)
@@ -121,10 +149,19 @@ def detail(name):
             p.save(projects_dir)
         project['train_status'] = 'stopped'
 
+    total_runtime_seconds = get_db().get_project_total_runtime(name)
     beekeeper_home = current_app.config["BEEKEEPER_HOME"]
     mcp_server_path = os.path.join(beekeeper_home, "mcp_server.py")
-    return render_template("project.html", project=project, training=training, runs=runs,
-                           mcp_server_path=mcp_server_path)
+    return render_template(
+        "project.html",
+        project=project,
+        training=training,
+        runs=runs,
+        mcp_server_path=mcp_server_path,
+        total_runtime=_format_runtime(total_runtime_seconds),
+        total_runtime_seconds=total_runtime_seconds,
+        ssh_auth_error=is_ssh_auth_error(project.get("setup_error", "")),
+    )
 
 
 @project_bp.route("/<name>/edit", methods=["GET"])
@@ -216,12 +253,70 @@ def update(name):
     except (ValueError, TypeError):
         project_data["max_parallel_runs"] = 2
 
+    # GPU memory management
+    project_data["gpu_enabled"] = bool(request.form.get("gpu_enabled"))
+    try:
+        project_data["gpu_memory_minimum"] = max(0, int(request.form.get("gpu_memory_minimum") or 0))
+    except (ValueError, TypeError):
+        project_data["gpu_memory_minimum"] = 0
+    try:
+        project_data["gpu_memory_preferred"] = max(0, int(request.form.get("gpu_memory_preferred") or 0))
+    except (ValueError, TypeError):
+        project_data["gpu_memory_preferred"] = 0
+
     from models.project import Project
     project = Project(**project_data)
     project.save(projects_dir)
 
     flash("Project settings updated.", "success")
     return redirect(url_for(_DETAIL_ROUTE, name=name))
+
+
+@project_bp.route("/<name>/rename", methods=["POST"])
+def rename(name):
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
+    if not os.path.isfile(config_path):
+        abort(404)
+
+    with open(config_path) as f:
+        project_data = json.load(f)
+
+    if project_data.get("setup_status") in SETUP_ACTIVE_STATUSES:
+        flash("Cannot rename while setup is in progress.", "error")
+        return redirect(url_for(_EDIT_ROUTE, name=name))
+
+    training = get_training_status(name)
+    if training["status"] != "idle":
+        flash("Cannot rename while training is active.", "error")
+        return redirect(url_for(_EDIT_ROUTE, name=name))
+
+    new_name = request.form.get("new_name", "").strip()
+    if not new_name or not re.match(r"^[a-zA-Z0-9_-]+$", new_name):
+        flash("Invalid project name. Use only letters, numbers, hyphens, underscores.", "error")
+        return redirect(url_for(_EDIT_ROUTE, name=name))
+
+    if new_name == name:
+        return redirect(url_for(_EDIT_ROUTE, name=name))
+
+    new_dir = os.path.join(projects_dir, new_name)
+    if os.path.exists(new_dir):
+        flash(f"A project named '{new_name}' already exists.", "error")
+        return redirect(url_for(_EDIT_ROUTE, name=name))
+
+    old_dir = os.path.join(projects_dir, name)
+    os.rename(old_dir, new_dir)
+
+    project_data["name"] = new_name
+    new_config_path = os.path.join(new_dir, _PROJECT_FILE)
+    with open(new_config_path, "w") as f:
+        json.dump(project_data, f, indent=2)
+
+    from services.db_service import get_db
+    get_db().rename_project_runs(name, new_name)
+
+    flash(f"Project renamed to '{new_name}'.", "success")
+    return redirect(url_for(_EDIT_ROUTE, name=new_name))
 
 
 @project_bp.route("/<name>/retry-setup", methods=["POST"])
@@ -247,9 +342,13 @@ def clear_tb_logs(name):
         project = json.load(f)
 
     tb_logdir = os.path.join(projects_dir, name, "workspace", project.get("tensorboard_log_dir", "runs"))
-    if os.path.isdir(tb_logdir):
-        shutil.rmtree(tb_logdir)
-        os.makedirs(tb_logdir, exist_ok=True)
+    # tb_logdir may be a symlink into persistent/runs/run_<id>/ (set up by
+    # _ensure_workspace_symlink for the most recent run) — shutil.rmtree refuses
+    # to operate on a symlink itself, so clear the link target instead.
+    clear_target = os.path.realpath(tb_logdir) if os.path.islink(tb_logdir) else tb_logdir
+    if os.path.isdir(clear_target):
+        shutil.rmtree(clear_target)
+        os.makedirs(clear_target, exist_ok=True)
         flash("Tensorboard logs cleared.", "success")
     else:
         flash("Tensorboard log directory not found.", "error")

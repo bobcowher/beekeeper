@@ -42,8 +42,23 @@ echo "--- Creating virtual environment ---"
 PYTHON_VERSION=$($PYTHON_BIN -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 VENV_PACKAGE="python${PYTHON_VERSION}-venv"
 
-# Check if venv package is installed (Debian/Ubuntu specific)
-if command -v apt &>/dev/null && ! dpkg -l | grep -q "^ii.*$VENV_PACKAGE"; then
+# Check whether this interpreter can actually create a venv.
+#
+# The dpkg check below is Debian/Ubuntu specific and only meaningful for a
+# system python. Interpreters from conda, pyenv, uv or a source build ship
+# venv already, and no python<X.Y>-venv package exists for them -- on Ubuntu
+# 26.04 a conda 3.12 sends this looking for python3.12-venv, which is not in
+# the archive at all, so `apt install` fails and set -e aborts setup before
+# the venv is ever created.
+#
+# Ask the question we actually care about first.
+if "$PYTHON_BIN" -m venv --help &>/dev/null; then
+    VENV_AVAILABLE=true
+else
+    VENV_AVAILABLE=false
+fi
+
+if [[ "$VENV_AVAILABLE" = false ]] && command -v apt &>/dev/null && ! dpkg -l | grep -q "^ii.*$VENV_PACKAGE"; then
     echo ""
     echo "ERROR: $VENV_PACKAGE is not installed." >&2
     echo ""
