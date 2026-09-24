@@ -35,7 +35,7 @@ from fastmcp import FastMCP
 BEEKEEPER_HOST = os.environ.get("BEEKEEPER_HOST", "http://localhost:5000").rstrip("/")
 BEEKEEPER_API_KEY = os.environ.get("BEEKEEPER_API_KEY", "")
 
-MCP_VERSION = "0.1.3"
+MCP_VERSION = "0.2.0"
 
 mcp = FastMCP("Beekeeper")
 

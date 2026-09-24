@@ -2,20 +2,41 @@
 
 ## [Unreleased]
 
+---
+
+## [1.1.0] - 2026-09-23
+
 ### New Features
 
-- GPU stats (`get_stats`, `get_capacity` MCP tools; `/api/v1/stats`, `/api/v1/capacity`) now
-  include compute platform info: per-GPU `compute_capability`, plus a host-wide `gpu_platform`
-  block with driver version and the max CUDA version the driver supports (what `nvidia-smi`'s
-  header shows) — what an agent needs before picking a PyTorch/JAX build for a project.
-  ROCm detection via `rocm-smi` is best-effort and untested (no AMD GPUs in this fleet).
+- **GPU memory management** (opt-in per project) — `gpu_enabled`, `gpu_memory_minimum`, `gpu_memory_preferred`. A VRAM pre-flight check rejects runs below the minimum and assigns the GPU with the most free memory. `CUDA_VISIBLE_DEVICES`, `GPU_DEVICE`, `GPU_OFFLOAD` and `GPU_MEMORY_*` are injected into the training process.
+- **GPU platform info for agents** — `get_stats` / `get_capacity` (and `/api/v1/stats`, `/api/v1/capacity`) now report per-GPU `compute_capability` plus a host-wide `gpu_platform` block with driver version and the max CUDA version the driver supports. ROCm detection via `rocm-smi` is best-effort and untested.
+- **Instance-wide SSH key** — Beekeeper generates an ed25519 keypair on first start (`.ssh/`, mode 0600). The public key is shown under Admin → SSH Key, with a Regenerate action. Git clone/fetch over SSH uses it automatically. A setup failure caused by a missing or unauthorized key now links straight to it.
+- **Project rename** — `POST /api/v1/projects/<name>/rename`, an edit-page form, and the `rename_project` MCP tool. Run history is migrated with the project.
+- **Per-run artifact browser** — `/api/v1/projects/<name>/runs/<run_id|latest>/files` and an "Artifacts" button in run history. Unlike the workspace file endpoint, it can't be clobbered by parallel runs.
+- **Run log viewer** — history page with a terminal-style log view and a separate download.
+- **Env vars at project creation** — the New Project form now takes environment variables, so a project that needs an API key can be set up in one step.
+- **Static data directory via API/MCP** — `PATCH /api/v1/projects/<name>` and `update_project` accept `data_dir_enabled`, `data_dir_local`, `data_dir_remote` on an existing project. The symlink is created or repaired immediately.
+- Cumulative training time on dashboard cards and the project page; `training_status` includes `tb_port`; OpenCode tab on the MCP setup page; `analyze_run` now returns `branch`, `commit_sha`, and `status`.
 
 ### Bug Fixes
 
-- MCP `update_project` and `PATCH /api/v1/projects/<name>` now support setting the static
-  data directory (`data_dir_enabled`, `data_dir_local`, `data_dir_remote`) on an existing
-  project — previously only settable at project creation, so an agent had no way to enable
-  or repoint it later. Symlink is created/repaired immediately if the workspace already exists.
+- **GPU assignment ran on the wrong card** on hosts where PCI order and CUDA's fastest-first order differ. `CUDA_DEVICE_ORDER=PCI_BUS_ID` is now set alongside `CUDA_VISIBLE_DEVICES` and cannot be overridden by project env vars.
+- **Pre-launch failures had unreadable logs** — a bad `train_file`, pip failure, or git sync failure wrote its error to disk but the API returned an empty log. The log is now archived and resolvable.
+- **Every run gets its own log file** (`train-<run_id>.log`). Previously a run starting right after another could truncate the shared `train.log` before the previous run's copy was archived.
+- **Completed runs served the wrong log** — archived log paths are now resolved from the run record.
+- **`/api/v1/busy` now includes in-progress project setup**, so a deploy can no longer restart the service mid-clone or mid-pip-install and leave setup stuck.
+- **Fresh installs failed on first `git clone`** with "Host key verification failed". New hosts are now trusted on first contact (`StrictHostKeyChecking=accept-new`); a changed host key still fails.
+- **`setup.sh` failed with conda/pyenv/uv Python** on hosts without a `python3.X-venv` package. It now tests whether the interpreter can create a venv.
+- "Clear All Logs" returned a 500 for projects that had completed a run (TensorBoard dir is a symlink).
+- `pip install` now runs with `--upgrade --upgrade-strategy only-if-needed` so pinned versions in `requirements.txt` are honored.
+- `switch_branch` no longer blocks on Beekeeper's own workspace symlinks.
+- Output-path symlinks resolve into `persistent/` correctly.
+- Restyled the setup error card (monospace, scrollable, distinct hint callout), the Artifacts modal, and the rename form placement.
+
+### Maintenance
+
+- MCP package bumped to 0.2.0 (new `rename_project` tool; expanded `update_project`, `get_stats`, `get_capacity`).
+- `/api/v1/version` now reports the real server version (it was stuck at 1.0.7).
 
 ---
 

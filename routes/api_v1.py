@@ -28,7 +28,7 @@ from routes.runs import _resolve_run_id, _safe_run_path
 
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
-SERVER_VERSION = "1.0.7"
+SERVER_VERSION = "1.1.0"
 MIN_MCP_VERSION = "0.1.1"
 PROJECT_FILE = "project.json"
 MCP_SERVER_FILE = "mcp_server.py"

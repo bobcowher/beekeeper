@@ -5,7 +5,7 @@ import subprocess
 from flask import Flask
 
 BEEKEEPER_HOME = os.path.dirname(os.path.abspath(__file__))
-APP_VERSION = "1.0.9"
+APP_VERSION = "1.1.0"
 
 
 def _git_value(args, default="unknown"):
