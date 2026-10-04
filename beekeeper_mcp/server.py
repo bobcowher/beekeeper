@@ -430,6 +430,12 @@ def rename_project(project_name: str, new_name: str) -> dict:
 
     Cannot rename while setup or training is active — stop training first.
     new_name must contain only letters, numbers, hyphens, and underscores.
+
+    For conda projects, this destroys the old conda env and rebuilds it under
+    the new name in the background (slow — can take several minutes). The
+    response's setup_status will be "pending"; poll get_project until it's
+    "ready" before starting training. venv projects rename instantly with no
+    rebuild.
     """
     return _post(f"/projects/{project_name}/rename", {"new_name": new_name})
 

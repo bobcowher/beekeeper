@@ -383,8 +383,7 @@ def rename_project_api(name):
     with open(config_path) as f:
         project_data = json.load(f)
 
-    setup_active = ("pending", "cloning", "installing", "running")
-    if project_data.get("setup_status") in setup_active:
+    if project_data.get("setup_status") in SETUP_ACTIVE_STATUSES:
         return api_response(
             error_code="SETUP_ACTIVE",
             error_message="Cannot rename while setup is in progress",
@@ -411,18 +410,15 @@ def rename_project_api(name):
             status_code=409
         )
 
-    old_dir = os.path.join(projects_dir, name)
-    os.rename(old_dir, new_dir)
+    from services.project_service import rename_project
+    updated = rename_project(projects_dir, name, new_name)
 
-    project_data["name"] = new_name
-    new_config_path = os.path.join(new_dir, PROJECT_FILE)
-    with open(new_config_path, "w") as f:
-        json.dump(project_data, f, indent=2)
-
-    from services.db_service import get_db
-    get_db().rename_project_runs(name, new_name)
-
-    return api_response(data={"old_name": name, "name": new_name, "renamed": True})
+    return api_response(data={
+        "old_name": name,
+        "name": new_name,
+        "renamed": True,
+        "setup_status": updated["setup_status"],
+    })
 
 
 @api_v1_bp.route("/projects/<name>", methods=["PATCH"])

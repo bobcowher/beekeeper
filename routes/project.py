@@ -304,18 +304,17 @@ def rename(name):
         flash(f"A project named '{new_name}' already exists.", "error")
         return redirect(url_for(_EDIT_ROUTE, name=name))
 
-    old_dir = os.path.join(projects_dir, name)
-    os.rename(old_dir, new_dir)
+    from services.project_service import rename_project
+    updated = rename_project(projects_dir, name, new_name)
 
-    project_data["name"] = new_name
-    new_config_path = os.path.join(new_dir, _PROJECT_FILE)
-    with open(new_config_path, "w") as f:
-        json.dump(project_data, f, indent=2)
-
-    from services.db_service import get_db
-    get_db().rename_project_runs(name, new_name)
-
-    flash(f"Project renamed to '{new_name}'.", "success")
+    if updated.get("env_type") == "conda":
+        flash(
+            f"Project renamed to '{new_name}'. Rebuilding its conda environment in the "
+            f"background — this can take several minutes, and training is disabled until it finishes.",
+            "success",
+        )
+    else:
+        flash(f"Project renamed to '{new_name}'.", "success")
     return redirect(url_for(_EDIT_ROUTE, name=new_name))
 
 

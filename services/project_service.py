@@ -144,6 +144,57 @@ def _resolve_conda_env_path(conda_bin, env_name):
     return None
 
 
+def rename_project(projects_dir, name, new_name):
+    """
+    Rename a project directory, its JSON config, and its run history.
+
+    For conda projects, the old env is destroyed and a fresh one is rebuilt
+    under the new name in a background thread (same pipeline as retry-setup).
+    Conda envs aren't safely movable in general — some packages embed their
+    install path — so a full rebuild is the correct, if slow, fix. The
+    project's setup_status is set to "pending" for the duration, which blocks
+    training until the rebuild finishes.
+
+    Caller is responsible for validating new_name and checking for conflicts
+    first. Returns the updated project_data dict.
+    """
+    old_dir = os.path.join(projects_dir, name)
+    new_dir = os.path.join(projects_dir, new_name)
+    config_path = os.path.join(new_dir, "project.json")
+
+    with open(os.path.join(old_dir, "project.json")) as f:
+        project_data = _json.load(f)
+
+    os.rename(old_dir, new_dir)
+
+    project_data["name"] = new_name
+    env_type = project_data.get("env_type")
+    if env_type == "conda":
+        project_data["setup_status"] = "pending"
+        project_data["setup_error"] = ""
+
+    with open(config_path, "w") as f:
+        _json.dump(project_data, f, indent=2)
+
+    from services.db_service import get_db
+    get_db().rename_project_runs(name, new_name)
+
+    if env_type == "conda":
+        conda_bin = _find_conda_bin()
+        if conda_bin:
+            subprocess.run(
+                [conda_bin, "env", "remove", "-y", "-n", _conda_env_name(name)],
+                capture_output=True, text=True, timeout=120,
+            )
+        project = Project.load(config_path)
+        thread = threading.Thread(
+            target=_setup_project, args=(projects_dir, project, True), daemon=True
+        )
+        thread.start()
+
+    return project_data
+
+
 def create_project(projects_dir, data):
     """Create a new project: save config, then clone/venv/install in background."""
     project = Project(

@@ -214,9 +214,22 @@
     </div>
 </form>
 
-<form action="{{ url_for('project.rename', name=project.name) }}" method="POST" class="card" style="margin-top: 16px">
+{% set rename_confirm_message = (
+    "Renaming a conda project destroys and rebuilds its environment under the new name. "
+    "This can take several minutes, and training will be disabled until it finishes. Continue?"
+    if project.env_type == "conda" else
+    "Rename this project? All run history will be updated."
+) %}
+<form action="{{ url_for('project.rename', name=project.name) }}" method="POST" class="card" style="margin-top: 16px"
+      onsubmit="return confirm({{ rename_confirm_message | tojson }})">
     <h2>Rename Project</h2>
-    <p class="muted" style="margin-bottom: 12px">Only allowed when training is idle and setup is complete. All run history will be updated.</p>
+    <p class="muted" style="margin-bottom: 12px">
+        {% if project.env_type == "conda" %}
+        Renaming a conda project destroys and rebuilds its environment under the new name &mdash; this takes several minutes and training is disabled until setup finishes. Only allowed when training is idle and setup is complete.
+        {% else %}
+        Only allowed when training is idle and setup is complete. All run history will be updated.
+        {% endif %}
+    </p>
     <div class="form-group">
         <label for="new_name">New Name</label>
         <input type="text" id="new_name" name="new_name" value="{{ project.name }}"

@@ -479,3 +479,60 @@ def test_api_v1_update_project_data_dir_conflict_returns_409(
 
     assert r.status_code == 409
     assert r.get_json()["error"]["code"] == "DATA_DIR_CONFLICT"
+
+
+# --- Rename project: conda env is rebuilt under the new name ---
+#
+# The actual rebuild mechanics (conda env remove + background _setup_project)
+# are unit-tested against services.project_service.rename_project directly in
+# test_project_service.py. These exercise the HTTP contract: status codes,
+# response shape, and that a conda rename reports "pending" rather than
+# silently claiming the project is immediately usable.
+
+def test_api_v1_rename_conda_project_reports_pending_setup_status(
+    client, app, mocker
+):
+    from conftest import make_project_dir
+    from services import project_service
+
+    make_project_dir(app, name="oldname", env_type="conda")
+
+    mocker.patch.object(project_service, "_find_conda_bin", return_value=None)
+    mocker.patch.object(project_service.threading, "Thread")
+
+    r = client.post(
+        "/api/v1/projects/oldname/rename",
+        json={"new_name": "newname"},
+        headers={"Authorization": "Bearer test"},
+    )
+
+    assert r.status_code == 200
+    data = r.get_json()["data"]
+    assert data == {
+        "old_name": "oldname",
+        "name": "newname",
+        "renamed": True,
+        "setup_status": "pending",
+    }
+    assert not os.path.isdir(os.path.join(app.config["PROJECTS_DIR"], "oldname"))
+    assert os.path.isdir(os.path.join(app.config["PROJECTS_DIR"], "newname"))
+
+
+def test_api_v1_rename_venv_project_does_not_touch_conda(client, app, mocker):
+    from conftest import make_project_dir
+    from services import project_service
+
+    make_project_dir(app, name="oldname", env_type="venv")
+    conda_spy = mocker.patch.object(project_service, "_find_conda_bin")
+    thread_spy = mocker.patch.object(project_service.threading, "Thread")
+
+    r = client.post(
+        "/api/v1/projects/oldname/rename",
+        json={"new_name": "newname"},
+        headers={"Authorization": "Bearer test"},
+    )
+
+    assert r.status_code == 200
+    assert r.get_json()["data"]["setup_status"] == "ready"
+    conda_spy.assert_not_called()
+    thread_spy.assert_not_called()
