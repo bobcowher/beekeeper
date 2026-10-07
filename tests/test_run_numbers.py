@@ -239,3 +239,166 @@ def test_backfill_continues_after_existing_numbers(tmp_path):
     got = sqlite3.connect(path).execute("SELECT run_number FROM training_runs ORDER BY started_at").fetchall()
     assert got == [(5,), (6,), (7,), (8,)]
     assert db.create_training_run("a", _meta())[1] == 9
+
+
+# --- persistent folder migration -------------------------------------------
+
+import os
+
+from services import run_folder_migration as rfm
+
+
+def _reset_folder_migration():
+    from services.db_service import get_db
+    with get_db()._get_connection() as c:
+        c.execute("DELETE FROM schema_migrations")
+        c.commit()
+
+
+def _mk_run(db, projects_dir, project, pk_dir=True):
+    pk, n = db.create_training_run(project, _meta())
+    rel = f"persistent/runs/run_{pk}"
+    db.update_training_run(pk, persistent_dir=rel, tensorboard_dir=rel)
+    if pk_dir:
+        os.makedirs(os.path.join(projects_dir, project, rel))
+        with open(os.path.join(projects_dir, project, rel, "marker.txt"), "w") as f:
+            f.write(f"pk={pk}")
+    return pk, n
+
+
+def test_folder_migration_renames_to_numbers_and_handles_collisions(app, mocker):
+    from services.db_service import get_db
+    _reset_folder_migration()
+    db = get_db()
+    projects_dir = app.config["PROJECTS_DIR"]
+    mocker.patch.object(rfm, "_live_run_dirs", return_value=[])
+
+    _mk_run(db, projects_dir, "z", pk_dir=False)            # pk 1 (z #1), shifts pks
+    projects = ["a", "b", "a", "b", "a"]
+    runs = [_mk_run(db, projects_dir, p) for p in projects]
+    # a: pks 2,4,6 -> #1,#2,#3   b: pks 3,5 -> #1,#2
+    # Collision: a's old folder run_2 (pk 2, becoming run_1) holds the name that a's pk-4
+    # run (#2) needs. Marker files prove no folder was clobbered or swapped.
+
+    assert rfm.migrate_run_folders(projects_dir) == "done"
+
+    for (pk, n), project in zip(runs, projects):
+        row = db.get_run(project, n)
+        assert row["persistent_dir"] == f"persistent/runs/run_{n}"
+        assert row["tensorboard_dir"] == f"persistent/runs/run_{n}"
+        with open(os.path.join(projects_dir, project, row["persistent_dir"], "marker.txt")) as f:
+            assert f.read() == f"pk={pk}"
+    assert not any(
+        name.startswith(".migrating_")
+        for p in ["a", "b"]
+        for name in os.listdir(os.path.join(projects_dir, p, "persistent", "runs"))
+    )
+
+
+def test_folder_migration_defers_when_a_run_process_is_live(app, mocker):
+    from services.db_service import get_db
+    _reset_folder_migration()
+    projects_dir = app.config["PROJECTS_DIR"]
+    _mk_run(get_db(), projects_dir, "a")
+    mocker.patch.object(rfm, "_live_run_dirs",
+                        return_value=[os.path.join(projects_dir, "a", "persistent", "runs", "run_1")])
+
+    assert rfm.migrate_run_folders(projects_dir) == "deferred"
+    assert not get_db().migration_applied(rfm.RUN_FOLDER_MIGRATION)
+
+
+def test_folder_migration_ignores_stale_running_rows(app, mocker):
+    from services.db_service import get_db
+    _reset_folder_migration()
+    db = get_db()
+    projects_dir = app.config["PROJECTS_DIR"]
+    pk, _ = _mk_run(db, projects_dir, "a")
+    db.update_training_run(pk, status="running")  # stale row, no live process
+    mocker.patch.object(rfm, "_live_run_dirs", return_value=[])
+
+    assert rfm.migrate_run_folders(projects_dir) == "done"
+
+
+def test_folder_migration_runs_once(app, mocker):
+    _reset_folder_migration()
+    mocker.patch.object(rfm, "_live_run_dirs", return_value=[])
+    projects_dir = app.config["PROJECTS_DIR"]
+    rfm.migrate_run_folders(projects_dir)
+    assert rfm.migrate_run_folders(projects_dir) == "already_applied"
+
+
+def test_folder_migration_tolerates_missing_folder(app, mocker):
+    from services.db_service import get_db
+    _reset_folder_migration()
+    db = get_db()
+    projects_dir = app.config["PROJECTS_DIR"]
+    pk, n = _mk_run(db, projects_dir, "a", pk_dir=False)
+    mocker.patch.object(rfm, "_live_run_dirs", return_value=[])
+
+    assert rfm.migrate_run_folders(projects_dir) == "done"
+    assert db.get_run("a", n)["persistent_dir"] == f"persistent/runs/run_{n}"
+
+
+def test_folder_migration_resumes_after_pass_one(app, mocker):
+    # Simulate a crash after pass 1: folder staged with marker, DB still says run_<pk>.
+    from services.db_service import get_db
+    _reset_folder_migration()
+    db = get_db()
+    projects_dir = app.config["PROJECTS_DIR"]
+    _mk_run(db, projects_dir, "z", pk_dir=False)
+    pk, n = _mk_run(db, projects_dir, "a")              # pk 2, #1
+    base = os.path.join(projects_dir, "a", "persistent", "runs")
+    with open(os.path.join(base, f"run_{pk}", rfm.MARKER), "w") as f:
+        f.write(str(pk))
+    os.rename(os.path.join(base, f"run_{pk}"), os.path.join(base, f".migrating_{pk}"))
+    mocker.patch.object(rfm, "_live_run_dirs", return_value=[])
+
+    assert rfm.migrate_run_folders(projects_dir) == "done"
+    assert db.get_run("a", n)["persistent_dir"] == f"persistent/runs/run_{n}"
+    assert open(os.path.join(base, f"run_{n}", "marker.txt")).read() == f"pk={pk}"
+
+
+def test_folder_migration_adopts_folder_moved_before_db_update(app, mocker):
+    from services.db_service import get_db
+    _reset_folder_migration()
+    db = get_db()
+    projects_dir = app.config["PROJECTS_DIR"]
+    _mk_run(db, projects_dir, "z", pk_dir=False)
+    pk, n = _mk_run(db, projects_dir, "a")
+    base = os.path.join(projects_dir, "a", "persistent", "runs")
+    with open(os.path.join(base, f"run_{pk}", rfm.MARKER), "w") as f:
+        f.write(str(pk))
+    os.rename(os.path.join(base, f"run_{pk}"), os.path.join(base, f"run_{n}"))  # moved, DB not updated
+    mocker.patch.object(rfm, "_live_run_dirs", return_value=[])
+
+    assert rfm.migrate_run_folders(projects_dir) == "done"
+    assert db.get_run("a", n)["persistent_dir"] == f"persistent/runs/run_{n}"
+
+
+def test_folder_migration_never_points_run_at_foreign_folder(app, mocker):
+    from services.db_service import get_db
+    _reset_folder_migration()
+    db = get_db()
+    projects_dir = app.config["PROJECTS_DIR"]
+    _mk_run(db, projects_dir, "z", pk_dir=False)
+    pk, n = _mk_run(db, projects_dir, "a", pk_dir=False)    # own folder missing
+    os.makedirs(os.path.join(projects_dir, "a", "persistent", "runs", f"run_{n}"))  # unrelated, no marker
+    mocker.patch.object(rfm, "_live_run_dirs", return_value=[])
+
+    assert rfm.migrate_run_folders(projects_dir) == "done"
+    assert db.get_run("a", n)["persistent_dir"] is None
+
+
+def test_folder_migration_reports_conflict_and_retries(app, mocker):
+    from services.db_service import get_db
+    _reset_folder_migration()
+    db = get_db()
+    projects_dir = app.config["PROJECTS_DIR"]
+    _mk_run(db, projects_dir, "z", pk_dir=False)
+    pk, n = _mk_run(db, projects_dir, "a")
+    os.makedirs(os.path.join(projects_dir, "a", "persistent", "runs", f".migrating_{pk}"))  # both exist
+    mocker.patch.object(rfm, "_live_run_dirs", return_value=[])
+
+    assert rfm.migrate_run_folders(projects_dir) == "conflicts"
+    assert not db.migration_applied(rfm.RUN_FOLDER_MIGRATION)
+    assert db.get_run("a", n)["persistent_dir"] == f"persistent/runs/run_{pk}"   # untouched

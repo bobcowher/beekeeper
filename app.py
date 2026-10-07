@@ -75,6 +75,8 @@ def create_app(test_config=None):
     # Initialize database
     from services.db_service import init_database
     init_database(app.config["DB_PATH"])
+    from services.run_folder_migration import migrate_run_folders
+    migrate_run_folders(app.config["PROJECTS_DIR"])
 
     # Register blueprints
     from routes.dashboard import dashboard_bp
