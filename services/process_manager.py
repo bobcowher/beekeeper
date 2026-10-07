@@ -13,9 +13,8 @@ from models.project import Project
 from services.db_service import get_db
 from services.project_service import ensure_data_dir_symlink, validate_output_paths, validate_workspace_path
 from services.git_utils import git_env
-from services.run_folder_migration import MARKER
 from services.run_refs import run_ref
-from services.run_storage_service import delete_run_storage, persistent_runs_root
+from services.run_storage_service import MARKER, delete_run_storage, persistent_runs_root
 from services.stats_service import get_gpu_stats
 
 log = logging.getLogger(__name__)

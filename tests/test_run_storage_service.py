@@ -35,3 +35,20 @@ def test_clear_persistent_runs_removes_orphans_and_recreates_root(tmp_path):
     runs_root = projects_dir / "myproject" / "persistent" / "runs"
     assert runs_root.is_dir()
     assert list(runs_root.iterdir()) == []
+
+
+def test_delete_run_storage_refuses_folder_owned_by_another_run(tmp_path):
+    from services.run_storage_service import MARKER
+    projects_dir = tmp_path / "projects"
+    folder = projects_dir / "myproject" / "persistent" / "runs" / "run_4"
+    folder.mkdir(parents=True)
+    (folder / MARKER).write_text("9")
+    (folder / "model.pt").write_text("weights")
+
+    delete_run_storage(str(projects_dir), "myproject",
+                       {"id": 4, "persistent_dir": "persistent/runs/run_4"})
+    assert (folder / "model.pt").exists()
+
+    delete_run_storage(str(projects_dir), "myproject",
+                       {"id": 9, "persistent_dir": "persistent/runs/run_4"})
+    assert not folder.exists()

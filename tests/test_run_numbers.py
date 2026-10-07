@@ -544,3 +544,132 @@ def test_folder_migration_skips_links_without_project_json(app, mocker):
 
     assert rfm.migrate_run_folders(projects_dir) == "done"
     assert os.readlink(os.path.join(pdir, "workspace", "runs")) == old
+
+
+def _write_marker(folder, pk):
+    with open(os.path.join(folder, rfm.MARKER), "w") as f:
+        f.write(str(pk))
+
+
+def test_folder_migration_occupied_dest_points_row_at_staged_folder(app, mocker):
+    from services.db_service import get_db
+    from services.run_storage_service import delete_run_storage
+    _reset_folder_migration()
+    db = get_db()
+    projects_dir = app.config["PROJECTS_DIR"]
+    _mk_run(db, projects_dir, "z", pk_dir=False)            # pk 1
+    old_pk, old_n = _mk_run(db, projects_dir, "a")          # pk 2, a #1
+    base = os.path.join(projects_dir, "a", "persistent", "runs")
+    foreign = os.path.join(base, f"run_{old_n}")
+    os.makedirs(foreign)
+    open(os.path.join(foreign, "foreign.txt"), "w").close()  # dest occupied, no marker
+    mocker.patch.object(rfm, "_live_run_dirs", return_value=[])
+
+    assert rfm.migrate_run_folders(projects_dir) == "conflicts"
+    staged_rel = f"persistent/runs/.migrating_{old_pk}"
+    row = db.get_training_run(old_pk)
+    assert row["persistent_dir"] == staged_rel
+    assert row["tensorboard_dir"] == staged_rel
+
+    # A new run gets number == old pk and creates run_<old pk> with its own marker.
+    new_pk, new_n = db.create_training_run("a", _meta())
+    assert new_n == old_pk
+    new_folder = os.path.join(base, f"run_{new_n}")
+    os.makedirs(new_folder)
+    _write_marker(new_folder, new_pk)
+    open(os.path.join(new_folder, "new.txt"), "w").close()
+
+    # Even a stale pointer at run_<old pk> must not delete the new run's folder.
+    delete_run_storage(projects_dir, "a", {**row, "persistent_dir": f"persistent/runs/run_{old_pk}"})
+    assert os.path.isfile(os.path.join(new_folder, "new.txt"))
+
+    # Resolve the conflict; the next startup places the staged folder and finishes.
+    import shutil
+    shutil.rmtree(foreign)
+    assert rfm.migrate_run_folders(projects_dir) == "done"
+    assert db.migration_applied(rfm.RUN_FOLDER_MIGRATION)
+    row = db.get_training_run(old_pk)
+    assert row["persistent_dir"] == f"persistent/runs/run_{old_n}"
+    assert _read(os.path.join(base, f"run_{old_n}", "marker.txt")) == f"pk={old_pk}"
+
+    # Pruning the old row removes only its own folder.
+    delete_run_storage(projects_dir, "a", row)
+    assert not os.path.exists(os.path.join(base, f"run_{old_n}"))
+    assert os.path.isfile(os.path.join(new_folder, "new.txt"))
+
+
+def test_folder_migration_oserror_in_pass_one_does_not_block_other_rows(app, mocker):
+    from services.db_service import get_db
+    _reset_folder_migration()
+    db = get_db()
+    projects_dir = app.config["PROJECTS_DIR"]
+    pk1, pk2 = _swapped_runs(db, projects_dir)              # a: pk1 -> #2, pk2 -> #1
+    b_pk, b_n = _mk_run(db, projects_dir, "b")              # b: pk3 -> #1
+    stuck = os.path.join(projects_dir, "a", "persistent", "runs", f"run_{pk1}")
+    real_rename = os.rename
+
+    def flaky_rename(src, dst, *args, **kwargs):
+        if os.path.normpath(src) == os.path.normpath(stuck):
+            raise OSError(13, "Permission denied")
+        return real_rename(src, dst, *args, **kwargs)
+
+    mocker.patch("services.run_folder_migration.os.rename", side_effect=flaky_rename)
+    mocker.patch.object(rfm, "_live_run_dirs", return_value=[])
+
+    assert rfm.migrate_run_folders(projects_dir) == "conflicts"
+    assert not db.migration_applied(rfm.RUN_FOLDER_MIGRATION)
+    assert db.get_run("b", b_n)["persistent_dir"] == f"persistent/runs/run_{b_n}"
+    for pk in (pk1, pk2, b_pk):
+        row = db.get_training_run(pk)
+        folder = os.path.join(projects_dir, row["project_name"], row["persistent_dir"])
+        assert _read(os.path.join(folder, "marker.txt")) == f"pk={pk}"
+
+
+def test_folder_migration_archives_legacy_unarchived_live_log(app, mocker):
+    from services.db_service import get_db
+    from services.process_manager import get_run_log_path
+    _reset_folder_migration()
+    db = get_db()
+    projects_dir = app.config["PROJECTS_DIR"]
+    _mk_run(db, projects_dir, "z", pk_dir=False)            # pk 1
+    _mk_run(db, projects_dir, "z", pk_dir=False)            # pk 2
+    old_pk, old_n = _mk_run(db, projects_dir, "a", pk_dir=False)   # pk 3, a #1
+    new_pk, new_n = _mk_run(db, projects_dir, "a", pk_dir=False)   # pk 4, a #2
+    pdir = os.path.join(projects_dir, "a")
+    os.makedirs(pdir, exist_ok=True)
+    with open(os.path.join(pdir, f"train-{old_pk}.log"), "w") as f:
+        f.write("old run log")
+    with open(os.path.join(pdir, f"train-{new_n}.log"), "w") as f:
+        f.write("new run log")
+    mocker.patch.object(rfm, "_live_run_dirs", return_value=[])
+
+    assert rfm.migrate_run_folders(projects_dir) == "done"
+    rel = db.get_training_run(old_pk)["log_file_path"]
+    assert rel.startswith("run_logs/run-") and rel.endswith(f"-{old_n:04d}.log")
+    assert not os.path.exists(os.path.join(pdir, f"train-{old_pk}.log"))
+    assert _read(get_run_log_path(projects_dir, "a", old_n)) == "old run log"
+    assert _read(os.path.join(pdir, f"train-{new_n}.log")) == "new run log"
+    assert _read(get_run_log_path(projects_dir, "a", new_n)) == "new run log"
+    assert db.get_training_run(new_pk)["log_file_path"] is None
+
+
+def test_folder_migration_leaves_ambiguous_legacy_log(app, mocker):
+    # train-<pk>.log where another run in the project has number == pk: that run (new code)
+    # already truncated and owns the file, so it must not be handed to the old row.
+    from services.db_service import get_db
+    _reset_folder_migration()
+    db = get_db()
+    projects_dir = app.config["PROJECTS_DIR"]
+    _mk_run(db, projects_dir, "z", pk_dir=False)            # pk 1
+    old_pk, _ = _mk_run(db, projects_dir, "a", pk_dir=False)       # pk 2, a #1
+    owner_pk, owner_n = _mk_run(db, projects_dir, "a", pk_dir=False)  # pk 3, a #2
+    assert owner_n == old_pk
+    pdir = os.path.join(projects_dir, "a")
+    os.makedirs(pdir, exist_ok=True)
+    with open(os.path.join(pdir, f"train-{old_pk}.log"), "w") as f:
+        f.write("owned by a #2")
+    mocker.patch.object(rfm, "_live_run_dirs", return_value=[])
+
+    assert rfm.migrate_run_folders(projects_dir) == "done"
+    assert db.get_training_run(old_pk)["log_file_path"] is None
+    assert _read(os.path.join(pdir, f"train-{owner_n}.log")) == "owned by a #2"

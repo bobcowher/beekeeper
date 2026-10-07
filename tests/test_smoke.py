@@ -229,6 +229,36 @@ def test_clear_tb_logs_symlinked_directory(client, ready_project, app):
     assert os.listdir(persistent_run_dir) == []
 
 
+def test_clear_tb_logs_refuses_folder_owned_by_another_run(client, ready_project, app):
+    """The link target's ownership marker must name the run whose stored folder it is."""
+    import datetime
+    import os
+    from services.db_service import get_db
+    from services.run_storage_service import MARKER
+    projects_dir = app.config["PROJECTS_DIR"]
+    db = get_db()
+    pk, _ = db.create_training_run("myproject", {"started_at": datetime.datetime.now(),
+                                                 "status": "completed", "branch": "main"})
+    db.update_training_run(pk, persistent_dir="persistent/runs/run_1", tensorboard_dir="persistent/runs/run_1")
+    workspace = os.path.join(projects_dir, "myproject", "workspace")
+    run_dir = os.path.join(projects_dir, "myproject", "persistent", "runs", "run_1")
+    os.makedirs(workspace)
+    os.makedirs(run_dir)
+    with open(os.path.join(run_dir, MARKER), "w") as f:
+        f.write(str(pk + 100))
+    open(os.path.join(run_dir, "events.out.tfevents.1"), "w").close()
+    os.symlink(run_dir, os.path.join(workspace, "runs"))
+
+    resp = client.post("/projects/myproject/clear-tb-logs", follow_redirects=False)
+    assert resp.status_code == 302
+    assert os.path.isfile(os.path.join(run_dir, "events.out.tfevents.1"))
+
+    with open(os.path.join(run_dir, MARKER), "w") as f:
+        f.write(str(pk))
+    client.post("/projects/myproject/clear-tb-logs", follow_redirects=False)
+    assert os.listdir(run_dir) == [MARKER]  # cleared, ownership marker kept
+
+
 def test_clear_tb_logs_missing_directory(client, ready_project):
     resp = client.post("/projects/myproject/clear-tb-logs", follow_redirects=False)
     assert resp.status_code == 302

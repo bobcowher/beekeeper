@@ -16,7 +16,7 @@ from services.project_service import (
 )
 from services.python_versions import find_available, has_conda
 from services.process_manager import get_training_status, stop_tensorboard, get_runs_for_project
-from services.run_storage_service import delete_run_storage
+from services.run_storage_service import MARKER, delete_run_storage, persistent_runs_root, read_run_marker
 from services.db_service import get_db
 from services.ssh_key_service import is_ssh_auth_error
 
@@ -330,6 +330,24 @@ def retry(name):
     return redirect(url_for(_DETAIL_ROUTE, name=name))
 
 
+def _persistent_run_folder(projects_dir, name, path):
+    """The persistent/runs/<folder> directory containing path, or None if outside it."""
+    runs_root = os.path.realpath(persistent_runs_root(projects_dir, name))
+    rel = os.path.relpath(os.path.realpath(path), runs_root)
+    if rel == os.curdir or rel.startswith(os.pardir):
+        return None
+    return os.path.join(runs_root, rel.split(os.sep)[0])
+
+
+def _folder_claimed_by_other_run(name, run_folder, owner_pk):
+    """True if the run whose stored folder this is differs from the marker's owner."""
+    rel = f"persistent/runs/{os.path.basename(run_folder)}"
+    return any(
+        r["persistent_dir"] == rel and r["id"] != owner_pk
+        for r in get_db().get_training_runs(name, limit=None)
+    )
+
+
 @project_bp.route("/<name>/clear-tb-logs", methods=["POST"])
 def clear_tb_logs(name):
     import shutil
@@ -346,9 +364,16 @@ def clear_tb_logs(name):
     # _ensure_workspace_symlink for the most recent run) — shutil.rmtree refuses
     # to operate on a symlink itself, so clear the link target instead.
     clear_target = os.path.realpath(tb_logdir) if os.path.islink(tb_logdir) else tb_logdir
-    if os.path.isdir(clear_target):
+    run_folder = _persistent_run_folder(projects_dir, name, clear_target)
+    owner = read_run_marker(run_folder) if run_folder else None
+    if owner is not None and _folder_claimed_by_other_run(name, run_folder, owner):
+        flash("Tensorboard logs not cleared: the linked run folder belongs to another run.", "error")
+    elif os.path.isdir(clear_target):
         shutil.rmtree(clear_target)
         os.makedirs(clear_target, exist_ok=True)
+        if owner is not None and not os.path.exists(os.path.join(run_folder, MARKER)):
+            with open(os.path.join(run_folder, MARKER), "w") as f:
+                f.write(str(owner))
         flash("Tensorboard logs cleared.", "success")
     else:
         flash("Tensorboard log directory not found.", "error")
