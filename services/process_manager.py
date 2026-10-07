@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 _PROJECT_FILE = "project.json"
 
-_running = {}  # {run_id: info_dict} — keyed by DB run ID (int)
+_running = {}  # {run_pk: info_dict} — keyed by DB run ID (int)
 _tb_running = {}  # standalone TB processes: {name: {"tb_process": Popen, "tb_port": int, "last_access": float}}
 _lock = threading.Lock()
 _TB_IDLE_TIMEOUT = 1800  # 30 min
@@ -41,8 +41,8 @@ _GPU_ENV_KEYS = {
 }
 
 
-def _persistent_run_paths(projects_dir: str, name: str, run_id: int) -> tuple[str, str]:
-    rel = f"persistent/runs/run_{run_id}"
+def _persistent_run_paths(projects_dir: str, name: str, run_pk: int) -> tuple[str, str]:
+    rel = f"persistent/runs/run_{run_pk}"
     return rel, os.path.join(projects_dir, name, rel)  # NOSONAR
 
 
@@ -243,12 +243,12 @@ def get_runs_for_project(name: str) -> list:
     now = time.time()
     result = []
     with _lock:
-        for run_id, info in _running.items():
+        for run_pk, info in _running.items():
             if info.get("project_name") != name:
                 continue
             if info.get("starting"):
                 result.append({
-                    "run_id": run_id,
+                    "run_id": run_pk,
                     "branch": info.get("branch", ""),
                     "status": "starting",
                     "pid": None,
@@ -262,7 +262,7 @@ def get_runs_for_project(name: str) -> list:
                 from services.resource_tracker import get_process_resources
                 resources = get_process_resources(pid) if pid else None
                 result.append({
-                    "run_id": run_id,
+                    "run_id": run_pk,
                     "branch": info.get("branch", ""),
                     "status": "running",
                     "pid": pid,
@@ -275,9 +275,10 @@ def get_runs_for_project(name: str) -> list:
 
 def get_run_log_path(projects_dir: str, name: str, run_id: int | None = None) -> str:
     """Return the log file path for a run. For completed runs, resolves via DB."""
+    run_pk = run_id
     with _lock:
-        if run_id is not None:
-            info = _running.get(run_id)
+        if run_pk is not None:
+            info = _running.get(run_pk)
             if info and info.get("log_path"):
                 return info["log_path"]
         else:
@@ -288,8 +289,8 @@ def get_run_log_path(projects_dir: str, name: str, run_id: int | None = None) ->
             if len(active) == 1 and active[0].get("log_path"):
                 return active[0]["log_path"]
 
-    if run_id is not None:
-        run = get_db().get_training_run(run_id)
+    if run_pk is not None:
+        run = get_db().get_training_run(run_pk)
         if run and run.get("log_file_path"):
             archived = os.path.join(projects_dir, name, run["log_file_path"])
             if os.path.isfile(archived):
@@ -297,16 +298,16 @@ def get_run_log_path(projects_dir: str, name: str, run_id: int | None = None) ->
         # Not archived (e.g. a pre-launch failure) — the live per-run file,
         # written directly by _execute_training/_abort, is still the source
         # of truth; nothing writes the old shared "train.log" anymore.
-        return os.path.join(projects_dir, name, f"train-{run_id}.log")
+        return os.path.join(projects_dir, name, f"train-{run_pk}.log")
 
     return os.path.join(projects_dir, name, "train.log")
 
 
-def _monitor_process(projects_dir, name, run_id):  # NOSONAR — sequential cleanup pipeline
+def _monitor_process(projects_dir, name, run_pk):  # NOSONAR — sequential cleanup pipeline
     """Background thread that waits for the training process to exit."""
     while True:
         with _lock:
-            info = _running.get(run_id)
+            info = _running.get(run_pk)
             if not info:
                 return
             proc = info["process"]
@@ -316,7 +317,7 @@ def _monitor_process(projects_dir, name, run_id):  # NOSONAR — sequential clea
             log_path = None
             started_at = None
             with _lock:
-                info = _running.get(run_id)
+                info = _running.get(run_pk)
                 if info:
                     log_path = info.get("log_path")
                     started_at = info.get("started_at")
@@ -328,8 +329,8 @@ def _monitor_process(projects_dir, name, run_id):  # NOSONAR — sequential clea
                             "tb_port": tb_port,
                             "last_access": time.time(),
                         }
-                        log.info("Migrated TB for %s run %d to standalone (port %d)", name, run_id, tb_port)
-                    del _running[run_id]
+                        log.info("Migrated TB for %s run %d to standalone (port %d)", name, run_pk, tb_port)
+                    del _running[run_pk]
 
             workspace_dir = info.get("workspace_dir") if info else None
             primary_ws = os.path.join(projects_dir, name, "workspace")
@@ -340,10 +341,10 @@ def _monitor_process(projects_dir, name, run_id):  # NOSONAR — sequential clea
 
             archived_log_path = None
             if log_path and os.path.isfile(log_path):
-                archived_log_path = _archive_run_log(projects_dir, name, run_id, log_path)
+                archived_log_path = _archive_run_log(projects_dir, name, run_pk, log_path)
 
             if started_at:
-                _finalize_run_record(run_id, ret, started_at, archived_log_path)
+                _finalize_run_record(run_pk, ret, started_at, archived_log_path)
 
             # Clean up parallel workspace on natural completion
             if is_parallel and workspace_dir:
@@ -358,7 +359,7 @@ def _monitor_process(projects_dir, name, run_id):  # NOSONAR — sequential clea
                 from services import tensorboard_service
                 _threading.Thread(
                     target=tensorboard_service.parse_run_metrics,
-                    args=(projects_dir, name, run_id),
+                    args=(projects_dir, name, run_pk),
                     daemon=True,
                 ).start()
 
@@ -472,7 +473,7 @@ def _append_run_footer(log_path, ret, started_at):
         pass
 
 
-def _archive_run_log(projects_dir: str, project_name: str, run_id: int, source_log_path: str) -> str | None:
+def _archive_run_log(projects_dir: str, project_name: str, run_pk: int, source_log_path: str) -> str | None:
     """
     Copy train.log to archived location.
     Returns relative path (e.g., "run_logs/run-20260321-171532-0042.log").
@@ -485,7 +486,7 @@ def _archive_run_log(projects_dir: str, project_name: str, run_id: int, source_l
 
     # Generate filename: run-{YYYYMMDD-HHMMSS}-{id}.log
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    filename = f"run-{timestamp}-{run_id:04d}.log"
+    filename = f"run-{timestamp}-{run_pk:04d}.log"
     dest_path = os.path.join(archive_dir, filename)
 
     # Copy log file atomically
@@ -493,11 +494,11 @@ def _archive_run_log(projects_dir: str, project_name: str, run_id: int, source_l
         shutil.copy2(source_log_path, dest_path)
         return f"run_logs/{filename}"
     except Exception as e:
-        log.error(f"Failed to archive log for run {run_id}: {e}")
+        log.error(f"Failed to archive log for run {run_pk}: {e}")
         return None
 
 
-def _finalize_run_record(run_id: int, exit_code: int, started_at: float, log_path: str | None):
+def _finalize_run_record(run_pk: int, exit_code: int, started_at: float, log_path: str | None):
     """Update run record with completion data."""
     ended_at = datetime.datetime.now()
     duration = int(time.time() - started_at)
@@ -511,7 +512,7 @@ def _finalize_run_record(run_id: int, exit_code: int, started_at: float, log_pat
         status = 'crashed'
 
     get_db().update_training_run(
-        run_id,
+        run_pk,
         ended_at=ended_at,
         duration_seconds=duration,
         status=status,
@@ -555,8 +556,8 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
     if branch is None:
         branch = project.get("branch", "main")
 
-    # Pre-create DB record so run_id is available immediately for slot reservation
-    run_id = get_db().create_training_run(
+    # Pre-create DB record so run_pk is available immediately for slot reservation
+    run_pk = get_db().create_training_run(
         project_name=name,
         metadata={
             "started_at": datetime.datetime.now(),
@@ -573,11 +574,11 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
         max_runs = project.get("max_parallel_runs", 2)
 
         if not parallel_enabled and len(active_runs) > 0:
-            get_db().delete_training_run(run_id)
+            get_db().delete_training_run(run_pk)
             return {"error": "Training is already running. To run multiple runs simultaneously, enable Parallel Runs in Edit Project."}
 
         if parallel_enabled and len(active_runs) >= max_runs:
-            get_db().delete_training_run(run_id)
+            get_db().delete_training_run(run_pk)
             return {"error": f"At capacity ({max_runs} parallel runs)"}
 
         # GPU pre-flight check — atomic with slot reservation so parallel starts
@@ -586,13 +587,13 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
         if project.get("gpu_enabled", False):
             gpus = get_gpu_stats()
             if not gpus:
-                get_db().delete_training_run(run_id)
+                get_db().delete_training_run(run_pk)
                 return {"error": "GPU management is enabled but no NVIDIA GPUs were detected"}
             minimum_mb = project.get("gpu_memory_minimum", 0)
             best = max(gpus, key=lambda g: g["mem_total"] - g["mem_used"])
             free_mb = (best["mem_total"] - best["mem_used"]) // (1024 * 1024)
             if minimum_mb > 0 and free_mb < minimum_mb:
-                get_db().delete_training_run(run_id)
+                get_db().delete_training_run(run_pk)
                 return {
                     "error": (
                         f"Insufficient VRAM: {minimum_mb} MB required, "
@@ -604,14 +605,14 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
         primary_in_use = any(info.get("workspace_dir") == primary_ws for info in active_runs)
         workspace_dir = (
             primary_ws if not primary_in_use
-            else os.path.join(projects_dir, name, f"workspace-{run_id}")
+            else os.path.join(projects_dir, name, f"workspace-{run_pk}")
         )
 
-        _running[run_id] = {
+        _running[run_pk] = {
             "process": None,
             "starting": True,
             "project_name": name,
-            "run_id": run_id,
+            "run_pk": run_pk,
             "branch": branch,
             "workspace_dir": workspace_dir,
         }
@@ -620,21 +621,21 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
 
     thread = threading.Thread(
         target=_execute_training,
-        args=(projects_dir, name, project, python_bin, run_id, branch, workspace_dir, gpu_assignment),
+        args=(projects_dir, name, project, python_bin, run_pk, branch, workspace_dir, gpu_assignment),
         daemon=True,
     )
     thread.start()
 
-    return {"run_id": run_id, "status": "starting"}
+    return {"run_id": run_pk, "status": "starting"}
 
 
-def _execute_training(projects_dir, name, project, python_bin, run_id, branch, workspace_dir, gpu_assignment=None):  # NOSONAR — sequential pre-launch pipeline
+def _execute_training(projects_dir, name, project, python_bin, run_pk, branch, workspace_dir, gpu_assignment=None):  # NOSONAR — sequential pre-launch pipeline
     """Run the full pre-launch sequence and start the training subprocess (runs in background thread)."""
     is_parallel = workspace_dir != os.path.join(projects_dir, name, "workspace")
-    log_path = os.path.join(projects_dir, name, f"train-{run_id}.log")
+    log_path = os.path.join(projects_dir, name, f"train-{run_pk}.log")
 
     def _abort(msg):
-        log.error("Pre-launch failed for %s run %d: %s", name, run_id, msg)
+        log.error("Pre-launch failed for %s run %d: %s", name, run_pk, msg)
         try:
             with open(log_path, "w") as lf:
                 lf.write(f"[beekeeper] Pre-launch failed: {msg}\n")
@@ -642,13 +643,13 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
             pass
         archived_log_path = None
         if os.path.isfile(log_path):
-            archived_log_path = _archive_run_log(projects_dir, name, run_id, log_path)
+            archived_log_path = _archive_run_log(projects_dir, name, run_pk, log_path)
         get_db().update_training_run(
-            run_id, status="crashed", ended_at=datetime.datetime.now(),
+            run_pk, status="crashed", ended_at=datetime.datetime.now(),
             duration_seconds=0, log_file_path=archived_log_path,
         )
         with _lock:
-            _running.pop(run_id, None)
+            _running.pop(run_pk, None)
             remaining_after = _get_runs_for_project(name)
         if not remaining_after:
             _update_project_json(projects_dir, name, train_status="stopped")
@@ -702,7 +703,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
 
     # Update the pre-created DB record with full metadata
     get_db().update_training_run(
-        run_id,
+        run_pk,
         status="running",
         commit_sha=run_meta["commit_sha"],
         commit_message=run_meta["commit_msg"],
@@ -788,7 +789,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
     except ValueError as e:
         return _abort(str(e))
 
-    persistent_run_rel, persistent_run_dir = _persistent_run_paths(projects_dir, name, run_id)
+    persistent_run_rel, persistent_run_dir = _persistent_run_paths(projects_dir, name, run_pk)
     os.makedirs(persistent_run_dir, exist_ok=True)
 
     _ensure_workspace_symlink(
@@ -810,7 +811,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
         )
 
     get_db().update_training_run(
-        run_id,
+        run_pk,
         persistent_dir=persistent_run_rel,
         tensorboard_dir=persistent_run_rel,
     )
@@ -899,17 +900,17 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
                     start_new_session=True,
                 )
             except Exception as e:
-                log.warning("Failed to start tensorboard for %s run %d: %s", name, run_id, e)
+                log.warning("Failed to start tensorboard for %s run %d: %s", name, run_pk, e)
                 tb_port = None
 
     with _lock:
-        _running[run_id] = {
+        _running[run_pk] = {
             "process": proc,
             "log_path": log_path,
             "tb_process": tb_process,
             "tb_port": tb_port,
             "started_at": time.time(),
-            "run_id": run_id,
+            "run_pk": run_pk,
             "project_name": name,
             "branch": branch,
             "workspace_dir": workspace_dir,
@@ -920,19 +921,20 @@ def _execute_training(projects_dir, name, project, python_bin, run_id, branch, w
                          last_run_at=time.time())
 
     thread = threading.Thread(
-        target=_monitor_process, args=(projects_dir, name, run_id), daemon=True
+        target=_monitor_process, args=(projects_dir, name, run_pk), daemon=True
     )
     thread.start()
 
 def stop_training(projects_dir, name, run_id=None):  # NOSONAR — sequential stop/cleanup pipeline
     """Stop a training run. run_id selects which run; omit if only one is active."""
+    run_pk = run_id
     primary_ws = os.path.join(projects_dir, name, "workspace")
 
     with _lock:
-        if run_id is not None:
-            info = _running.get(run_id)
+        if run_pk is not None:
+            info = _running.get(run_pk)
             if not info or info.get("project_name") != name:
-                return {"error": f"Run {run_id} not found for project {name}"}
+                return {"error": f"Run {run_pk} not found for project {name}"}
         else:
             project_runs = [rid for rid, info in _running.items()
                             if info.get("project_name") == name]
@@ -949,8 +951,8 @@ def stop_training(projects_dir, name, run_id=None):  # NOSONAR — sequential st
                 return {"error": "Training is not running"}
             if len(project_runs) > 1:
                 return {"error": "Multiple runs active — specify run_id"}
-            run_id = project_runs[0]
-            info = _running.get(run_id)
+            run_pk = project_runs[0]
+            info = _running.get(run_pk)
             if info is None:
                 return {"error": "Training is not running"}
 
@@ -979,7 +981,7 @@ def stop_training(projects_dir, name, run_id=None):  # NOSONAR — sequential st
         exit_code = -15
 
     with _lock:
-        info = _running.pop(run_id, None)
+        info = _running.pop(run_pk, None)
         if info:
             tb = info.get("tb_process")
             tb_port = info.get("tb_port")
@@ -989,7 +991,7 @@ def stop_training(projects_dir, name, run_id=None):  # NOSONAR — sequential st
                     "tb_port": tb_port,
                     "last_access": time.time(),
                 }
-                log.info("Migrated TB for %s run %d to standalone", name, run_id)
+                log.info("Migrated TB for %s run %d to standalone", name, run_pk)
 
     # File I/O and DB writes outside lock to avoid blocking other threads
     if info:
@@ -1001,10 +1003,10 @@ def stop_training(projects_dir, name, run_id=None):  # NOSONAR — sequential st
 
         archived_log_path = None
         if log_path and os.path.isfile(log_path):
-            archived_log_path = _archive_run_log(projects_dir, name, run_id, log_path)
+            archived_log_path = _archive_run_log(projects_dir, name, run_pk, log_path)
 
         if started_at:
-            _finalize_run_record(run_id, exit_code, started_at, archived_log_path)
+            _finalize_run_record(run_pk, exit_code, started_at, archived_log_path)
 
     is_parallel = workspace_dir != primary_ws
     if is_parallel:
@@ -1019,7 +1021,7 @@ def stop_training(projects_dir, name, run_id=None):  # NOSONAR — sequential st
     if not remaining:
         _update_project_json(projects_dir, name, train_status="stopped", train_pid=0)
 
-    return {"status": "stopped", "run_id": run_id}
+    return {"status": "stopped", "run_id": run_pk}
 
 
 def get_training_status(name: str) -> dict:

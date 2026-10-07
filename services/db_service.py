@@ -63,7 +63,7 @@ class DatabaseService:
                 conn.execute('''
                     CREATE TABLE IF NOT EXISTS metric_analyses (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        run_id INTEGER NOT NULL,
+                        run_pk INTEGER NOT NULL,
                         metric_name TEXT NOT NULL,
                         trend TEXT,
                         recent_trend TEXT,
@@ -83,12 +83,12 @@ class DatabaseService:
                         sampled_points TEXT,
                         total_points INTEGER,
                         parsed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (run_id) REFERENCES training_runs(id) ON DELETE CASCADE,
-                        UNIQUE(run_id, metric_name)
+                        FOREIGN KEY (run_pk) REFERENCES training_runs(id) ON DELETE CASCADE,
+                        UNIQUE(run_pk, metric_name)
                     )
                 ''')
                 conn.execute(
-                    'CREATE INDEX IF NOT EXISTS idx_metric_analyses_run ON metric_analyses(run_id)'
+                    'CREATE INDEX IF NOT EXISTS idx_metric_analyses_run_pk ON metric_analyses(run_pk)'
                 )
 
             # Migrate existing databases: add new columns if missing
@@ -105,6 +105,12 @@ class DatabaseService:
                     conn.execute(f'ALTER TABLE metric_analyses ADD COLUMN {col} {typedef}')
                 except Exception:
                     pass  # column already exists
+
+            ma_columns = {row['name'] for row in conn.execute("PRAGMA table_info(metric_analyses)")}
+            if 'run_id' in ma_columns and 'run_pk' not in ma_columns:
+                conn.execute('ALTER TABLE metric_analyses RENAME COLUMN run_id TO run_pk')
+            conn.execute('DROP INDEX IF EXISTS idx_metric_analyses_run')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_metric_analyses_run_pk ON metric_analyses(run_pk)')
 
             # Add annotation columns to training_runs if missing
             cursor = conn.execute("PRAGMA table_info(training_runs)")
@@ -383,7 +389,7 @@ class DatabaseService:
 
     # Training run operations
     def create_training_run(self, project_name: str, metadata: dict) -> int:
-        """Create new run record. Returns run_id."""
+        """Create new run record. Returns the new run_pk (training_runs.id)."""
         with self._get_connection() as conn:
             cursor = conn.execute(
                 '''INSERT INTO training_runs
@@ -405,7 +411,7 @@ class DatabaseService:
             conn.commit()
             return cursor.lastrowid
 
-    def update_training_run(self, run_id: int, **fields):
+    def update_training_run(self, run_pk: int, **fields):
         """Update run fields (status, timing, metadata, etc.)."""
         allowed_fields = [
             'ended_at', 'duration_seconds', 'status', 'exit_code',
@@ -426,7 +432,7 @@ class DatabaseService:
         if not updates:
             return
 
-        values.append(run_id)
+        values.append(run_pk)
         query = f"UPDATE training_runs SET {', '.join(updates)} WHERE id = ?"
 
         with self._get_connection() as conn:
@@ -449,16 +455,16 @@ class DatabaseService:
 
             return [dict(row) for row in rows]
 
-    def get_training_run(self, run_id: int) -> dict:
+    def get_training_run(self, run_pk: int) -> dict:
         """Fetch single run details."""
         with self._get_connection() as conn:
-            row = conn.execute('SELECT * FROM training_runs WHERE id = ?', (run_id,)).fetchone()
+            row = conn.execute('SELECT * FROM training_runs WHERE id = ?', (run_pk,)).fetchone()
             return dict(row) if row else None
 
-    def delete_training_run(self, run_id: int):
+    def delete_training_run(self, run_pk: int):
         """Delete run record."""
         with self._get_connection() as conn:
-            conn.execute('DELETE FROM training_runs WHERE id = ?', (run_id,))
+            conn.execute('DELETE FROM training_runs WHERE id = ?', (run_pk,))
             conn.commit()
 
     def count_training_runs(self, project_name: str) -> int:
@@ -480,7 +486,7 @@ class DatabaseService:
             ).fetchone()
             return int(row['total']) if row else 0
 
-    def update_run_annotations(self, run_id: int, **fields):
+    def update_run_annotations(self, run_pk: int, **fields):
         """Update notes, notable, and/or tags on a run record."""
         allowed = {'notes': str, 'notable': int, 'tags': str}
         updates, values = [], []
@@ -490,7 +496,7 @@ class DatabaseService:
                 values.append(allowed[field](value))
         if not updates:
             return
-        values.append(run_id)
+        values.append(run_pk)
         with self._get_connection() as conn:
             conn.execute(f"UPDATE training_runs SET {', '.join(updates)} WHERE id = ?", values)
             conn.commit()
@@ -542,21 +548,21 @@ class DatabaseService:
             return cursor.rowcount
 
     # Metric analysis operations
-    def save_metric_analysis(self, run_id: int, metric_name: str, analysis_data: dict):
+    def save_metric_analysis(self, run_pk: int, metric_name: str, analysis_data: dict):
         """Insert or replace metric analysis."""
         import json
 
         with self._get_connection() as conn:
             conn.execute(
                 '''INSERT OR REPLACE INTO metric_analyses
-                   (run_id, metric_name, trend, recent_trend, initial_value, final_value,
+                   (run_pk, metric_name, trend, recent_trend, initial_value, final_value,
                     best_value, best_step, peak_value, peak_step, peak_reversal_pct,
                     improvement_percent, converged, convergence_step,
                     anomaly_count, anomaly_details, summary, sampled_points, total_points,
                     smoothed_points, smoothed_final_value, ema_alpha)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (
-                    run_id,
+                    run_pk,
                     metric_name,
                     analysis_data.get('trend'),
                     analysis_data.get('recent_trend'),
@@ -582,7 +588,7 @@ class DatabaseService:
             )
             conn.commit()
 
-    def get_metric_analyses(self, run_id: int, metric_names: list | None = None) -> dict:
+    def get_metric_analyses(self, run_pk: int, metric_names: list | None = None) -> dict:
         """Get cached analyses for a run."""
         import json
 
@@ -590,13 +596,13 @@ class DatabaseService:
             if metric_names:
                 placeholders = ','.join('?' * len(metric_names))
                 query = f'''SELECT * FROM metric_analyses
-                           WHERE run_id = ? AND metric_name IN ({placeholders})'''
-                params = [run_id] + metric_names
+                           WHERE run_pk = ? AND metric_name IN ({placeholders})'''
+                params = [run_pk] + metric_names
                 rows = conn.execute(query, params).fetchall()
             else:
                 rows = conn.execute(
-                    'SELECT * FROM metric_analyses WHERE run_id = ?',
-                    (run_id,)
+                    'SELECT * FROM metric_analyses WHERE run_pk = ?',
+                    (run_pk,)
                 ).fetchall()
 
             result = {}
@@ -626,10 +632,10 @@ class DatabaseService:
 
             return result
 
-    def delete_metric_analyses(self, run_id: int):
+    def delete_metric_analyses(self, run_pk: int):
         """Delete all analyses for a run."""
         with self._get_connection() as conn:
-            conn.execute('DELETE FROM metric_analyses WHERE run_id = ?', (run_id,))
+            conn.execute('DELETE FROM metric_analyses WHERE run_pk = ?', (run_pk,))
             conn.commit()
 
 

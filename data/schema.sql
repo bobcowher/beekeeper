@@ -77,7 +77,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_project_started ON training_runs(project_nam
 -- Metric analyses table
 CREATE TABLE IF NOT EXISTS metric_analyses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id INTEGER NOT NULL,
+    run_pk INTEGER NOT NULL,
     metric_name TEXT NOT NULL,
 
     -- Analysis summary
@@ -105,8 +105,7 @@ CREATE TABLE IF NOT EXISTS metric_analyses (
 
     parsed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-    FOREIGN KEY (run_id) REFERENCES training_runs(id) ON DELETE CASCADE,
-    UNIQUE(run_id, metric_name)
+    FOREIGN KEY (run_pk) REFERENCES training_runs(id) ON DELETE CASCADE,
+    UNIQUE(run_pk, metric_name)
 );
 
-CREATE INDEX IF NOT EXISTS idx_metric_analyses_run ON metric_analyses(run_id);

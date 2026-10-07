@@ -1,0 +1,74 @@
+import sqlite3
+
+import pytest
+
+from services.db_service import DatabaseService
+
+
+def _legacy_db(path):
+    """A pre-change database: metric_analyses keyed by run_id, no run_number."""
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE training_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_name TEXT NOT NULL,
+            started_at TIMESTAMP NOT NULL,
+            ended_at TIMESTAMP, duration_seconds INTEGER,
+            status TEXT NOT NULL, exit_code INTEGER,
+            commit_sha TEXT, commit_message TEXT, branch TEXT,
+            python_version TEXT, gpu_info TEXT, hostname TEXT,
+            log_file_path TEXT, tensorboard_dir TEXT, persistent_dir TEXT,
+            notes TEXT NOT NULL DEFAULT '', notable INTEGER NOT NULL DEFAULT 0,
+            tags TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE metric_analyses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL,
+            metric_name TEXT NOT NULL,
+            trend TEXT, recent_trend TEXT, initial_value REAL, final_value REAL,
+            best_value REAL, best_step INTEGER, peak_value REAL, peak_step INTEGER,
+            peak_reversal_pct REAL DEFAULT 0, improvement_percent REAL,
+            converged BOOLEAN DEFAULT 0, convergence_step INTEGER,
+            anomaly_count INTEGER DEFAULT 0, anomaly_details TEXT, summary TEXT,
+            sampled_points TEXT, total_points INTEGER,
+            smoothed_points TEXT, smoothed_final_value REAL, ema_alpha REAL,
+            parsed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (run_id) REFERENCES training_runs(id) ON DELETE CASCADE,
+            UNIQUE(run_id, metric_name)
+        );
+        CREATE INDEX idx_metric_analyses_run ON metric_analyses(run_id);
+    """)
+    conn.commit()
+    return conn
+
+
+def test_migration_renames_metric_analyses_run_id_to_run_pk(tmp_path):
+    path = str(tmp_path / "legacy.db")
+    conn = _legacy_db(path)
+    conn.execute(
+        "INSERT INTO training_runs (project_name, started_at, status) VALUES ('a', '2026-01-01T00:00:00', 'completed')"
+    )
+    conn.execute("INSERT INTO metric_analyses (run_id, metric_name, trend) VALUES (1, 'loss', 'improving')")
+    conn.commit()
+    conn.close()
+
+    db = DatabaseService(path)
+
+    assert db.get_metric_analyses(1)["loss"]["trend"] == "improving"
+    c = sqlite3.connect(path)
+    cols = {r[1] for r in c.execute("PRAGMA table_info(metric_analyses)")}
+    assert "run_pk" in cols and "run_id" not in cols
+    fks = [(r[2], r[3], r[4]) for r in c.execute("PRAGMA foreign_key_list(metric_analyses)")]
+    assert ("training_runs", "run_pk", "id") in fks
+    indexes = {r[1] for r in c.execute("PRAGMA index_list(metric_analyses)")}
+    assert "idx_metric_analyses_run_pk" in indexes and "idx_metric_analyses_run" not in indexes
+    with pytest.raises(sqlite3.IntegrityError):
+        c.execute("INSERT INTO metric_analyses (run_pk, metric_name) VALUES (1, 'loss')")
+
+
+def test_fresh_db_metric_analyses_uses_run_pk(tmp_path):
+    path = str(tmp_path / "fresh.db")
+    DatabaseService(path)
+    cols = {r[1] for r in sqlite3.connect(path).execute("PRAGMA table_info(metric_analyses)")}
+    assert "run_pk" in cols and "run_id" not in cols

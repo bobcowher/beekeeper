@@ -252,7 +252,7 @@ def test_get_runs_for_project_returns_active(tmp_path):
         "process": mock_proc,
         "starting": False,
         "project_name": "myproject",
-        "run_id": 42,
+        "run_pk": 42,
         "branch": "main",
         "workspace_dir": "/fake/workspace",
         "log_path": "/fake/train.log",
@@ -283,7 +283,7 @@ def test_start_training_rejects_second_run_when_parallel_disabled(tmp_path):
     # Simulate run 1 already active
     process_manager._running[1] = {
         "process": MagicMock(), "starting": False,
-        "project_name": "myproject", "run_id": 1,
+        "project_name": "myproject", "run_pk": 1,
         "branch": "main",
         "workspace_dir": os.path.join(projects_dir, "myproject", "workspace"),
     }
@@ -308,7 +308,7 @@ def test_start_training_allows_second_run_when_parallel_enabled(tmp_path):
     # Simulate run 1 already active on primary workspace
     process_manager._running[1] = {
         "process": MagicMock(), "starting": False,
-        "project_name": "myproject", "run_id": 1,
+        "project_name": "myproject", "run_pk": 1,
         "branch": "main",
         "workspace_dir": os.path.join(projects_dir, "myproject", "workspace"),
     }
@@ -344,7 +344,7 @@ def test_parallel_tensorboard_link_exists_before_training_process(tmp_path):
 
     process_manager._running[1] = {
         "process": MagicMock(), "starting": False,
-        "project_name": "myproject", "run_id": 1,
+        "project_name": "myproject", "run_pk": 1,
         "branch": "main",
         "workspace_dir": os.path.join(projects_dir, "myproject", "workspace"),
     }
@@ -480,7 +480,7 @@ def test_parallel_workspace_output_conflict_is_replaced(tmp_path):
 
     process_manager._running[1] = {
         "process": MagicMock(), "starting": False,
-        "project_name": "myproject", "run_id": 1,
+        "project_name": "myproject", "run_pk": 1,
         "branch": "main",
         "workspace_dir": os.path.join(projects_dir, "myproject", "workspace"),
     }

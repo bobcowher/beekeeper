@@ -33,14 +33,14 @@ def _resolve_run_tensorboard_dir(projects_dir: str, project_name: str, run: dict
     return candidates[0]
 
 
-def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> dict:
+def parse_run_metrics(projects_dir: str, project_name: str, run_pk: int) -> dict:
     """
     Parse TFEvents and cache analysis for all metrics.
 
     Args:
         projects_dir: Base projects directory
         project_name: Name of the project
-        run_id: Training run ID
+        run_pk: Training run ID
 
     Returns:
         dict with 'success': bool and optional 'reason' for failure
@@ -49,9 +49,9 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> dict
         db = get_db()
 
         # Get run info from DB
-        run = db.get_training_run(run_id)
+        run = db.get_training_run(run_pk)
         if not run or not run.get('tensorboard_dir'):
-            log.warning(f"Run {run_id} has no tensorboard_dir")
+            log.warning(f"Run {run_pk} has no tensorboard_dir")
             return {'success': False, 'reason': 'no_tensorboard_dir'}
 
         # Try the stored path first. New runs store project-relative persistent
@@ -95,7 +95,7 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> dict
         # Group by metric tag
         metric_groups = scalars_df.groupby('tag')
 
-        log.info(f"Found {len(metric_groups)} metrics for run {run_id}")
+        log.info(f"Found {len(metric_groups)} metrics for run {run_pk}")
 
         # Analyze each metric
         for metric_name, group in metric_groups:
@@ -122,13 +122,13 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_id: int) -> dict
             analysis = analyze_metric(metric_name, data)
 
             # Save to database
-            db.save_metric_analysis(run_id, metric_name, analysis)
+            db.save_metric_analysis(run_pk, metric_name, analysis)
 
-        log.info(f"Successfully parsed and analyzed {len(metric_groups)} metrics for run {run_id}")
+        log.info(f"Successfully parsed and analyzed {len(metric_groups)} metrics for run {run_pk}")
         return {'success': True}
 
     except Exception as e:
-        log.error(f"Error parsing metrics for run {run_id}: {e}", exc_info=True)
+        log.error(f"Error parsing metrics for run {run_pk}: {e}", exc_info=True)
         return {'success': False, 'reason': 'unexpected_error', 'error': str(e)}
 
 
@@ -464,7 +464,7 @@ def smart_sample(data: list, target: int = 100) -> list:
 def get_metric_analysis(
     projects_dir: str,
     project_name: str,
-    run_id: int,
+    run_pk: int,
     metric_filter: list | None = None,
     detail: str = 'low'
 ) -> dict:
@@ -474,7 +474,7 @@ def get_metric_analysis(
     Args:
         projects_dir: Base projects directory
         project_name: Name of the project
-        run_id: Training run ID
+        run_pk: Training run ID
         metric_filter: List of metric names to filter (None = all)
         detail: 'low' (summary), 'medium' (+samples), 'high' (+full data)
 
@@ -484,16 +484,16 @@ def get_metric_analysis(
     db = get_db()
 
     # Check cache
-    cached = db.get_metric_analyses(run_id, metric_filter)
+    cached = db.get_metric_analyses(run_pk, metric_filter)
 
     # Evict stale cache entries that predate the smoothed_points feature
     if cached and not any(v.get('ema_alpha') for v in cached.values()):
-        db.delete_metric_analyses(run_id)
+        db.delete_metric_analyses(run_pk)
         cached = None
 
     # If not cached, try to parse
     if not cached:
-        result = parse_run_metrics(projects_dir, project_name, run_id)
+        result = parse_run_metrics(projects_dir, project_name, run_pk)
         if not result['success']:
             # Provide diagnostic error messages
             reason = result.get('reason', 'unknown')
@@ -522,7 +522,7 @@ def get_metric_analysis(
             }
 
         # Fetch after parsing
-        cached = db.get_metric_analyses(run_id, metric_filter)
+        cached = db.get_metric_analyses(run_pk, metric_filter)
 
     # If still empty after parse attempt
     if not cached:
@@ -583,7 +583,7 @@ def _discover_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -
     import datetime
     from dateutil import parser as date_parser
 
-    log.debug(f"Auto-discovering TB dir for project={project_name}, run_id={run.get('id')}")
+    log.debug(f"Auto-discovering TB dir for project={project_name}, run_pk={run.get('id')}")
 
     project_dir = os.path.join(projects_dir, project_name)
 
