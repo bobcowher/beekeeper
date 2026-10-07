@@ -35,7 +35,7 @@ from fastmcp import FastMCP
 BEEKEEPER_HOST = os.environ.get("BEEKEEPER_HOST", "http://localhost:5000").rstrip("/")
 BEEKEEPER_API_KEY = os.environ.get("BEEKEEPER_API_KEY", "")
 
-MCP_VERSION = "0.2.0"
+MCP_VERSION = "0.3.0"
 
 mcp = FastMCP("Beekeeper")
 
@@ -286,7 +286,10 @@ def start_training(project_name: str, branch: str | None = None) -> dict:
     """
     Start training for a project. branch overrides the project's configured default.
     The pre-launch sequence (git sync, pip install) runs first — 30-120s.
-    Returns run_id. Use training_status() to confirm the run is active.
+    Returns run_id and run_ref. Use training_status() to confirm the run is active.
+
+    run_id is the project's own run number (1, 2, 3, ... per project). When telling the
+    user about a run, refer to it by its run_ref (e.g. "mnist-12").
 
     If GPU management is enabled (gpu_enabled=True on the project), a VRAM pre-flight
     check runs before launching. The run is rejected if free VRAM is below
@@ -308,6 +311,9 @@ def stop_training(project_name: str, run_id: int | None = None) -> dict:
     """
     Stop a training run. Provide run_id when multiple runs are active on the same project.
     If only one run is active and run_id is omitted, it stops automatically.
+
+    run_id is the project's own run number (1, 2, 3, ... per project). When telling the
+    user about a run, refer to it by its run_ref (e.g. "mnist-12").
     """
     body = {"run_id": run_id} if run_id is not None else {}
     return _post(f"/projects/{project_name}/training/stop", body)
@@ -317,8 +323,11 @@ def stop_training(project_name: str, run_id: int | None = None) -> dict:
 def training_status(project_name: str) -> dict:
     """
     Get all active training runs for a project.
-    Returns a list of runs, each with run_id, branch, status, elapsed seconds, pid, tb_port.
+    Returns a list of runs, each with run_id, run_ref, branch, status, elapsed seconds, pid, tb_port.
     Use run_id values when calling stop_training or get_logs for a specific run.
+
+    run_id is the project's own run number (1, 2, 3, ... per project). When telling the
+    user about a run, refer to it by its run_ref (e.g. "mnist-12").
     """
     return _get(f"/projects/{project_name}/training/status")
 
@@ -333,6 +342,9 @@ def get_logs(project_name: str, run_id: int | None = None, tail: int = 100) -> s
     Fetch the last N lines of training logs for a specific run.
     Provide run_id when multiple runs are active — required to avoid ambiguity.
     Use tail=500 for more context, tail=50 for a quick check.
+
+    run_id is the project's own run number (1, 2, 3, ... per project). When telling the
+    user about a run, refer to it by its run_ref (e.g. "mnist-12").
     """
     params = f"tail={tail}"
     if run_id is not None:
@@ -350,7 +362,10 @@ def analyze_run(project_name: str, run_id: int | None = None) -> dict:
     tail or download the full log via the run's log download endpoint if needed.
 
     When parallel runs are active and no run_id is given, returns an analysis
-    for each active run keyed by run_id.
+    for each active run keyed by run_id. Every result carries run_id and run_ref.
+
+    run_id is the project's own run number (1, 2, 3, ... per project). When telling the
+    user about a run, refer to it by its run_ref (e.g. "mnist-12").
     """
     if run_id is not None:
         run_meta = _get(f"/projects/{project_name}/runs/{run_id}")
@@ -359,6 +374,7 @@ def analyze_run(project_name: str, run_id: int | None = None) -> dict:
         logs = _get(f"/projects/{project_name}/runs/{run_id}/logs?tail_lines=300")
         return {
             "run_id": run_id,
+            "run_ref": run_data.get("run_ref"),
             "branch": run_data.get("branch"),
             "commit_sha": run_data.get("commit_sha"),
             "status": run_data.get("status"),
@@ -382,6 +398,7 @@ def analyze_run(project_name: str, run_id: int | None = None) -> dict:
             logs = _get(f"/projects/{project_name}/runs/{rid}/logs?tail_lines=300")
             results[str(rid)] = {
                 "run_id": rid,
+                "run_ref": run_data.get("run_ref"),
                 "branch": run_data.get("branch"),
                 "commit_sha": run_data.get("commit_sha"),
                 "status": run_data.get("status"),
@@ -394,8 +411,17 @@ def analyze_run(project_name: str, run_id: int | None = None) -> dict:
     active_run = runs[0] if runs else {}
     tb = _get(f"/projects/{project_name}/tensorboard/latest")
     logs = _get(f"/projects/{project_name}/logs?tail=300")
+    if active_run:
+        run_id_out = active_run.get("run_id")
+        run_ref_out = active_run.get("run_ref")
+    else:
+        # Idle: the tensorboard-latest response identifies the run it analyzed.
+        tb_data = tb.get("data", {}) if isinstance(tb, dict) else {}
+        run_id_out = tb_data.get("run_id")
+        run_ref_out = tb_data.get("run_ref")
     return {
-        "run_id": active_run.get("run_id"),
+        "run_id": run_id_out,
+        "run_ref": run_ref_out,
         "branch": active_run.get("branch"),
         "commit_sha": active_run.get("commit_sha"),
         "status": active_run.get("status"),

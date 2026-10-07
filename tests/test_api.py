@@ -695,3 +695,18 @@ def test_api_delete_refused_while_run_active(client, app, ready_project):
     assert r.status_code == 409
     assert r.get_json()["error"]["code"] == "PROJECT_BUSY"
     assert os.path.isdir(os.path.join(app.config["PROJECTS_DIR"], "myproject"))
+
+
+def test_tensorboard_latest_returns_public_run_id_and_ref(client, app, mocker):
+    from conftest import make_project_dir
+    from services import tensorboard_service
+    make_project_dir(app, name="a")
+    seeded = _seed_runs(["z"] * 3 + ["a"])
+    (_, pk, n), = [s for s in seeded if s[0] == "a"]
+    mocker.patch.object(tensorboard_service, "get_metric_analysis", return_value={"metrics": {}})
+
+    for url in ("/api/v1/projects/a/tensorboard/latest",
+                f"/api/v1/projects/a/tensorboard/latest?run_id={n}"):
+        data = client.get(url, headers=_AUTH).get_json()["data"]
+        assert data["run_id"] == n
+        assert data["run_ref"] == f"a-{n}"

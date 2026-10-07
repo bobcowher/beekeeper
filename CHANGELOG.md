@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Changed
+- **Breaking:** deleting a project is refused while one of its runs is starting or running.
+  The API returns error code `PROJECT_BUSY` (409), replacing `TRAINING_RUNNING`, and also
+  covers runs that are still starting.
+- **Breaking:** run IDs are now per-project (each project counts 1, 2, 3, ...). `run_id`
+  in the UI, URLs, REST API, and MCP tools means the project's run number. Existing runs
+  are renumbered in start order on first startup, and their persistent folders are
+  renamed to `run_<number>` (deferred automatically if a training process is live).
+- Run objects include `run_ref` (e.g. `mnist-12`) for human-readable references; the
+  internal database ID is no longer exposed.
+- Training processes receive `BEEKEEPER_RUN_ID` and `BEEKEEPER_RUN_REF`.
+- New run folders get a hidden `.beekeeper_run_pk` ownership marker; a run refuses to start
+  if its `run_<n>` folder already belongs to another run.
+- Startup migration also re-points workspace TensorBoard/output symlinks to the renamed
+  folders, and never blocks startup (failures are logged and retried on next start).
+- MCP server 0.3.0; the API now requires MCP >= 0.3.0.
+
+### Fixed
+- Deleting a project now removes its run history, so a recreated project with the same
+  name starts fresh.
+- Refused training starts (already running, at capacity, insufficient VRAM) no longer
+  consume a run number.
+- Generated agent SDK run methods pointed at non-existent global `/runs/{id}` endpoints.
+
 ---
 
 ## [1.1.0] - 2026-09-23

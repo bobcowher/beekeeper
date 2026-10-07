@@ -171,7 +171,7 @@ class BeekeeperClient:
         params = {'detail': detail}
         if metrics:
             params['metrics'] = ','.join(metrics)
-        return self._request('GET', f"/runs/{run_id}/metrics", params=params)
+        return self._request('GET', f"/projects/{self.project_name}/runs/{run_id}/metrics", params=params)
 
     # Run History
     def get_run_history(self, limit: int = 20) -> Dict[str, Any]:
@@ -180,7 +180,7 @@ class BeekeeperClient:
 
     def get_run_details(self, run_id: int) -> Dict[str, Any]:
         \"\"\"Get details for a specific run.\"\"\"
-        return self._request('GET', f"/runs/{run_id}")
+        return self._request('GET', f"/projects/{self.project_name}/runs/{run_id}")
 
     # System Stats
     def get_system_stats(self) -> Dict[str, Any]:
