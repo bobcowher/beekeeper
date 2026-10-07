@@ -35,7 +35,7 @@
             const data = await resp.json();
             allRuns = data.runs || [];
             // Keep checked state only for runs that still exist
-            const existingIds = new Set(allRuns.map(r => r.id));
+            const existingIds = new Set(allRuns.map(r => r.run_id));
             for (const id of [...checkedIds]) {
                 if (!existingIds.has(id)) checkedIds.delete(id);
             }
@@ -116,34 +116,34 @@
         const commitMsg = escHtml(run.commit_message || '');
         const notable = run.notable ? 1 : 0;
         const tags = (run.tags || '').split(',').map(t => t.trim()).filter(Boolean);
-        const isChecked = checkedIds.has(run.id);
-        const notesOpen = expandedNotes.has(run.id);
+        const isChecked = checkedIds.has(run.run_id);
+        const notesOpen = expandedNotes.has(run.run_id);
 
         const tagsHtml = tags.map(t => `<span class="tag-chip">${escHtml(t)}</span>`).join('') +
-            `<button class="tag-add-btn" data-run-id="${run.id}" title="Edit tags">&#43;</button>`;
+            `<button class="tag-add-btn" data-run-id="${run.run_id}" title="Edit tags">&#43;</button>`;
 
-        let row = `<tr data-run-id="${run.id}">`;
-        row += `<td style="text-align:center"><button class="star-btn${notable ? ' notable' : ''}" data-run-id="${run.id}" title="${notable ? 'Remove star' : 'Star this run'}">${notable ? '&#9733;' : '&#9734;'}</button></td>`;
-        row += `<td><input type="checkbox" class="compare-checkbox" data-run-id="${run.id}"${isChecked ? ' checked' : ''}></td>`;
-        row += `<td class="muted" style="font-size:0.8rem">#${run.id}</td>`;
+        let row = `<tr data-run-id="${run.run_id}">`;
+        row += `<td style="text-align:center"><button class="star-btn${notable ? ' notable' : ''}" data-run-id="${run.run_id}" title="${notable ? 'Remove star' : 'Star this run'}">${notable ? '&#9733;' : '&#9734;'}</button></td>`;
+        row += `<td><input type="checkbox" class="compare-checkbox" data-run-id="${run.run_id}"${isChecked ? ' checked' : ''}></td>`;
+        row += `<td class="muted" style="font-size:0.8rem">#${run.run_id}</td>`;
         row += `<td>${started}</td>`;
         row += `<td>${duration}</td>`;
         row += `<td><span class="status-badge status-${statusClass}">${run.status}</span></td>`;
         row += `<td><code>${branch}</code> <code title="${commitMsg}">${commitShort}</code></td>`;
-        row += `<td class="tags-cell" data-run-id="${run.id}">${tagsHtml}</td>`;
+        row += `<td class="tags-cell" data-run-id="${run.run_id}">${tagsHtml}</td>`;
         row += '<td class="run-actions">';
-        row += `<button class="btn btn-secondary btn-sm notes-btn" data-run-id="${run.id}">${run.notes ? '&#128221;' : '+'} Notes</button>`;
+        row += `<button class="btn btn-secondary btn-sm notes-btn" data-run-id="${run.run_id}">${run.notes ? '&#128221;' : '+'} Notes</button>`;
         if (run.log_file_path) {
-            row += ` <a href="/projects/${projectName}/history/${run.id}/log" class="btn btn-secondary btn-sm">Log</a>`;
+            row += ` <a href="/projects/${projectName}/history/${run.run_id}/log" class="btn btn-secondary btn-sm">Log</a>`;
         }
-        row += ` <button class="btn btn-secondary btn-sm artifacts-btn" data-run-id="${run.id}">Artifacts</button>`;
+        row += ` <button class="btn btn-secondary btn-sm artifacts-btn" data-run-id="${run.run_id}">Artifacts</button>`;
         row += '</td>';
         row += '</tr>';
 
         // Notes sub-row
         const notesText = escHtml(run.notes || '');
-        row += `<tr class="notes-row" data-run-id="${run.id}" style="${notesOpen ? '' : 'display:none'}">`;
-        row += `<td colspan="9"><textarea class="notes-editor" data-run-id="${run.id}" placeholder="Add post-run observations…">${notesText}</textarea></td>`;
+        row += `<tr class="notes-row" data-run-id="${run.run_id}" style="${notesOpen ? '' : 'display:none'}">`;
+        row += `<td colspan="9"><textarea class="notes-editor" data-run-id="${run.run_id}" placeholder="Add post-run observations…">${notesText}</textarea></td>`;
         row += '</tr>';
 
         return row;
@@ -170,7 +170,7 @@
         listEl.querySelectorAll('.star-btn').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const runId = parseInt(btn.dataset.runId);
-                const run = allRuns.find(r => r.id === runId);
+                const run = allRuns.find(r => r.run_id === runId);
                 if (!run) return;
                 run.notable = run.notable ? 0 : 1;
                 await patchRun(runId, {notable: !!run.notable});
@@ -226,7 +226,7 @@
         listEl.querySelectorAll('.notes-editor').forEach(ta => {
             ta.addEventListener('blur', async () => {
                 const runId = parseInt(ta.dataset.runId);
-                const run = allRuns.find(r => r.id === runId);
+                const run = allRuns.find(r => r.run_id === runId);
                 if (!run) return;
                 if (ta.value === (run.notes || '')) return;
                 run.notes = ta.value;
@@ -241,7 +241,7 @@
         listEl.querySelectorAll('.tag-add-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const runId = parseInt(btn.dataset.runId);
-                const run = allRuns.find(r => r.id === runId);
+                const run = allRuns.find(r => r.run_id === runId);
                 if (!run) return;
                 const cell = listEl.querySelector(`.tags-cell[data-run-id="${runId}"]`);
                 if (cell) openTagEditor(cell, run);
@@ -382,7 +382,7 @@
         const save = async () => {
             const tags = input.value.split(',').map(t => t.trim()).filter(Boolean).join(',');
             run.tags = tags;
-            await patchRun(run.id, {tags});
+            await patchRun(run.run_id, {tags});
             renderAll();
         };
 
@@ -397,8 +397,8 @@
 
     async function openCompare() {
         const [id1, id2] = [...checkedIds];
-        const run1 = allRuns.find(r => r.id === id1);
-        const run2 = allRuns.find(r => r.id === id2);
+        const run1 = allRuns.find(r => r.run_id === id1);
+        const run2 = allRuns.find(r => r.run_id === id2);
         if (!run1 || !run2) return;
 
         showCompareModal(run1, run2, null, true);
@@ -452,7 +452,7 @@
             .map(t => `<span class="tag-chip">${escHtml(t)}</span>`).join('');
 
         return `<div class="compare-run-card">
-            <h4>${label} &mdash; Run #${run.id}</h4>
+            <h4>${label} &mdash; Run #${run.run_id}</h4>
             <div><strong>Started:</strong> ${started}</div>
             <div><strong>Duration:</strong> ${duration}</div>
             <div><strong>Status:</strong> <span class="status-badge status-${getStatusClass(run.status)}">${run.status}</span></div>
