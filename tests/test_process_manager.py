@@ -1000,3 +1000,53 @@ def test_stop_training_by_per_project_number(app, ready_project, mocker):
     assert "error" in process_manager.stop_training(projects_dir, "myproject", run_id=99)
     result = process_manager.stop_training(projects_dir, "myproject", run_id=3)
     assert result["run_id"] == 3 and result["run_ref"] == "myproject-3"
+
+
+def _stale_pk_row(projects_dir, persistent=True):
+    """myproject run #1 with pk 2 (other project holds pk 1), as left by an unfinished migration."""
+    import datetime
+    from services.db_service import get_db
+    _create_run_in_other_project()
+    db = get_db()
+    pk, n = db.create_training_run(
+        "myproject", {"started_at": datetime.datetime.now(), "status": "completed"})
+    assert (pk, n) == (2, 1)
+    if persistent:
+        db.update_training_run(pk, persistent_dir="persistent/runs/run_2",
+                               tensorboard_dir="persistent/runs/run_2")
+    return pk
+
+
+def test_launch_aborts_when_another_row_stores_the_new_folder(app, ready_project):
+    from services import process_manager
+    from services.db_service import get_db
+    projects_dir = _prepare_launchable(app)
+    old_pk = _stale_pk_row(projects_dir)
+    os.makedirs(os.path.join(projects_dir, "myproject", "persistent", "runs", "run_2"))  # empty
+
+    result, popen = _launch_real_db(projects_dir)
+
+    assert result["run_id"] == 2
+    assert not popen.called  # avoid assert_not_called: its failure message dumps the env
+    assert get_db().get_run("myproject", 2)["status"] == "crashed"
+    assert get_db().get_training_run(old_pk)["persistent_dir"] == "persistent/runs/run_2"
+    log_path = process_manager.get_run_log_path(projects_dir, "myproject", run_id=2)
+    assert "unfinished folder migration" in open(log_path).read()
+
+
+def test_launch_archives_pk_named_log_of_older_run_before_truncating(app, ready_project):
+    from services import process_manager
+    from services.db_service import get_db
+    projects_dir = _prepare_launchable(app)
+    old_pk = _stale_pk_row(projects_dir, persistent=False)
+    with open(os.path.join(projects_dir, "myproject", f"train-{old_pk}.log"), "w") as f:
+        f.write("old run log")
+
+    result, popen = _launch_real_db(projects_dir)
+
+    assert result["run_id"] == 2
+    popen.assert_called_once()
+    rel = get_db().get_training_run(old_pk)["log_file_path"]
+    assert rel and rel.endswith("-0001.log")
+    with open(process_manager.get_run_log_path(projects_dir, "myproject", run_id=1)) as f:
+        assert f.read() == "old run log"

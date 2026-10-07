@@ -673,3 +673,27 @@ def test_folder_migration_leaves_ambiguous_legacy_log(app, mocker):
     assert rfm.migrate_run_folders(projects_dir) == "done"
     assert db.get_training_run(old_pk)["log_file_path"] is None
     assert _read(os.path.join(pdir, f"train-{owner_n}.log")) == "owned by a #2"
+
+
+def test_folder_migration_db_error_on_one_row_does_not_stop_others(app, mocker):
+    from services.db_service import get_db
+    _reset_folder_migration()
+    db = get_db()
+    projects_dir = app.config["PROJECTS_DIR"]
+    _mk_run(db, projects_dir, "z", pk_dir=False)            # pk 1
+    a_pk, a_n = _mk_run(db, projects_dir, "a")              # pk 2, a #1
+    b_pk, b_n = _mk_run(db, projects_dir, "b")              # pk 3, b #1
+    real_update = db.update_training_run
+
+    def flaky_update(pk, **fields):
+        if pk == a_pk:
+            raise RuntimeError("database is locked")
+        return real_update(pk, **fields)
+
+    mocker.patch.object(db, "update_training_run", side_effect=flaky_update)
+    mocker.patch.object(rfm, "get_db", return_value=db)
+    mocker.patch.object(rfm, "_live_run_dirs", return_value=[])
+
+    assert rfm.migrate_run_folders(projects_dir) == "conflicts"
+    assert not db.migration_applied(rfm.RUN_FOLDER_MIGRATION)
+    assert db.get_run("b", b_n)["persistent_dir"] == f"persistent/runs/run_{b_n}"

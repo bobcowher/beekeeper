@@ -259,6 +259,30 @@ def test_clear_tb_logs_refuses_folder_owned_by_another_run(client, ready_project
     assert os.listdir(run_dir) == [MARKER]  # cleared, ownership marker kept
 
 
+def test_clear_tb_logs_survives_marker_rewrite_failure(client, ready_project, app, mocker):
+    import builtins
+    import os
+    from services.run_storage_service import MARKER
+    projects_dir = app.config["PROJECTS_DIR"]
+    workspace = os.path.join(projects_dir, "myproject", "workspace")
+    run_dir = os.path.join(projects_dir, "myproject", "persistent", "runs", "run_1")
+    os.makedirs(workspace)
+    os.makedirs(run_dir)
+    with open(os.path.join(run_dir, MARKER), "w") as f:
+        f.write("1")
+    os.symlink(run_dir, os.path.join(workspace, "runs"))
+    real_open = builtins.open
+
+    def failing_open(path, mode="r", *args, **kwargs):
+        if str(path).endswith(MARKER) and "w" in mode:
+            raise OSError(28, "No space left on device")
+        return real_open(path, mode, *args, **kwargs)
+
+    mocker.patch("builtins.open", side_effect=failing_open)
+    resp = client.post("/projects/myproject/clear-tb-logs", follow_redirects=False)
+    assert resp.status_code == 302
+
+
 def test_clear_tb_logs_missing_directory(client, ready_project):
     resp = client.post("/projects/myproject/clear-tb-logs", follow_redirects=False)
     assert resp.status_code == 302

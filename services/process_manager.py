@@ -14,6 +14,7 @@ from services.db_service import get_db
 from services.project_service import ensure_data_dir_symlink, validate_output_paths, validate_workspace_path
 from services.git_utils import git_env
 from services.run_refs import run_ref
+from services.run_folder_migration import archive_pk_named_log
 from services.run_storage_service import MARKER, delete_run_storage, persistent_runs_root
 from services.stats_service import get_gpu_stats
 
@@ -635,10 +636,26 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
     return {"run_id": run_id, "run_ref": run_ref(name, run_id), "status": "starting"}
 
 
+def _archive_older_runs_pk_named_log(projects_dir: str, name: str, run_id: int, log_path: str):
+    """Before run #<run_id> truncates train-<run_id>.log, archive it if it is still the
+    unarchived live log of the older run whose pk == run_id (named before run numbers)."""
+    old = get_db().get_training_run(run_id)
+    if not (old and old["project_name"] == name and not old.get("log_file_path")
+            and old["run_number"] != old["id"] and os.path.isfile(log_path)):
+        return
+    try:
+        rel = archive_pk_named_log(projects_dir, old)
+    except OSError as e:
+        log.warning("Could not archive %s for run_pk %s before reuse: %s", log_path, old["id"], e)
+        return
+    get_db().update_training_run(old["id"], log_file_path=rel)
+
+
 def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, branch, workspace_dir, gpu_assignment=None):  # NOSONAR — sequential pre-launch pipeline
     """Run the full pre-launch sequence and start the training subprocess (runs in background thread)."""
     is_parallel = workspace_dir != os.path.join(projects_dir, name, "workspace")
     log_path = os.path.join(projects_dir, name, f"train-{run_id}.log")
+    _archive_older_runs_pk_named_log(projects_dir, name, run_id, log_path)
 
     def _abort(msg):
         log.error("Pre-launch failed for %s: %s", run_ref(name, run_id), msg)
@@ -796,6 +813,12 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
         return _abort(str(e))
 
     persistent_run_rel, persistent_run_dir = _persistent_run_paths(projects_dir, name, run_id)
+    if any(r["id"] != run_pk and r.get("persistent_dir") == persistent_run_rel
+           for r in get_db().get_training_runs(name, limit=None)):
+        return _abort(
+            f"Persistent folder {persistent_run_rel} is still recorded for another run "
+            "(an unfinished folder migration?). Check the server log."
+        )
     # Never merge into a folder that belongs to another run (e.g. an unmigrated run_<pk>
     # left behind by an unfinished folder migration).
     marker_path = os.path.join(persistent_run_dir, MARKER)

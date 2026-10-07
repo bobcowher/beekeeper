@@ -31,6 +31,25 @@ def _live_run_dirs(projects_dir: str) -> list[str]:
     return found
 
 
+def archive_pk_named_log(projects_dir: str, run: dict) -> str:
+    """Move projects/<name>/train-<pk>.log into run_logs/ under the run's number.
+
+    Uses the archive naming run-<ts>-<run_number:04d>.log (ts = the log's mtime) and
+    returns the project-relative path; the caller records it as log_file_path. Raises
+    OSError (FileExistsError if that archive name is taken).
+    """
+    project_dir = os.path.join(projects_dir, run["project_name"])
+    src = os.path.join(project_dir, f"train-{run['id']}.log")
+    ts = datetime.datetime.fromtimestamp(os.path.getmtime(src)).strftime("%Y%m%d-%H%M%S")
+    rel = f"run_logs/run-{ts}-{run['run_number']:04d}.log"
+    dest = os.path.join(project_dir, rel)
+    if os.path.exists(dest):
+        raise FileExistsError(f"{dest} exists")
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    os.rename(src, dest)
+    return rel
+
+
 def _archive_legacy_live_logs(projects_dir: str, db) -> list[str]:
     """Archive live logs still named train-<pk>.log (unarchived runs from before run numbers).
 
@@ -55,14 +74,7 @@ def _archive_legacy_live_logs(projects_dir: str, db) -> list[str]:
             log.warning("Leaving %s: it belongs to %s run #%s", src, r["project_name"], r["id"])
             continue
         try:
-            ts = datetime.datetime.fromtimestamp(os.path.getmtime(src)).strftime("%Y%m%d-%H%M%S")
-            rel = f"run_logs/run-{ts}-{r['run_number']:04d}.log"
-            dest = os.path.join(project_dir, rel)
-            if os.path.exists(dest):
-                conflicts.append(f"{r['project_name']}: {dest} exists; {src} left in place")
-                continue
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            os.rename(src, dest)
+            rel = archive_pk_named_log(projects_dir, r)
         except OSError as e:
             conflicts.append(f"{r['project_name']}: could not archive {src}: {e}")
             continue
@@ -209,16 +221,16 @@ def _migrate_folders(projects_dir: str, db) -> list[str]:
             with open(os.path.join(src, MARKER), "w") as f:
                 f.write(str(r["id"]))
             os.rename(src, staged)
-        except OSError as e:
+        except Exception as e:
             # Folder (and the row's pointer to it) stays at run_<pk>; retried next startup.
+            log.exception("Could not stage %s", src)
             conflicts.append(f"{r['project_name']}: could not stage {src}: {e}")
             pass1_conflicts.add(r["id"])
 
     # Pass 2: place each staged folder at run_<number> and record it.
     migrated = []
-    for r in todo:
-        if r["id"] in pass1_conflicts:
-            continue  # conflict already recorded; row still points at its run_<pk> folder
+
+    def place(r):
         _, staged, dest = paths(r)
         new_rel = f"persistent/runs/run_{r['run_number']}"
         staged_rel = f"persistent/runs/.migrating_{r['id']}"
@@ -226,13 +238,13 @@ def _migrate_folders(projects_dir: str, db) -> list[str]:
             if os.path.exists(dest):
                 conflicts.append(f"{r['project_name']}: {dest} exists; {staged} left in place")
                 set_dir(r, staged_rel)
-                continue
+                return
             try:
                 os.rename(staged, dest)
             except OSError as e:
                 conflicts.append(f"{r['project_name']}: could not place {staged} at {dest}: {e}")
                 set_dir(r, staged_rel)
-                continue
+                return
             set_dir(r, new_rel)
             migrated.append(r)
         elif os.path.isdir(dest):
@@ -244,6 +256,18 @@ def _migrate_folders(projects_dir: str, db) -> list[str]:
         else:
             set_dir(r, new_rel)            # folder already gone (pruned/never created)
             migrated.append(r)
+
+    for r in todo:
+        if r["id"] in pass1_conflicts:
+            continue  # conflict already recorded; row still points at its run_<pk> folder
+        try:
+            place(r)
+        except Exception as e:
+            # E.g. a DB error after a rename: the next startup re-derives this row's state
+            # (an own-marker folder at run_<number> is adopted); new runs refuse to reuse
+            # a folder another row still stores.
+            log.exception("Could not migrate run folder for run_pk %s", r["id"])
+            conflicts.append(f"{r['project_name']}: run_pk {r['id']}: {e}")
 
     conflicts += _repoint_workspace_links(projects_dir, migrated)
 

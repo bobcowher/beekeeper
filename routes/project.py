@@ -1,6 +1,7 @@
+import json
+import logging
 import os
 import re
-import json
 from flask import (
     Blueprint, render_template, current_app,
     request, redirect, url_for, abort, flash, jsonify,
@@ -19,6 +20,8 @@ from services.process_manager import get_training_status, stop_tensorboard, get_
 from services.run_storage_service import MARKER, delete_run_storage, persistent_runs_root, read_run_marker
 from services.db_service import get_db
 from services.ssh_key_service import is_ssh_auth_error
+
+log = logging.getLogger(__name__)
 
 project_bp = Blueprint("project", __name__, url_prefix="/projects")
 
@@ -372,8 +375,11 @@ def clear_tb_logs(name):
         shutil.rmtree(clear_target)
         os.makedirs(clear_target, exist_ok=True)
         if owner is not None and not os.path.exists(os.path.join(run_folder, MARKER)):
-            with open(os.path.join(run_folder, MARKER), "w") as f:
-                f.write(str(owner))
+            try:
+                with open(os.path.join(run_folder, MARKER), "w") as f:
+                    f.write(str(owner))
+            except OSError as e:
+                log.warning("Could not restore run marker in %s: %s", run_folder, e)
         flash("Tensorboard logs cleared.", "success")
     else:
         flash("Tensorboard log directory not found.", "error")

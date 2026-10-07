@@ -80,7 +80,8 @@ def create_app(test_config=None):
         from services.run_folder_migration import migrate_run_folders
         migrate_run_folders(app.config["PROJECTS_DIR"])
     except Exception:
-        # Fail open: each row's DB path changes only after its own rename, so a retry is safe.
+        # Fail open: a row's stored path always names the folder holding its data
+        # (run_<pk>, .migrating_<pk> or run_<number>), so a retry at next startup is safe.
         logging.getLogger(__name__).exception("Run folder migration failed; will retry on next startup")
 
     # Register blueprints
