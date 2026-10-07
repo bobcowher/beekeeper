@@ -170,3 +170,72 @@ def test_create_project_purges_orphan_history(app, mocker):
 
     assert db.get_training_runs("ghost", limit=None) == []
     assert db.create_training_run("ghost", _meta())[1] == 1
+
+
+def test_backfill_numbers_each_project_by_started_at(tmp_path):
+    path = str(tmp_path / "legacy.db")
+    conn = _legacy_db(path)
+    rows = [  # (project, started_at) inserted out of chronological order
+        ("a", "2026-01-03"), ("b", "2026-01-01"), ("a", "2026-01-01"),
+        ("a", "2026-01-02"), ("b", "2026-01-05"),
+    ]
+    for p, s in rows:
+        conn.execute(
+            "INSERT INTO training_runs (project_name, started_at, status) VALUES (?, ?, 'completed')", (p, s)
+        )
+    conn.commit()
+    conn.close()
+
+    db = DatabaseService(path)
+
+    got = sqlite3.connect(path).execute(
+        "SELECT project_name, started_at, run_number FROM training_runs ORDER BY project_name, run_number"
+    ).fetchall()
+    assert got == [
+        ("a", "2026-01-01", 1), ("a", "2026-01-02", 2), ("a", "2026-01-03", 3),
+        ("b", "2026-01-01", 1), ("b", "2026-01-05", 2),
+    ]
+    assert db.create_training_run("a", _meta())[1] == 4
+    assert db.create_training_run("b", _meta())[1] == 3
+
+
+def test_backfill_is_idempotent(tmp_path):
+    path = str(tmp_path / "legacy.db")
+    conn = _legacy_db(path)
+    conn.execute("INSERT INTO training_runs (project_name, started_at, status) VALUES ('a', '2026-01-01', 'completed')")
+    conn.commit()
+    conn.close()
+    DatabaseService(path)
+    db = DatabaseService(path)  # second startup
+    assert db.create_training_run("a", _meta())[1] == 2
+
+
+def test_unique_index_rejects_duplicate_numbers(db):
+    db.create_training_run("a", _meta())
+    with pytest.raises(sqlite3.IntegrityError):
+        with sqlite3.connect(db.db_path) as c:
+            c.execute(
+                "INSERT INTO training_runs (project_name, run_number, started_at, status) VALUES ('a', 1, 'x', 'x')"
+            )
+
+
+def test_migration_helpers_round_trip(db):
+    assert db.migration_applied("x") is False
+    db.mark_migration_applied("x")
+    db.mark_migration_applied("x")
+    assert db.migration_applied("x") is True
+
+
+def test_backfill_continues_after_existing_numbers(tmp_path):
+    path = str(tmp_path / "legacy.db")
+    conn = _legacy_db(path)
+    conn.execute("ALTER TABLE training_runs ADD COLUMN run_number INTEGER")
+    conn.execute("INSERT INTO training_runs (project_name, run_number, started_at, status) VALUES ('a', 5, '2026-01-01', 'x')")
+    for s in ("2026-01-02", "2026-01-03", "2026-01-04"):
+        conn.execute("INSERT INTO training_runs (project_name, started_at, status) VALUES ('a', ?, 'x')", (s,))
+    conn.commit()
+    conn.close()
+    db = DatabaseService(path)
+    got = sqlite3.connect(path).execute("SELECT run_number FROM training_runs ORDER BY started_at").fetchall()
+    assert got == [(5,), (6,), (7,), (8,)]
+    assert db.create_training_run("a", _meta())[1] == 9

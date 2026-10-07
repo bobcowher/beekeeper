@@ -114,3 +114,8 @@ CREATE TABLE IF NOT EXISTS run_counters (
     project_name TEXT PRIMARY KEY,
     last_number  INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    name TEXT PRIMARY KEY,
+    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

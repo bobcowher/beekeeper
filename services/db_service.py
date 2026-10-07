@@ -131,6 +131,45 @@ class DatabaseService:
             conn.execute('''CREATE TABLE IF NOT EXISTS run_counters (
                 project_name TEXT PRIMARY KEY, last_number INTEGER NOT NULL)''')
 
+            conn.execute('''CREATE TABLE IF NOT EXISTS schema_migrations (
+                name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+
+            # Backfill per-project run numbers for rows created before run_number existed.
+            # Numbers continue after any already-assigned numbers in the same project.
+            conn.execute('''
+                UPDATE training_runs SET run_number = (
+                    SELECT numbered.n FROM (
+                        SELECT id,
+                               COALESCE((SELECT MAX(run_number) FROM training_runs t2
+                                         WHERE t2.project_name = t.project_name), 0)
+                               + ROW_NUMBER() OVER (PARTITION BY project_name ORDER BY started_at, id) AS n
+                        FROM training_runs t WHERE run_number IS NULL
+                    ) AS numbered WHERE numbered.id = training_runs.id
+                ) WHERE run_number IS NULL
+            ''')
+            conn.execute('''
+                INSERT INTO run_counters (project_name, last_number)
+                SELECT project_name, MAX(run_number) FROM training_runs
+                WHERE run_number IS NOT NULL GROUP BY project_name
+                ON CONFLICT(project_name) DO UPDATE
+                    SET last_number = MAX(last_number, excluded.last_number)
+            ''')
+            conn.execute(
+                'CREATE UNIQUE INDEX IF NOT EXISTS idx_training_runs_project_number '
+                'ON training_runs(project_name, run_number)'
+            )
+
+            conn.commit()
+
+    def migration_applied(self, name: str) -> bool:
+        with self._get_connection() as conn:
+            return conn.execute(
+                'SELECT 1 FROM schema_migrations WHERE name = ?', (name,)
+            ).fetchone() is not None
+
+    def mark_migration_applied(self, name: str):
+        with self._get_connection() as conn:
+            conn.execute('INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)', (name,))
             conn.commit()
 
     # User operations
