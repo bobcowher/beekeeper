@@ -241,7 +241,7 @@ def test_mcp_documentation_and_download_use_mcp_server_constant(client, app, tmp
 
 def test_training_history_log_missing_run_uses_shared_message(client, mocker):
     db = mocker.MagicMock()
-    db.get_training_run.return_value = None
+    db.get_run.return_value = None
     mocker.patch("services.db_service.get_db", return_value=db)
 
     r = client.get("/projects/myproject/history/9/log")
@@ -252,7 +252,7 @@ def test_training_history_log_missing_run_uses_shared_message(client, mocker):
 
 def test_training_history_diff_missing_runs_use_shared_message(client, mocker):
     db = mocker.MagicMock()
-    db.get_training_run.side_effect = [
+    db.get_run.side_effect = [
         {"id": 1, "project_name": "myproject", "commit_sha": "a" * 40},
         None,
     ]
@@ -266,7 +266,7 @@ def test_training_history_diff_missing_runs_use_shared_message(client, mocker):
 
 def test_training_history_update_missing_run_uses_shared_message(client, mocker):
     db = mocker.MagicMock()
-    db.get_training_run.return_value = None
+    db.get_run.return_value = None
     mocker.patch("services.db_service.get_db", return_value=db)
 
     r = client.patch("/projects/myproject/history/9", json={"notes": "later"})
@@ -277,37 +277,55 @@ def test_training_history_update_missing_run_uses_shared_message(client, mocker)
 
 # --- API v1 run-scoped artifact files ---
 
-def _make_run_dir(app, name, run_id, files=None):
-    """Create projects/<name>/persistent/runs/run_<id>/ with optional file contents."""
+def _seed_runs(order):
+    import datetime
+    from services.db_service import get_db
+    db = get_db()
+    out = []
+    for p in order:
+        pk, n = db.create_training_run(p, {"started_at": datetime.datetime.now(), "status": "completed"})
+        out.append((p, pk, n))
+    return out
+
+
+def _make_run_dir(app, name, files=None, rel=None):
+    """Seed a real run and create its stored persistent dir. Returns (run_dir, run_number)."""
     import os
-    run_dir = os.path.join(app.config["PROJECTS_DIR"], name, "persistent", "runs", f"run_{run_id}")
+    from services.db_service import get_db
+    ((_, pk, n),) = _seed_runs([name])
+    rel = rel or f"persistent/runs/run_{n}"
+    get_db().update_training_run(pk, persistent_dir=rel)
+    run_dir = os.path.join(app.config["PROJECTS_DIR"], name, rel)
     os.makedirs(run_dir, exist_ok=True)
     for rel_path, content in (files or {}).items():
         full = os.path.join(run_dir, rel_path)
         os.makedirs(os.path.dirname(full), exist_ok=True)
         with open(full, "w") as f:
             f.write(content)
-    return run_dir
+    return run_dir, n
+
+
+_AUTH = {"Authorization": "Bearer test"}
 
 
 def test_api_v1_run_files_lists_directory(client, ready_project, app):
-    _make_run_dir(app, "myproject", 5, {"config.yaml": "lr: 0.001", "checkpoints/model.ckpt": "weights"})
+    _, n = _make_run_dir(app, "myproject", {"config.yaml": "lr: 0.001", "checkpoints/model.ckpt": "weights"})
 
-    r = client.get("/api/v1/projects/myproject/runs/5/files",
-                    headers={"Authorization": "Bearer test"})
+    r = client.get(f"/api/v1/projects/myproject/runs/{n}/files", headers=_AUTH)
 
     assert r.status_code == 200
     data = r.get_json()
     assert data["success"] is True
     names = {e["name"] for e in data["data"]["entries"]}
     assert names == {"config.yaml", "checkpoints"}
+    assert data["data"]["run_id"] == n
+    assert data["data"]["run_ref"] == f"myproject-{n}"
 
 
 def test_api_v1_run_files_downloads_file(client, ready_project, app):
-    _make_run_dir(app, "myproject", 5, {"config.yaml": "lr: 0.001"})
+    _, n = _make_run_dir(app, "myproject", {"config.yaml": "lr: 0.001"})
 
-    r = client.get("/api/v1/projects/myproject/runs/5/files/config.yaml",
-                    headers={"Authorization": "Bearer test"})
+    r = client.get(f"/api/v1/projects/myproject/runs/{n}/files/config.yaml", headers=_AUTH)
 
     assert r.status_code == 200
     assert r.data == b"lr: 0.001"
@@ -315,76 +333,192 @@ def test_api_v1_run_files_downloads_file(client, ready_project, app):
 
 
 def test_api_v1_run_files_zip_download(client, ready_project, app):
-    _make_run_dir(app, "myproject", 5, {"checkpoints/model.ckpt": "weights"})
+    _, n = _make_run_dir(app, "myproject", {"checkpoints/model.ckpt": "weights"})
 
-    r = client.get("/api/v1/projects/myproject/runs/5/files/checkpoints?zip=1",
-                    headers={"Authorization": "Bearer test"})
+    r = client.get(f"/api/v1/projects/myproject/runs/{n}/files/checkpoints?zip=1", headers=_AUTH)
 
     assert r.status_code == 200
     assert r.headers["Content-Type"] == "application/zip"
 
 
-def test_api_v1_run_files_latest_resolves_to_run_with_artifacts(client, ready_project, app, mocker):
-    _make_run_dir(app, "myproject", 4, {"model.ckpt": "old"})
-    _make_run_dir(app, "myproject", 6, {"model.ckpt": "new"})
+def test_api_v1_run_files_latest_resolves_to_run_with_artifacts(client, ready_project, app):
+    _make_run_dir(app, "myproject", {"model.ckpt": "old"})
+    _make_run_dir(app, "myproject", {"model.ckpt": "new"})
 
-    db = mocker.MagicMock()
-    db.get_training_runs.return_value = [{"id": 6}, {"id": 4}]  # newest first
-    mocker.patch("routes.runs.get_db", return_value=db)
-
-    r = client.get("/api/v1/projects/myproject/runs/latest/files/model.ckpt",
-                    headers={"Authorization": "Bearer test"})
+    r = client.get("/api/v1/projects/myproject/runs/latest/files/model.ckpt", headers=_AUTH)
 
     assert r.status_code == 200
     assert r.data == b"new"
 
 
-def test_api_v1_run_files_latest_with_no_artifacts_returns_404(client, ready_project, app, mocker):
-    db = mocker.MagicMock()
-    db.get_training_runs.return_value = [{"id": 6}]
-    mocker.patch("routes.runs.get_db", return_value=db)
+def test_api_v1_run_files_latest_with_no_artifacts_returns_404(client, ready_project, app):
+    _seed_runs(["myproject"])  # run row exists, but its persistent dir does not
 
-    r = client.get("/api/v1/projects/myproject/runs/latest/files",
-                    headers={"Authorization": "Bearer test"})
+    r = client.get("/api/v1/projects/myproject/runs/latest/files", headers=_AUTH)
 
     assert r.status_code == 404
     assert r.get_json()["error"]["code"] == "NOT_FOUND"
 
 
 def test_api_v1_run_files_unknown_run_id_returns_404(client, ready_project):
-    r = client.get("/api/v1/projects/myproject/runs/999/files",
-                    headers={"Authorization": "Bearer test"})
+    r = client.get("/api/v1/projects/myproject/runs/999/files", headers=_AUTH)
 
     assert r.status_code == 404
     assert r.get_json()["error"]["code"] == "NOT_FOUND"
 
 
 def test_api_v1_run_files_missing_subpath_returns_404(client, ready_project, app):
-    _make_run_dir(app, "myproject", 5)
+    _, n = _make_run_dir(app, "myproject")
 
-    r = client.get("/api/v1/projects/myproject/runs/5/files/nope.txt",
-                    headers={"Authorization": "Bearer test"})
+    r = client.get(f"/api/v1/projects/myproject/runs/{n}/files/nope.txt", headers=_AUTH)
 
     assert r.status_code == 404
     assert r.get_json()["error"]["code"] == "NOT_FOUND"
 
 
 def test_api_v1_run_files_path_traversal_returns_403(client, ready_project, app):
-    _make_run_dir(app, "myproject", 5)
+    _, n = _make_run_dir(app, "myproject")
 
-    r = client.get("/api/v1/projects/myproject/runs/5/files/../../../etc/passwd",
-                    headers={"Authorization": "Bearer test"})
+    r = client.get(f"/api/v1/projects/myproject/runs/{n}/files/../../../etc/passwd", headers=_AUTH)
 
     assert r.status_code == 403
     assert r.get_json()["error"]["code"] == "FORBIDDEN"
 
 
 def test_api_v1_run_files_unknown_project_returns_404(client):
-    r = client.get("/api/v1/projects/ghost/runs/5/files",
-                    headers={"Authorization": "Bearer test"})
+    r = client.get("/api/v1/projects/ghost/runs/5/files", headers=_AUTH)
 
     assert r.status_code == 404
     assert r.get_json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_api_run_lookup_is_per_project(client, app):
+    from conftest import make_project_dir
+    make_project_dir(app, name="a")
+    make_project_dir(app, name="b")
+    _seed_runs(["a", "b", "b"])
+
+    ra = client.get("/api/v1/projects/a/runs/1", headers=_AUTH).get_json()["data"]["run"]
+    rb = client.get("/api/v1/projects/b/runs/2", headers=_AUTH).get_json()["data"]["run"]
+    assert (ra["project_name"], ra["run_id"], ra["run_ref"]) == ("a", 1, "a-1")
+    assert (rb["project_name"], rb["run_id"], rb["run_ref"]) == ("b", 2, "b-2")
+    assert client.get("/api/v1/projects/a/runs/2", headers=_AUTH).status_code == 404
+
+
+def test_api_never_serializes_primary_key(client, app):
+    from conftest import make_project_dir
+    make_project_dir(app, name="a")
+    _seed_runs(["a", "a"])
+    runs = client.get("/api/v1/projects/a/runs", headers=_AUTH).get_json()["data"]["runs"]
+    assert [r["run_id"] for r in runs] == [2, 1]
+    assert all("id" not in r and "run_number" not in r for r in runs)
+    assert all("id" not in r for r in client.get("/projects/a/history").get_json()["runs"])
+
+
+def test_run_files_latest_uses_stored_persistent_dir(client, app):
+    from conftest import make_project_dir
+    make_project_dir(app, name="a")
+    _, n = _make_run_dir(app, "a", {"model.pt": ""}, rel="persistent/runs/.migrating_77")
+
+    r = client.get("/api/v1/projects/a/runs/latest/files", headers=_AUTH)
+    assert r.status_code == 200
+    assert "model.pt" in str(r.get_json())
+    assert r.get_json()["data"]["run_id"] == n
+
+
+def test_history_log_download_named_by_run_ref(client, app):
+    import os
+    from conftest import make_project_dir
+    from services.db_service import get_db
+    make_project_dir(app, name="a")
+    (_, pk, n), = _seed_runs(["a"])
+    os.makedirs(os.path.join(app.config["PROJECTS_DIR"], "a", "run_logs"))
+    with open(os.path.join(app.config["PROJECTS_DIR"], "a", "run_logs", "x.log"), "w") as f:
+        f.write("hello")
+    get_db().update_training_run(pk, log_file_path="run_logs/x.log")
+
+    r = client.get(f"/projects/a/history/{n}/log/download")
+    assert r.status_code == 200
+    assert "a-1.log" in r.headers["Content-Disposition"]
+
+
+def _contains_value_under_key(obj, keys, value):
+    if isinstance(obj, dict):
+        return any(
+            (k in keys and v == value) or _contains_value_under_key(v, keys, value)
+            for k, v in obj.items()
+        )
+    if isinstance(obj, list):
+        return any(_contains_value_under_key(v, keys, value) for v in obj)
+    return False
+
+
+def test_no_endpoint_serializes_a_primary_key(client, app, mocker):
+    import os
+    from conftest import make_project_dir
+    from services.db_service import get_db
+    from services import tensorboard_service
+    make_project_dir(app, name="a")
+    seeded = _seed_runs(["z"] * 40 + ["a"])           # a #1 has pk 41
+    (_, pk, n), = [s for s in seeded if s[0] == "a"]
+    rel = f"persistent/runs/run_{n}"
+    get_db().update_training_run(pk, persistent_dir=rel, tensorboard_dir=rel)
+    os.makedirs(os.path.join(app.config["PROJECTS_DIR"], "a", rel))
+    mocker.patch.object(tensorboard_service, "get_metric_analysis",
+                        side_effect=lambda pd, name, run_pk, *a, **k: {"metrics": {}})
+    urls = [
+        "/api/v1/projects/a/runs",
+        f"/api/v1/projects/a/runs/{n}",
+        f"/api/v1/projects/a/runs/{n}/logs",
+        f"/api/v1/projects/a/runs/{n}/files",
+        f"/api/v1/projects/a/runs/{n}/metrics",
+        "/api/v1/projects/a/tensorboard/latest",
+        f"/api/v1/projects/a/tensorboard/latest?run_id={n}",
+        "/projects/a/history",
+        "/projects/a/runs/",
+        f"/projects/a/runs/{n}/files/",
+    ]
+    seen_json = 0
+    for url in urls:
+        r = client.get(url, headers=_AUTH)
+        body = r.get_json(silent=True)
+        if body is None:
+            continue
+        seen_json += 1
+        assert not _contains_value_under_key(body, {"id", "run_id", "run_pk"}, pk), url
+    assert seen_json >= 6
+
+
+def test_metrics_endpoint_passes_pk_internally(client, app, mocker):
+    from conftest import make_project_dir
+    from services import tensorboard_service
+    make_project_dir(app, name="a")
+    seeded = _seed_runs(["z"] * 5 + ["a"])
+    (_, pk, n), = [s for s in seeded if s[0] == "a"]
+    spy = mocker.patch.object(tensorboard_service, "get_metric_analysis", return_value={"metrics": {}})
+
+    r = client.get(f"/api/v1/projects/a/runs/{n}/metrics", headers=_AUTH)
+
+    assert r.status_code == 200
+    assert spy.call_args[0][2] == pk
+    assert r.get_json()["data"]["run_id"] == n
+
+
+def test_api_log_download_named_by_run_ref(client, app):
+    import os
+    from conftest import make_project_dir
+    from services.db_service import get_db
+    make_project_dir(app, name="a")
+    seeded = _seed_runs(["z"] * 3 + ["a"])
+    (_, pk, n), = [s for s in seeded if s[0] == "a"]
+    logs = os.path.join(app.config["PROJECTS_DIR"], "a", "run_logs")
+    os.makedirs(logs)
+    with open(os.path.join(logs, f"run-20260101-000000-{pk:04d}.log"), "w") as f:
+        f.write("x")
+    get_db().update_training_run(pk, log_file_path=f"run_logs/run-20260101-000000-{pk:04d}.log")
+
+    r = client.get(f"/api/v1/projects/a/runs/{n}/log", headers=_AUTH)
+    assert "a-1.log" in r.headers["Content-Disposition"]
 
 
 # --- Update project: static data directory ---

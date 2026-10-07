@@ -6,6 +6,7 @@ from services.process_manager import (
     start_training, stop_training, get_training_status,
     start_tensorboard, stop_tensorboard, get_run_log_path, get_runs_for_project,
 )
+from services.run_refs import public_run, run_ref
 from services.run_storage_service import clear_persistent_runs, delete_run_storage
 
 _PROJECT_FILE = "project.json"
@@ -152,7 +153,7 @@ def logs_download(name):
     log_path = get_run_log_path(projects_dir, name, run_id=run_id)
     if not os.path.isfile(log_path):
         return jsonify({"error": "No log file found"}), 404
-    filename = f"{name}-run-{run_id}.log" if run_id else f"{name}-train.log"
+    filename = f"{run_ref(name, run_id)}.log" if run_id else f"{name}-train.log"
     return send_file(log_path, as_attachment=True, download_name=filename)
 
 
@@ -167,7 +168,7 @@ def history(name):
         return jsonify({"error": _NOT_FOUND}), 404
 
     runs = get_db().get_training_runs(name, limit=20)
-    return jsonify({"runs": runs})
+    return jsonify({"runs": [public_run(r) for r in runs]})
 
 
 @training_bp.route("/<name>/history/<int:run_id>/log", methods=["GET"])
@@ -176,8 +177,8 @@ def history_log(name, run_id):
     from services.db_service import get_db
     projects_dir = current_app.config["PROJECTS_DIR"]
 
-    run = get_db().get_training_run(run_id)
-    if not run or run['project_name'] != name:
+    run = get_db().get_run(name, run_id)
+    if not run:
         return jsonify({"error": _RUN_NOT_FOUND}), 404
 
     if not run.get('log_file_path'):
@@ -202,8 +203,8 @@ def history_log_download(name, run_id):
     from services.db_service import get_db
     projects_dir = current_app.config["PROJECTS_DIR"]
 
-    run = get_db().get_training_run(run_id)
-    if not run or run['project_name'] != name:
+    run = get_db().get_run(name, run_id)
+    if not run:
         return jsonify({"error": _RUN_NOT_FOUND}), 404
 
     if not run.get('log_file_path'):
@@ -214,7 +215,7 @@ def history_log_download(name, run_id):
         return jsonify({"error": "Log file not found"}), 404
 
     return send_file(log_path, as_attachment=True,
-                     download_name=f"{name}-run-{run_id}.log")
+                     download_name=f"{run_ref(name, run_id)}.log")
 
 
 @training_bp.route("/<name>/history/diff", methods=["GET"])
@@ -228,11 +229,11 @@ def history_diff(name):
     if not from_id or not to_id:
         return jsonify({"error": "from and to run IDs required"}), 400
 
-    from_run = get_db().get_training_run(from_id)
-    to_run = get_db().get_training_run(to_id)
-    if not from_run or from_run['project_name'] != name:
+    from_run = get_db().get_run(name, from_id)
+    to_run = get_db().get_run(name, to_id)
+    if not from_run:
         return jsonify({"error": _RUN_NOT_FOUND}), 404
-    if not to_run or to_run['project_name'] != name:
+    if not to_run:
         return jsonify({"error": _RUN_NOT_FOUND}), 404
 
     from_sha = from_run.get('commit_sha')
@@ -273,8 +274,8 @@ def update_run(name, run_id):
     """Update annotations (notes, notable, tags) on a run."""
     from services.db_service import get_db
 
-    run = get_db().get_training_run(run_id)
-    if not run or run['project_name'] != name:
+    run = get_db().get_run(name, run_id)
+    if not run:
         return jsonify({"error": _RUN_NOT_FOUND}), 404
 
     data = request.get_json() or {}
@@ -287,7 +288,7 @@ def update_run(name, run_id):
         kwargs['tags'] = str(data['tags'])
 
     if kwargs:
-        get_db().update_run_annotations(run_id, **kwargs)
+        get_db().update_run_annotations(run["id"], **kwargs)
 
     return jsonify({"ok": True})
 

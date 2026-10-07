@@ -24,12 +24,13 @@ from services.run_storage_service import delete_run_storage
 # Reuse helpers from existing routes
 from routes.training import _tail_offset
 from routes.files import _safe_path, _fmt_size, _zip_directory
-from routes.runs import _resolve_run_id, _safe_run_path
+from routes.runs import _resolve_run, _safe_run_path
+from services.run_refs import public_run, run_ref
 
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
 SERVER_VERSION = "1.1.0"
-MIN_MCP_VERSION = "0.1.1"
+MIN_MCP_VERSION = "0.3.0"
 PROJECT_FILE = "project.json"
 MCP_SERVER_FILE = "mcp_server.py"
 
@@ -589,8 +590,8 @@ def get_logs(name):
 
     if run_id is not None:
         from services.db_service import get_db
-        run = get_db().get_training_run(run_id)
-        if not run or run['project_name'] != name:
+        run = get_db().get_run(name, run_id)
+        if not run:
             return api_response(error_code="NOT_FOUND",
                                 error_message=f"Run {run_id} not found", status_code=404)
         # Prefer archived log; fall back to live log path (handles active parallel runs)
@@ -707,8 +708,8 @@ def analyze_logs(name):
 
     if run_id is not None:
         from services.db_service import get_db
-        run = get_db().get_training_run(run_id)
-        if not run or run['project_name'] != name:
+        run = get_db().get_run(name, run_id)
+        if not run:
             return api_response(
                 error_code="NOT_FOUND",
                 error_message=f"Run {run_id} not found",
@@ -1034,7 +1035,7 @@ def list_runs(name):
     from services.db_service import get_db
     runs = get_db().get_training_runs(name, limit=20)
 
-    return api_response(data={"runs": runs})
+    return api_response(data={"runs": [public_run(r) for r in runs]})
 
 
 @api_v1_bp.route("/projects/<name>/runs/<int:run_id>", methods=["GET"])
@@ -1044,16 +1045,16 @@ def get_run(name, run_id):
     load_project(name)
 
     from services.db_service import get_db
-    run = get_db().get_training_run(run_id)
+    run = get_db().get_run(name, run_id)
 
-    if not run or run['project_name'] != name:
+    if not run:
         return api_response(
             error_code="NOT_FOUND",
             error_message=f"Run {run_id} not found",
             status_code=404
         )
 
-    return api_response(data={"run": run})
+    return api_response(data={"run": public_run(run)})
 
 
 @api_v1_bp.route("/projects/<name>/runs/<int:run_id>/log", methods=["GET"])
@@ -1063,9 +1064,9 @@ def download_run_log(name, run_id):
     load_project(name)
 
     from services.db_service import get_db
-    run = get_db().get_training_run(run_id)
+    run = get_db().get_run(name, run_id)
 
-    if not run or run['project_name'] != name:
+    if not run:
         return api_response(
             error_code="NOT_FOUND",
             error_message=f"Run {run_id} not found",
@@ -1090,7 +1091,8 @@ def download_run_log(name, run_id):
         )
 
     from flask import send_file
-    return send_file(log_path, as_attachment=True)
+    return send_file(log_path, as_attachment=True,
+                     download_name=f"{run_ref(name, run_id)}.log")
 
 
 @api_v1_bp.route("/projects/<name>/runs/<int:run_id>/logs", methods=["GET"])
@@ -1100,9 +1102,9 @@ def get_run_logs_json(name, run_id):
     load_project(name)
 
     from services.db_service import get_db
-    run = get_db().get_training_run(run_id)
+    run = get_db().get_run(name, run_id)
 
-    if not run or run['project_name'] != name:
+    if not run:
         return api_response(
             error_code="NOT_FOUND",
             error_message=f"Run {run_id} not found",
@@ -1148,6 +1150,7 @@ def get_run_logs_json(name, run_id):
 
         return api_response(data={
             'run_id': run_id,
+            'run_ref': run_ref(name, run_id),
             'path': log_relative_path,
             'content': content,
             'encoding': 'utf-8',
@@ -1181,15 +1184,16 @@ def run_files(name, run_id_str, subpath=""):
     load_project(name)
 
     projects_dir = current_app.config["PROJECTS_DIR"]
-    run_id = _resolve_run_id(projects_dir, name, run_id_str)
-    if run_id is None:
+    run = _resolve_run(projects_dir, name, run_id_str)
+    if run is None:
         return api_response(
             error_code="NOT_FOUND",
             error_message=f"No run with artifacts found for '{run_id_str}'",
             status_code=404
         )
 
-    _, target = _safe_run_path(projects_dir, name, run_id, subpath)
+    run_id = run["run_number"]
+    _, target = _safe_run_path(projects_dir, name, run, subpath)
     if target is None:
         return api_response(
             error_code="FORBIDDEN",
@@ -1209,7 +1213,7 @@ def run_files(name, run_id_str, subpath=""):
         return send_file(target, as_attachment=True)
 
     if request.args.get("zip") == "1":
-        label = subpath.replace("/", "-") if subpath else f"run_{run_id}"
+        label = subpath.replace("/", "-") if subpath else run_ref(name, run_id)
         return _zip_directory(target, label)
 
     try:
@@ -1243,6 +1247,7 @@ def run_files(name, run_id_str, subpath=""):
 
     return api_response(data={
         "run_id": run_id,
+        "run_ref": run_ref(name, run_id),
         "path": subpath or "",
         "entries": entries,
     })
@@ -1338,8 +1343,8 @@ def get_latest_metrics(name):
 
     if requested_run_id is not None:
         # Fetch the specific run requested
-        target_run = db.get_training_run(requested_run_id)
-        if not target_run or target_run['project_name'] != name:
+        target_run = db.get_run(name, requested_run_id)
+        if not target_run:
             return api_response(
                 error_code="NOT_FOUND",
                 error_message=f"Run {requested_run_id} not found",
@@ -1363,7 +1368,7 @@ def get_latest_metrics(name):
 
         if running_runs:
             if len(running_runs) > 1:
-                ids = [r['id'] for r in running_runs]
+                ids = [r['run_number'] for r in running_runs]
                 return api_response(
                     error_code="MULTIPLE_RUNS_ACTIVE",
                     error_message=f"Multiple runs are active (IDs: {ids}). Specify ?run_id=N to select one.",
@@ -1384,16 +1389,16 @@ def get_latest_metrics(name):
                 status_code=404
             )
 
-    run_id = target_run['id']
+    run_pk = target_run['id']
 
     # Active runs: always re-parse — TFEvents grow as training progresses
     if is_active:
-        db.delete_metric_analyses(run_id)
+        db.delete_metric_analyses(run_pk)
 
     # Get metrics analysis
     projects_dir = current_app.config["PROJECTS_DIR"]
     result = tensorboard_service.get_metric_analysis(
-        projects_dir, name, run_id, metric_filter, detail
+        projects_dir, name, run_pk, metric_filter, detail
     )
 
     if 'error' in result:
@@ -1405,7 +1410,8 @@ def get_latest_metrics(name):
 
     # Build response
     response_data = {
-        'run_id': run_id,
+        'run_id': target_run['run_number'],
+        'run_ref': run_ref(name, target_run['run_number']),
         'is_active': is_active,
         'run_info': {
             'started_at': target_run['started_at'],
@@ -1468,7 +1474,7 @@ def cleanup_tensorboard_logs(name):
         for run in runs[keep_count:]:
             delete_run_storage(projects_dir, name, run)
             db.delete_training_run(run['id'])
-            deleted_run_ids.append(run['id'])
+            deleted_run_ids.append(run['run_number'])
 
         db_cleanup_info = {
             'deleted_count': len(deleted_run_ids),
@@ -1623,6 +1629,8 @@ Beekeeper sets these environment variables in every training process:
 | Variable | Points to |
 |----------|-----------|
 | `BEEKEEPER_RUN_DIR` | The run's persistent directory (absolute path) |
+| `BEEKEEPER_RUN_ID` | The per-project run number (`run_id`), e.g. `3` |
+| `BEEKEEPER_RUN_REF` | The run's human-readable ref, `<project>-<run_id>`, e.g. `myproject-3` |
 | `BEEKEEPER_TENSORBOARD_DIR` | Same — canonical location for TensorBoard events |
 | `TENSORBOARD_LOG_DIR` | Same — generic alias for frameworks that read this |
 
@@ -1848,11 +1856,15 @@ Beekeeper injects these env vars into every training process:
 | Variable | Value |
 |----------|-------|
 | `BEEKEEPER_RUN_DIR` | Absolute path to the run's persistent directory |
+| `BEEKEEPER_RUN_ID` | Per-project run number (`run_id`) |
+| `BEEKEEPER_RUN_REF` | `<project>-<run_id>`, how to refer to the run |
 | `BEEKEEPER_TENSORBOARD_DIR` | Same — canonical TensorBoard event location |
 | `TENSORBOARD_LOG_DIR` | Same — generic alias |
 
 If a user asks where their model weights, checkpoints, or exports are:
-1. Call `get_project("{name}")` and check `run_history` for the relevant run's `id`.
+1. Call `get_project("{name}")` and check `run_history` for the relevant run's `run_id`.
+   `run_id` is the per-project run number (1, 2, 3, ...). When talking to a person, refer
+   to a run by its `run_ref` (`<project>-<run_id>`, e.g. `{name}-3`), never by a bare number.
 2. Fetch it with `GET /api/v1/projects/{name}/runs/<run_id>/files/<path>` — use `latest`
    in place of `<run_id>` if no specific run was requested. Add `?zip=1` to download a
    directory as a zip instead of listing it.
@@ -2099,7 +2111,7 @@ def get_run_metrics(name, run_id):
 
     # Verify run exists
     db = get_db()
-    run = db.get_training_run(run_id)
+    run = db.get_run(name, run_id)
 
     if not run:
         return api_response(
@@ -2108,17 +2120,10 @@ def get_run_metrics(name, run_id):
             status_code=404
         )
 
-    if run['project_name'] != name:
-        return api_response(
-            error_code="RUN_NOT_FOUND",
-            error_message=f"Run {run_id} does not belong to project {name}",
-            status_code=404
-        )
-
     # Get metrics analysis
     projects_dir = current_app.config["PROJECTS_DIR"]
     result = tensorboard_service.get_metric_analysis(
-        projects_dir, name, run_id, metric_filter, detail
+        projects_dir, name, run["id"], metric_filter, detail
     )
 
     if 'error' in result:
@@ -2130,7 +2135,8 @@ def get_run_metrics(name, run_id):
 
     # Build response
     response_data = {
-        'run_id': run_id,
+        'run_id': run['run_number'],
+        'run_ref': run_ref(name, run['run_number']),
         'run_info': {
             'started_at': run['started_at'],
             'ended_at': run['ended_at'],

@@ -115,3 +115,41 @@ def test_http_traversal_blocked(client, ready_project, app):
 
     resp = client.get("/projects/myproject/files/../../etc/passwd")
     assert resp.status_code in (403, 404)
+
+
+# --- Run artifact paths (stored persistent_dir) ---
+
+def _run_path_env(tmp_path):
+    projects_dir = str(tmp_path / "projects")
+    os.makedirs(os.path.join(projects_dir, "myproject", "persistent", "runs"))
+    return projects_dir
+
+
+def test_safe_run_path_rejects_absolute_stored_dir(tmp_path):
+    from routes.runs import _safe_run_path
+    projects_dir = _run_path_env(tmp_path)
+    assert _safe_run_path(projects_dir, "myproject", {"persistent_dir": "/etc"}, "") == (None, None)
+
+
+def test_safe_run_path_rejects_dotdot_stored_dir(tmp_path):
+    from routes.runs import _safe_run_path
+    projects_dir = _run_path_env(tmp_path)
+    os.makedirs(os.path.join(projects_dir, "myproject", "..", "..", "outside"), exist_ok=True)
+    assert _safe_run_path(projects_dir, "myproject", {"persistent_dir": "../../outside"}, "") == (None, None)
+
+
+def test_safe_run_path_rejects_symlink_escaping_runs_root(tmp_path):
+    from routes.runs import _safe_run_path
+    projects_dir = _run_path_env(tmp_path)
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    os.symlink(str(outside), os.path.join(projects_dir, "myproject", "persistent", "runs", "run_1"))
+    run = {"persistent_dir": "persistent/runs/run_1"}
+    assert _safe_run_path(projects_dir, "myproject", run, "") == (None, None)
+
+
+def test_safe_run_path_rejects_missing_persistent_dir(tmp_path):
+    from routes.runs import _safe_run_path
+    projects_dir = _run_path_env(tmp_path)
+    assert _safe_run_path(projects_dir, "myproject", {"persistent_dir": None}, "") == (None, None)
+    assert _safe_run_path(projects_dir, "myproject", None, "") == (None, None)

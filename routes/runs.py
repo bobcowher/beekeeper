@@ -4,6 +4,7 @@ import zipfile
 from flask import Blueprint, current_app, jsonify, request, send_file, abort
 
 from services.db_service import get_db
+from services.run_refs import run_ref
 
 runs_bp = Blueprint("runs", __name__, url_prefix="/projects")
 
@@ -16,26 +17,30 @@ def _fmt_size(size):
     return f"{size:.1f} PB"
 
 
-def _resolve_run_id(projects_dir, name, run_id_str):
-    """Resolve 'latest' or a numeric string to an int run_id."""
+def _resolve_run(projects_dir, name, run_id_str):
+    """Resolve 'latest' or a run number string to a run row (dict) or None."""
     if run_id_str == "latest":
         runs = get_db().get_training_runs(name, limit=50)
         for run in runs:  # newest first
-            rid = run["id"]
-            if os.path.isdir(os.path.join(projects_dir, name, "persistent", "runs", f"run_{rid}")):
-                return rid
+            rel = run.get("persistent_dir")
+            if rel and os.path.isdir(os.path.join(projects_dir, name, rel)):
+                return run
         return None
     try:
-        return int(run_id_str)
+        return get_db().get_run(name, int(run_id_str))
     except (ValueError, TypeError):
         return None
 
 
-def _safe_run_path(projects_dir, name, run_id, subpath):
-    """Resolve and validate a path inside persistent/runs/run_{run_id}/."""
-    run_dir = os.path.realpath(
-        os.path.join(projects_dir, name, "persistent", "runs", f"run_{run_id}")
-    )
+def _safe_run_path(projects_dir, name, run, subpath):
+    """Resolve and validate a path inside the run's stored persistent dir."""
+    rel = run.get("persistent_dir") if run else None
+    if not rel:
+        return None, None
+    runs_root = os.path.realpath(os.path.join(projects_dir, name, "persistent", "runs"))
+    run_dir = os.path.realpath(os.path.join(projects_dir, name, rel))
+    if not run_dir.startswith(runs_root + os.sep):
+        return None, None
     target = os.path.realpath(os.path.join(run_dir, subpath)) if subpath else run_dir
     if not (target == run_dir or target.startswith(run_dir + os.sep)):
         return None, None
@@ -68,11 +73,14 @@ def list_runs(name):
     runs = get_db().get_training_runs(name, limit=100)
     result = []
     for run in runs:
-        rid = run["id"]
-        persistent_dir = os.path.join(projects_dir, name, "persistent", "runs", f"run_{rid}")
-        has_artifacts = os.path.isdir(persistent_dir) and bool(os.listdir(persistent_dir))
+        rid = run["run_number"]
+        rel = run.get("persistent_dir")
+        persistent_dir = os.path.join(projects_dir, name, rel) if rel else None
+        has_artifacts = bool(persistent_dir) and os.path.isdir(persistent_dir) and any(
+            not f.startswith(".") for f in os.listdir(persistent_dir))
         result.append({
             "run_id": rid,
+            "run_ref": run_ref(name, rid),
             "status": run.get("status"),
             "branch": run.get("branch"),
             "started_at": run.get("started_at"),
@@ -101,11 +109,12 @@ def run_files(name, run_id_str, subpath=""):
     if not os.path.isdir(os.path.join(projects_dir, name)):
         abort(404)
 
-    run_id = _resolve_run_id(projects_dir, name, run_id_str)
-    if run_id is None:
+    run = _resolve_run(projects_dir, name, run_id_str)
+    if run is None:
         abort(404)
+    run_id = run["run_number"]
 
-    _, target = _safe_run_path(projects_dir, name, run_id, subpath)
+    _, target = _safe_run_path(projects_dir, name, run, subpath)
     if target is None:
         abort(403)
 
@@ -116,7 +125,7 @@ def run_files(name, run_id_str, subpath=""):
         return send_file(target, as_attachment=True)
 
     if request.args.get("zip") == "1":
-        label = subpath.replace("/", "-") if subpath else f"run_{run_id}"
+        label = subpath.replace("/", "-") if subpath else run_ref(name, run_id)
         return _zip_directory(target, label)
 
     try:
@@ -152,10 +161,11 @@ def run_files(name, run_id_str, subpath=""):
     return jsonify({
         "project": name,
         "run_id": run_id,
+        "run_ref": run_ref(name, run_id),
         "path": subpath or "",
         "entries": entries,
         "curl_examples": {
             "download_file": f"curl -O {base}/<filepath>",
-            "download_dir_zip": f"curl -o run_{run_id}.zip '{base}/?zip=1'",
+            "download_dir_zip": f"curl -o {run_ref(name, run_id)}.zip '{base}/?zip=1'",
         },
     })
