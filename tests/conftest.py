@@ -7,10 +7,12 @@ from app import create_app
 
 @pytest.fixture
 def app(tmp_path):
-    application = create_app()
-    application.config["TESTING"] = True
-    application.config["PROJECTS_DIR"] = str(tmp_path / "projects")
     (tmp_path / "projects").mkdir()
+    application = create_app({
+        "TESTING": True,
+        "PROJECTS_DIR": str(tmp_path / "projects"),
+        "DB_PATH": str(tmp_path / "beekeeper-test.db"),
+    })
     return application
 
 

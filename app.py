@@ -53,12 +53,15 @@ def _get_secret_key() -> str:
     return key
 
 
-def create_app():
+def create_app(test_config=None):
     app = Flask(__name__)
     app.secret_key = _get_secret_key()
     app.config["BEEKEEPER_HOME"] = BEEKEEPER_HOME
     app.config["PROJECTS_DIR"] = os.path.join(BEEKEEPER_HOME, "projects")
+    app.config["DB_PATH"] = os.path.join(BEEKEEPER_HOME, "data", "beekeeper.db")
     app.config["DEPLOY_VERSION"] = get_deploy_version()
+    if test_config:
+        app.config.update(test_config)
 
     os.makedirs(app.config["PROJECTS_DIR"], exist_ok=True)
 
@@ -71,8 +74,7 @@ def create_app():
 
     # Initialize database
     from services.db_service import init_database
-    db_path = os.path.join(BEEKEEPER_HOME, 'data', 'beekeeper.db')
-    init_database(db_path)
+    init_database(app.config["DB_PATH"])
 
     # Register blueprints
     from routes.dashboard import dashboard_bp

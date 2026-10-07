@@ -237,3 +237,8 @@ def test_clear_tb_logs_missing_directory(client, ready_project):
 def test_clear_tb_logs_not_found(client):
     resp = client.post("/projects/ghost/clear-tb-logs")
     assert resp.status_code == 404
+
+
+def test_app_uses_test_db_path(app, tmp_path):
+    from services.db_service import get_db
+    assert get_db().db_path == str(tmp_path / "beekeeper-test.db")

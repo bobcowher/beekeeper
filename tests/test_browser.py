@@ -56,9 +56,11 @@ def live_server(tmp_path_factory):
     }))
 
     from app import create_app
-    flask_app = create_app()
-    flask_app.config["TESTING"] = True
-    flask_app.config["PROJECTS_DIR"] = str(projects_dir)
+    flask_app = create_app({
+        "TESTING": True,
+        "PROJECTS_DIR": str(projects_dir),
+        "DB_PATH": str(tmp / "beekeeper-test.db"),
+    })
 
     server_thread = threading.Thread(
         target=lambda: flask_app.run(port=5998, use_reloader=False, debug=False),
