@@ -1,3 +1,4 @@
+import os
 import sqlite3
 
 import pytest
@@ -243,8 +244,6 @@ def test_backfill_continues_after_existing_numbers(tmp_path):
 
 # --- persistent folder migration -------------------------------------------
 
-import os
-
 from services import run_folder_migration as rfm
 
 
@@ -355,7 +354,8 @@ def test_folder_migration_resumes_after_pass_one(app, mocker):
 
     assert rfm.migrate_run_folders(projects_dir) == "done"
     assert db.get_run("a", n)["persistent_dir"] == f"persistent/runs/run_{n}"
-    assert open(os.path.join(base, f"run_{n}", "marker.txt")).read() == f"pk={pk}"
+    with open(os.path.join(base, f"run_{n}", "marker.txt")) as f:
+        assert f.read() == f"pk={pk}"
 
 
 def test_folder_migration_adopts_folder_moved_before_db_update(app, mocker):
@@ -402,3 +402,145 @@ def test_folder_migration_reports_conflict_and_retries(app, mocker):
     assert rfm.migrate_run_folders(projects_dir) == "conflicts"
     assert not db.migration_applied(rfm.RUN_FOLDER_MIGRATION)
     assert db.get_run("a", n)["persistent_dir"] == f"persistent/runs/run_{pk}"   # untouched
+
+
+def _read(path):
+    with open(path) as f:
+        return f.read()
+
+
+def _swapped_runs(db, projects_dir):
+    """Project a: pk1 -> #2 and pk2 -> #1 (run_number > id for one row)."""
+    pk1, _ = _mk_run(db, projects_dir, "a")
+    pk2, _ = _mk_run(db, projects_dir, "a")
+    with db._get_connection() as c:
+        c.execute("UPDATE training_runs SET run_number = 99 WHERE id = ?", (pk1,))
+        c.execute("UPDATE training_runs SET run_number = 1 WHERE id = ?", (pk2,))
+        c.execute("UPDATE training_runs SET run_number = 2 WHERE id = ?", (pk1,))
+        c.commit()
+    return pk1, pk2
+
+
+def _assert_swapped(db, projects_dir, pk1, pk2):
+    base = os.path.join(projects_dir, "a", "persistent", "runs")
+    assert db.get_run("a", 2)["persistent_dir"] == "persistent/runs/run_2"
+    assert db.get_run("a", 1)["persistent_dir"] == "persistent/runs/run_1"
+    assert _read(os.path.join(base, "run_2", "marker.txt")) == f"pk={pk1}"
+    assert _read(os.path.join(base, "run_1", "marker.txt")) == f"pk={pk2}"
+    assert not [n for n in os.listdir(base) if n.startswith(".migrating_")]
+
+
+def test_folder_migration_handles_run_number_greater_than_pk(app, mocker):
+    from services.db_service import get_db
+    _reset_folder_migration()
+    db = get_db()
+    projects_dir = app.config["PROJECTS_DIR"]
+    pk1, pk2 = _swapped_runs(db, projects_dir)
+    mocker.patch.object(rfm, "_live_run_dirs", return_value=[])
+
+    assert rfm.migrate_run_folders(projects_dir) == "done"
+    _assert_swapped(db, projects_dir, pk1, pk2)
+
+
+def test_folder_migration_rerun_after_kill_mid_swap(app, mocker):
+    from services.db_service import get_db
+    _reset_folder_migration()
+    db = get_db()
+    projects_dir = app.config["PROJECTS_DIR"]
+    pk1, pk2 = _swapped_runs(db, projects_dir)
+    mocker.patch.object(rfm, "_live_run_dirs", return_value=[])
+    base = os.path.join(projects_dir, "a", "persistent", "runs")
+    # Kill state: pass 1 staged both; pass 2 placed pk2 at run_1 only (DB updated for it).
+    for pk in (pk1, pk2):
+        with open(os.path.join(base, f"run_{pk}", rfm.MARKER), "w") as f:
+            f.write(str(pk))
+        os.rename(os.path.join(base, f"run_{pk}"), os.path.join(base, f".migrating_{pk}"))
+    os.rename(os.path.join(base, f".migrating_{pk2}"), os.path.join(base, "run_1"))
+    db.update_training_run(pk2, persistent_dir="persistent/runs/run_1",
+                           tensorboard_dir="persistent/runs/run_1")
+
+    assert rfm.migrate_run_folders(projects_dir) == "done"
+    _assert_swapped(db, projects_dir, pk1, pk2)
+
+
+def test_folder_migration_rerun_does_not_steal_placed_folder(app, mocker):
+    # Kill state: pk1 placed at run_2 (DB still stale), pk2 still staged. A buggy pass 1
+    # would treat run_2 (pk1's folder, carrying pk1's marker) as pk2's source.
+    from services.db_service import get_db
+    _reset_folder_migration()
+    db = get_db()
+    projects_dir = app.config["PROJECTS_DIR"]
+    pk1, pk2 = _swapped_runs(db, projects_dir)
+    mocker.patch.object(rfm, "_live_run_dirs", return_value=[])
+    base = os.path.join(projects_dir, "a", "persistent", "runs")
+    for pk in (pk1, pk2):
+        with open(os.path.join(base, f"run_{pk}", rfm.MARKER), "w") as f:
+            f.write(str(pk))
+        os.rename(os.path.join(base, f"run_{pk}"), os.path.join(base, f".migrating_{pk}"))
+    os.rename(os.path.join(base, f".migrating_{pk1}"), os.path.join(base, "run_2"))  # pk1 placed, DB stale
+
+    assert rfm.migrate_run_folders(projects_dir) == "done"
+    _assert_swapped(db, projects_dir, pk1, pk2)
+
+
+def test_create_app_survives_migration_failure(mocker, tmp_path):
+    import app as app_module
+    mocker.patch("services.run_folder_migration.migrate_run_folders", side_effect=OSError("boom"))
+    application = app_module.create_app({
+        "TESTING": True,
+        "DB_PATH": str(tmp_path / "t.db"),
+        "PROJECTS_DIR": str(tmp_path / "projects"),
+    })
+    assert application is not None
+
+
+def _link_setup(db, projects_dir, output_paths=()):
+    import json
+    _mk_run(db, projects_dir, "z", pk_dir=False)
+    pk, n = _mk_run(db, projects_dir, "a")
+    pdir = os.path.join(projects_dir, "a")
+    with open(os.path.join(pdir, "project.json"), "w") as f:
+        json.dump({"tensorboard_log_dir": "runs", "output_paths": list(output_paths)}, f)
+    old = os.path.join(pdir, "persistent", "runs", f"run_{pk}")
+    for ws in ("workspace", f"workspace-{pk}"):
+        os.makedirs(os.path.join(pdir, ws))
+        os.symlink(old, os.path.join(pdir, ws, "runs"))
+    return pk, n, pdir, old
+
+
+def test_folder_migration_repoints_workspace_symlinks(app, mocker):
+    from services.db_service import get_db
+    _reset_folder_migration()
+    db = get_db()
+    projects_dir = app.config["PROJECTS_DIR"]
+    pk, n, pdir, old = _link_setup(db, projects_dir, output_paths=["out/models"])
+    os.makedirs(os.path.join(old, "out", "models"))
+    os.symlink(os.path.join(old, "out", "models"), os.path.join(pdir, "workspace", "models_link"))
+    os.makedirs(os.path.join(pdir, "workspace", "out"))
+    os.symlink(os.path.join(old, "out", "models"), os.path.join(pdir, "workspace", "out", "models"))
+    # An unrelated link must stay untouched.
+    elsewhere = os.path.join(pdir, "elsewhere")
+    os.makedirs(elsewhere)
+    os.symlink(elsewhere, os.path.join(pdir, "workspace-other-link"))
+    mocker.patch.object(rfm, "_live_run_dirs", return_value=[])
+
+    assert rfm.migrate_run_folders(projects_dir) == "done"
+    new = os.path.join(pdir, "persistent", "runs", f"run_{n}")
+    assert os.readlink(os.path.join(pdir, "workspace", "runs")) == new
+    assert os.readlink(os.path.join(pdir, f"workspace-{pk}", "runs")) == new
+    assert os.readlink(os.path.join(pdir, "workspace", "out", "models")) == os.path.join(new, "out", "models")
+    assert os.readlink(os.path.join(pdir, "workspace-other-link")) == elsewhere
+    assert os.path.isdir(os.path.join(pdir, "workspace", "runs"))
+
+
+def test_folder_migration_skips_links_without_project_json(app, mocker):
+    from services.db_service import get_db
+    _reset_folder_migration()
+    db = get_db()
+    projects_dir = app.config["PROJECTS_DIR"]
+    pk, n, pdir, old = _link_setup(db, projects_dir)
+    os.remove(os.path.join(pdir, "project.json"))
+    mocker.patch.object(rfm, "_live_run_dirs", return_value=[])
+
+    assert rfm.migrate_run_folders(projects_dir) == "done"
+    assert os.readlink(os.path.join(pdir, "workspace", "runs")) == old

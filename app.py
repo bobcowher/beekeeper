@@ -1,3 +1,4 @@
+import logging
 import os
 import random
 import secrets
@@ -75,8 +76,12 @@ def create_app(test_config=None):
     # Initialize database
     from services.db_service import init_database
     init_database(app.config["DB_PATH"])
-    from services.run_folder_migration import migrate_run_folders
-    migrate_run_folders(app.config["PROJECTS_DIR"])
+    try:
+        from services.run_folder_migration import migrate_run_folders
+        migrate_run_folders(app.config["PROJECTS_DIR"])
+    except Exception:
+        # Fail open: each row's DB path changes only after its own rename, so a retry is safe.
+        logging.getLogger(__name__).exception("Run folder migration failed; will retry on next startup")
 
     # Register blueprints
     from routes.dashboard import dashboard_bp

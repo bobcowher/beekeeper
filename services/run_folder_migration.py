@@ -1,4 +1,6 @@
 """One-time rename of persistent run folders from run_<pk> to run_<run_id>."""
+import glob
+import json
 import logging
 import os
 
@@ -33,6 +35,47 @@ def _marker(path: str) -> int | None:
             return int(f.read().strip())
     except (OSError, ValueError):
         return None
+
+
+def _repoint_workspace_links(projects_dir: str, migrated: list[dict]) -> None:
+    """Re-point workspace redirect symlinks (absolute run_<pk> targets) at run_<number>.
+
+    All new targets are computed from the links as they stand, in one lookup against the
+    old-path -> new-path mapping, so a path reused by another run is never chained.
+    """
+    by_project: dict[str, dict[str, str]] = {}
+    for r in migrated:
+        base = os.path.join(projects_dir, r["project_name"], "persistent", "runs")
+        by_project.setdefault(r["project_name"], {})[
+            os.path.normpath(os.path.join(base, f"run_{r['id']}"))
+        ] = os.path.join(base, f"run_{r['run_number']}")
+
+    for name, mapping in by_project.items():
+        project_dir = os.path.join(projects_dir, name)
+        try:
+            with open(os.path.join(project_dir, "project.json")) as f:
+                cfg = json.load(f)
+            rels = [cfg.get("tensorboard_log_dir") or "runs"] + list(cfg.get("output_paths") or [])
+        except (OSError, ValueError, TypeError, AttributeError):
+            continue
+        workspaces = [project_dir + os.sep + "workspace"] + sorted(glob.glob(project_dir + os.sep + "workspace-*"))
+        planned = []
+        for ws in workspaces:
+            for rel in rels:
+                link = os.path.join(ws, str(rel))
+                if not os.path.islink(link):
+                    continue
+                target = os.path.normpath(os.readlink(link))
+                for old, new in mapping.items():
+                    if target == old or target.startswith(old + os.sep):
+                        planned.append((link, new + target[len(old):]))
+                        break
+        for link, new_target in planned:
+            try:
+                os.unlink(link)
+                os.symlink(new_target, link)
+            except OSError:
+                log.exception("Could not re-point workspace link %s -> %s", link, new_target)
 
 
 def migrate_run_folders(projects_dir: str) -> str:
@@ -73,35 +116,46 @@ def migrate_run_folders(projects_dir: str) -> str:
         db.update_training_run(r["id"], **fields)
 
     # Pass 1: tag each pk-named folder with its owner and move it out of the way.
+    # A folder carrying another run's marker belongs to that run (already placed by an
+    # earlier attempt): never touch it; this run's own folder is then treated as missing.
+    pass1_conflicts = set()
     for r in todo:
         src, staged, _ = paths(r)
-        if os.path.isdir(src) and os.path.exists(staged):
-            conflicts.append(f"{r['project_name']}: both {src} and {staged} exist")
+        if not os.path.isdir(src) or _marker(src) not in (None, r["id"]):
             continue
-        if os.path.isdir(src):
-            with open(os.path.join(src, MARKER), "w") as f:
-                f.write(str(r["id"]))
-            os.rename(src, staged)
+        if os.path.exists(staged):
+            conflicts.append(f"{r['project_name']}: both {src} and {staged} exist")
+            pass1_conflicts.add(r["id"])
+            continue
+        with open(os.path.join(src, MARKER), "w") as f:
+            f.write(str(r["id"]))
+        os.rename(src, staged)
 
     # Pass 2: place each staged folder at run_<number> and record it.
+    migrated = []
     for r in todo:
-        src, staged, dest = paths(r)
+        if r["id"] in pass1_conflicts:
+            continue  # conflict already recorded; row left untouched for the next startup
+        _, staged, dest = paths(r)
         new_rel = f"persistent/runs/run_{r['run_number']}"
-        if os.path.isdir(src) and os.path.exists(staged):
-            continue  # conflict recorded in pass 1
         if os.path.isdir(staged):
             if os.path.exists(dest):
                 conflicts.append(f"{r['project_name']}: {dest} exists; {staged} left in place")
                 continue
             os.rename(staged, dest)
             set_dir(r, new_rel)
+            migrated.append(r)
         elif os.path.isdir(dest):
             if _marker(dest) == r["id"]:
                 set_dir(r, new_rel)        # moved by an interrupted earlier attempt
+                migrated.append(r)
             else:
                 set_dir(r, None)           # foreign folder; this run's own folder is gone
         else:
             set_dir(r, new_rel)            # folder already gone (pruned/never created)
+            migrated.append(r)
+
+    _repoint_workspace_links(projects_dir, migrated)
 
     if conflicts:
         for c in conflicts:
