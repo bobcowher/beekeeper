@@ -119,3 +119,42 @@ def test_validate_output_paths_normalizes_form_text():
 def test_validate_output_paths_rejects_unsafe_paths(paths):
     with pytest.raises(ValueError):
         validate_output_paths(paths, "runs")
+
+
+def test_delete_project_purges_run_history(tmp_path, mocker):
+    from services import project_service
+    projects_dir = str(tmp_path)
+    _write_project(projects_dir, "gone")
+    db = mocker.MagicMock()
+    mocker.patch("services.db_service.get_db", return_value=db)
+    mocker.patch("services.process_manager.get_runs_for_project", return_value=[])
+
+    project_service.delete_project(projects_dir, "gone")
+
+    db.delete_project_runs.assert_called_once_with("gone")
+
+
+def test_delete_project_refuses_while_a_run_is_active(tmp_path, mocker):
+    from services import project_service
+    projects_dir = str(tmp_path)
+    _write_project(projects_dir, "busy")
+    mocker.patch("services.process_manager.get_runs_for_project",
+                 return_value=[{"run_id": 1, "status": "starting"}])
+
+    with pytest.raises(project_service.ProjectBusyError):
+        project_service.delete_project(projects_dir, "busy")
+    assert os.path.isdir(os.path.join(projects_dir, "busy"))
+
+
+def test_rename_purges_orphan_history_at_destination(tmp_path, mocker):
+    projects_dir = str(tmp_path)
+    _write_project(projects_dir, "oldname")
+    db = mocker.MagicMock()
+    mocker.patch("services.db_service.get_db", return_value=db)
+
+    rename_project(projects_dir, "oldname", "newname")
+
+    assert db.method_calls[:2] == [
+        mocker.call.delete_project_runs("newname"),
+        mocker.call.rename_project_runs("oldname", "newname"),
+    ]

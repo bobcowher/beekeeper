@@ -120,12 +120,16 @@ class DatabaseService:
                 ('notable', 'INTEGER NOT NULL DEFAULT 0'),
                 ('tags',    "TEXT NOT NULL DEFAULT ''"),
                 ('persistent_dir', 'TEXT'),
+                ('run_number', 'INTEGER'),
             ]:
                 if col not in tr_columns:
                     try:
                         conn.execute(f'ALTER TABLE training_runs ADD COLUMN {col} {typedef}')
                     except Exception:
                         pass
+
+            conn.execute('''CREATE TABLE IF NOT EXISTS run_counters (
+                project_name TEXT PRIMARY KEY, last_number INTEGER NOT NULL)''')
 
             conn.commit()
 
@@ -388,16 +392,25 @@ class DatabaseService:
             ]
 
     # Training run operations
-    def create_training_run(self, project_name: str, metadata: dict) -> int:
-        """Create new run record. Returns the new run_pk (training_runs.id)."""
-        with self._get_connection() as conn:
+    def create_training_run(self, project_name: str, metadata: dict) -> tuple[int, int]:
+        """Create a run record with the project's next run number. Returns (run_pk, run_id)."""
+        conn = sqlite3.connect(self.db_path, isolation_level=None, timeout=30)
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            run_id = conn.execute(
+                '''INSERT INTO run_counters (project_name, last_number) VALUES (?, 1)
+                   ON CONFLICT(project_name) DO UPDATE SET last_number = last_number + 1
+                   RETURNING last_number''',
+                (project_name,)
+            ).fetchone()[0]
             cursor = conn.execute(
                 '''INSERT INTO training_runs
-                   (project_name, started_at, status, commit_sha, commit_message,
+                   (project_name, run_number, started_at, status, commit_sha, commit_message,
                     branch, python_version, gpu_info, hostname)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (
                     project_name,
+                    run_id,
                     metadata['started_at'].isoformat(),
                     metadata['status'],
                     metadata.get('commit_sha'),
@@ -408,8 +421,37 @@ class DatabaseService:
                     metadata.get('hostname'),
                 )
             )
+            conn.execute('COMMIT')
+            return cursor.lastrowid, run_id
+        except Exception:
+            if conn.in_transaction:
+                conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def get_run(self, project_name: str, run_id: int) -> dict | None:
+        """Resolve a project's run number to its full row, or None."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                'SELECT * FROM training_runs WHERE project_name = ? AND run_number = ?',
+                (project_name, run_id)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def delete_project_runs(self, project_name: str) -> int:
+        """Delete a project's runs, their metric analyses, and its run counter."""
+        with self._get_connection() as conn:
+            # foreign_keys is off on these connections, so cascade does not fire
+            conn.execute(
+                '''DELETE FROM metric_analyses WHERE run_pk IN
+                   (SELECT id FROM training_runs WHERE project_name = ?)''',
+                (project_name,)
+            )
+            cursor = conn.execute('DELETE FROM training_runs WHERE project_name = ?', (project_name,))
+            conn.execute('DELETE FROM run_counters WHERE project_name = ?', (project_name,))
             conn.commit()
-            return cursor.lastrowid
+            return cursor.rowcount
 
     def update_training_run(self, run_pk: int, **fields):
         """Update run fields (status, timing, metadata, etc.)."""
@@ -542,6 +584,10 @@ class DatabaseService:
         with self._get_connection() as conn:
             cursor = conn.execute(
                 'UPDATE training_runs SET project_name = ? WHERE project_name = ?',
+                (new_name, old_name)
+            )
+            conn.execute(
+                'UPDATE run_counters SET project_name = ? WHERE project_name = ?',
                 (new_name, old_name)
             )
             conn.commit()

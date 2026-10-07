@@ -556,16 +556,6 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
     if branch is None:
         branch = project.get("branch", "main")
 
-    # Pre-create DB record so run_pk is available immediately for slot reservation
-    run_pk = get_db().create_training_run(
-        project_name=name,
-        metadata={
-            "started_at": datetime.datetime.now(),
-            "status": "starting",
-            "branch": branch,
-        }
-    )
-
     primary_ws = os.path.join(projects_dir, name, "workspace")
 
     with _lock:
@@ -574,11 +564,9 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
         max_runs = project.get("max_parallel_runs", 2)
 
         if not parallel_enabled and len(active_runs) > 0:
-            get_db().delete_training_run(run_pk)
             return {"error": "Training is already running. To run multiple runs simultaneously, enable Parallel Runs in Edit Project."}
 
         if parallel_enabled and len(active_runs) >= max_runs:
-            get_db().delete_training_run(run_pk)
             return {"error": f"At capacity ({max_runs} parallel runs)"}
 
         # GPU pre-flight check — atomic with slot reservation so parallel starts
@@ -587,13 +575,11 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
         if project.get("gpu_enabled", False):
             gpus = get_gpu_stats()
             if not gpus:
-                get_db().delete_training_run(run_pk)
                 return {"error": "GPU management is enabled but no NVIDIA GPUs were detected"}
             minimum_mb = project.get("gpu_memory_minimum", 0)
             best = max(gpus, key=lambda g: g["mem_total"] - g["mem_used"])
             free_mb = (best["mem_total"] - best["mem_used"]) // (1024 * 1024)
             if minimum_mb > 0 and free_mb < minimum_mb:
-                get_db().delete_training_run(run_pk)
                 return {
                     "error": (
                         f"Insufficient VRAM: {minimum_mb} MB required, "
@@ -601,6 +587,16 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
                     )
                 }
             gpu_assignment = {"index": best["index"], "free_mb": free_mb}
+
+        # Number the run only after admission, so a refused start never consumes one.
+        run_pk, run_id = get_db().create_training_run(
+            project_name=name,
+            metadata={
+                "started_at": datetime.datetime.now(),
+                "status": "starting",
+                "branch": branch,
+            }
+        )
 
         primary_in_use = any(info.get("workspace_dir") == primary_ws for info in active_runs)
         workspace_dir = (
@@ -613,6 +609,7 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
             "starting": True,
             "project_name": name,
             "run_pk": run_pk,
+            "run_id": run_id,
             "branch": branch,
             "workspace_dir": workspace_dir,
         }
@@ -621,15 +618,15 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
 
     thread = threading.Thread(
         target=_execute_training,
-        args=(projects_dir, name, project, python_bin, run_pk, branch, workspace_dir, gpu_assignment),
+        args=(projects_dir, name, project, python_bin, run_pk, run_id, branch, workspace_dir, gpu_assignment),
         daemon=True,
     )
     thread.start()
 
-    return {"run_id": run_pk, "status": "starting"}
+    return {"run_id": run_pk, "status": "starting"}  # public number switches in Task 6
 
 
-def _execute_training(projects_dir, name, project, python_bin, run_pk, branch, workspace_dir, gpu_assignment=None):  # NOSONAR — sequential pre-launch pipeline
+def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, branch, workspace_dir, gpu_assignment=None):  # NOSONAR — sequential pre-launch pipeline
     """Run the full pre-launch sequence and start the training subprocess (runs in background thread)."""
     is_parallel = workspace_dir != os.path.join(projects_dir, name, "workspace")
     log_path = os.path.join(projects_dir, name, f"train-{run_pk}.log")
@@ -936,7 +933,7 @@ def stop_training(projects_dir, name, run_id=None):  # NOSONAR — sequential st
             if not info or info.get("project_name") != name:
                 return {"error": f"Run {run_pk} not found for project {name}"}
         else:
-            project_runs = [rid for rid, info in _running.items()
+            project_runs = [pk for pk, info in _running.items()
                             if info.get("project_name") == name]
             if not project_runs:
                 try:

@@ -72,3 +72,101 @@ def test_fresh_db_metric_analyses_uses_run_pk(tmp_path):
     DatabaseService(path)
     cols = {r[1] for r in sqlite3.connect(path).execute("PRAGMA table_info(metric_analyses)")}
     assert "run_pk" in cols and "run_id" not in cols
+
+
+import datetime
+import threading
+
+from services.run_refs import public_run, run_ref
+
+
+def _meta():
+    return {"started_at": datetime.datetime.now(), "status": "starting", "branch": "main"}
+
+
+@pytest.fixture
+def db(tmp_path):
+    return DatabaseService(str(tmp_path / "t.db"))
+
+
+def test_interleaved_projects_number_independently(db):
+    seq = [(p, db.create_training_run(p, _meta())[1]) for p in ["a", "b", "a", "a", "b"]]
+    assert seq == [("a", 1), ("b", 1), ("a", 2), ("a", 3), ("b", 2)]
+
+
+def test_numbers_not_reused_after_clear(db):
+    for _ in range(3):
+        db.create_training_run("a", _meta())
+    db.delete_all_runs("a")
+    assert db.create_training_run("a", _meta())[1] == 4
+
+
+def test_numbers_not_reused_after_prune(db):
+    for _ in range(5):
+        db.create_training_run("a", _meta())
+    db.prune_old_runs("a", keep_last=1)
+    assert db.create_training_run("a", _meta())[1] == 6
+
+
+def test_rename_continues_sequence(db):
+    db.create_training_run("a", _meta())
+    db.create_training_run("a", _meta())
+    db.rename_project_runs("a", "a2")
+    assert db.get_run("a2", 2) is not None
+    assert db.create_training_run("a2", _meta())[1] == 3
+
+
+def test_delete_project_runs_restarts_numbering(db):
+    pk, _ = db.create_training_run("a", _meta())
+    db.save_metric_analysis(pk, "loss", {"trend": "stable"})
+    db.delete_project_runs("a")
+    assert db.get_metric_analyses(pk) == {}
+    assert db.create_training_run("a", _meta())[1] == 1
+
+
+def test_concurrent_creates_get_distinct_numbers(db):
+    numbers, lock = [], threading.Lock()
+
+    def worker():
+        _, n = db.create_training_run("a", _meta())
+        with lock:
+            numbers.append(n)
+
+    threads = [threading.Thread(target=worker) for _ in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(numbers) == list(range(1, 11))
+
+
+def test_get_run_is_scoped_to_project(db):
+    db.create_training_run("a", _meta())
+    db.create_training_run("b", _meta())
+    assert db.get_run("a", 1)["project_name"] == "a"
+    assert db.get_run("b", 1)["project_name"] == "b"
+    assert db.get_run("a", 2) is None
+
+
+def test_public_run_hides_pk_and_adds_ref(db):
+    pk, _ = db.create_training_run("mnist", _meta())
+    out = public_run(db.get_run("mnist", 1))
+    assert "id" not in out and "run_number" not in out
+    assert out["run_id"] == 1
+    assert out["run_ref"] == "mnist-1" == run_ref("mnist", 1)
+
+
+def test_create_project_purges_orphan_history(app, mocker):
+    from services import project_service
+    from services.db_service import get_db
+    db = get_db()
+    db.create_training_run("ghost", _meta())  # orphan: no project directory
+    db.create_training_run("ghost", _meta())
+    mocker.patch.object(project_service.threading, "Thread")
+
+    project_service.create_project(app.config["PROJECTS_DIR"], {
+        "name": "ghost", "git_url": "https://github.com/user/repo.git",
+    })
+
+    assert db.get_training_runs("ghost", limit=None) == []
+    assert db.create_training_run("ghost", _meta())[1] == 1

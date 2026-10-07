@@ -74,7 +74,7 @@ def test_pip_install_called_with_requirements_file(tmp_path):
     from services import process_manager
     process_manager._running.clear()
     projects_dir = _make_project(tmp_path)
-    mock_db = MagicMock(create_training_run=MagicMock(return_value=99),
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=(99, 99)),
                         delete_training_run=MagicMock(),
                         get_training_runs=MagicMock(return_value=[]))
 
@@ -112,7 +112,7 @@ def test_pip_install_skipped_when_no_requirements_file(tmp_path):
     process_manager._running.clear()
     projects_dir = _make_project(tmp_path)
     os.remove(os.path.join(projects_dir, "myproject", "workspace", "requirements.txt"))
-    mock_db = MagicMock(create_training_run=MagicMock(return_value=99),
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=(99, 99)),
                         delete_training_run=MagicMock(),
                         get_training_runs=MagicMock(return_value=[]))
 
@@ -143,7 +143,7 @@ def test_pip_install_failure_blocks_training(tmp_path):
     from services import process_manager
     process_manager._running.clear()
     projects_dir = _make_project(tmp_path)
-    mock_db = MagicMock(create_training_run=MagicMock(return_value=99),
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=(99, 99)),
                         delete_training_run=MagicMock(),
                         get_training_runs=MagicMock(return_value=[]))
 
@@ -171,7 +171,7 @@ def test_pip_install_timeout_blocks_training(tmp_path):
     from services import process_manager
     process_manager._running.clear()
     projects_dir = _make_project(tmp_path)
-    mock_db = MagicMock(create_training_run=MagicMock(return_value=99),
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=(99, 99)),
                         delete_training_run=MagicMock(),
                         get_training_runs=MagicMock(return_value=[]))
 
@@ -201,7 +201,7 @@ def test_pip_install_runs_after_git_pull(tmp_path):
     process_manager._running.clear()
     projects_dir = _make_project(tmp_path)
     call_order = []
-    mock_db = MagicMock(create_training_run=MagicMock(return_value=99),
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=(99, 99)),
                         delete_training_run=MagicMock(),
                         get_training_runs=MagicMock(return_value=[]))
 
@@ -276,7 +276,7 @@ def test_start_training_rejects_second_run_when_parallel_disabled(tmp_path):
     from services import process_manager
     process_manager._running.clear()
     projects_dir = _make_project(tmp_path)
-    mock_db = MagicMock(create_training_run=MagicMock(return_value=1),
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=(1, 1)),
                         delete_training_run=MagicMock(),
                         get_training_runs=MagicMock(return_value=[]))
 
@@ -301,7 +301,7 @@ def test_start_training_allows_second_run_when_parallel_enabled(tmp_path):
     from services import process_manager
     process_manager._running.clear()
     projects_dir = _make_project(tmp_path, parallel_runs_enabled=True, max_parallel_runs=2)
-    mock_db = MagicMock(create_training_run=MagicMock(return_value=2),
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=(2, 2)),
                         delete_training_run=MagicMock(),
                         get_training_runs=MagicMock(return_value=[]))
 
@@ -338,7 +338,7 @@ def test_parallel_tensorboard_link_exists_before_training_process(tmp_path):
     with open(os.path.join(parallel_ws, "train.py"), "w") as f:
         f.write("print('training')")
 
-    mock_db = MagicMock(create_training_run=MagicMock(return_value=2),
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=(2, 2)),
                         delete_training_run=MagicMock(),
                         get_training_runs=MagicMock(return_value=[]))
 
@@ -388,7 +388,7 @@ def test_output_paths_link_to_persistent_run_dir_before_training_process(tmp_pat
     projects_dir = _make_project(tmp_path, output_paths=["saved_models", "exports/checkpoints"])
     workspace_dir = os.path.join(projects_dir, "myproject", "workspace")
 
-    mock_db = MagicMock(create_training_run=MagicMock(return_value=42),
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=(42, 42)),
                         delete_training_run=MagicMock(),
                         get_training_runs=MagicMock(return_value=[]))
 
@@ -433,7 +433,7 @@ def test_primary_workspace_output_conflict_warns_and_skips_symlink(tmp_path):
     with open(os.path.join(conflict_dir, "keep.txt"), "w") as f:
         f.write("do not delete")
 
-    mock_db = MagicMock(create_training_run=MagicMock(return_value=44),
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=(44, 44)),
                         delete_training_run=MagicMock(),
                         get_training_runs=MagicMock(return_value=[]))
 
@@ -474,7 +474,7 @@ def test_parallel_workspace_output_conflict_is_replaced(tmp_path):
     with open(os.path.join(parallel_ws, "saved_models", "tracked.txt"), "w") as f:
         f.write("replace me")
 
-    mock_db = MagicMock(create_training_run=MagicMock(return_value=45),
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=(45, 45)),
                         delete_training_run=MagicMock(),
                         get_training_runs=MagicMock(return_value=[]))
 
@@ -515,7 +515,7 @@ def test_reserved_run_env_var_is_overridden_and_warned(tmp_path):
     projects_dir = _make_project(tmp_path, env_vars={"BEEKEEPER_RUN_DIR": "/tmp/wrong"})
     expected_dir = os.path.join(projects_dir, "myproject", "persistent", "runs", "run_46")
 
-    mock_db = MagicMock(create_training_run=MagicMock(return_value=46),
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=(46, 46)),
                         delete_training_run=MagicMock(),
                         get_training_runs=MagicMock(return_value=[]))
 
@@ -558,7 +558,7 @@ def test_run_history_cleanup_deletes_only_non_notable_old_run_storage(tmp_path):
         {"id": 10, "started_at": "2026-05-03T12:00:00", "notable": 1, "persistent_dir": "persistent/runs/run_10"},
         {"id": 11, "started_at": "2026-05-02T12:00:00", "notable": 0, "persistent_dir": "persistent/runs/run_11"},
     ]
-    mock_db = MagicMock(create_training_run=MagicMock(return_value=46),
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=(46, 46)),
                         delete_training_run=MagicMock(),
                         get_training_runs=MagicMock(return_value=old_runs))
 
@@ -636,7 +636,7 @@ def test_start_training_returns_run_id(tmp_path):
     from services import process_manager
     process_manager._running.clear()
     projects_dir = _make_project(tmp_path)
-    mock_db = MagicMock(create_training_run=MagicMock(return_value=42),
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=(42, 42)),
                         delete_training_run=MagicMock(),
                         get_training_runs=MagicMock(return_value=[]))
 
@@ -665,7 +665,7 @@ def test_sequential_primary_runs_get_distinct_log_files(tmp_path):
     projects_dir = _make_project(tmp_path)
 
     mock_db = MagicMock(
-        create_training_run=MagicMock(side_effect=[50, 51]),
+        create_training_run=MagicMock(side_effect=[(50, 1), (51, 2)]),
         delete_training_run=MagicMock(),
         get_training_runs=MagicMock(return_value=[]),
     )
@@ -715,7 +715,7 @@ def test_prelaunch_abort_archives_log_and_records_path(tmp_path):
     projects_dir = _make_project(tmp_path, train_file="does_not_exist.py")
 
     mock_db = MagicMock(
-        create_training_run=MagicMock(return_value=77),
+        create_training_run=MagicMock(return_value=(77, 77)),
         delete_training_run=MagicMock(),
         get_training_runs=MagicMock(return_value=[]),
         update_training_run=MagicMock(),
@@ -777,7 +777,7 @@ def _launch_with_gpu_management(tmp_path, env_vars=None):
         {"index": 0, "name": "small", "mem_total": 12 * gib, "mem_used": 0},
         {"index": 1, "name": "big", "mem_total": 24 * gib, "mem_used": 0},
     ]
-    mock_db = MagicMock(create_training_run=MagicMock(return_value=99),
+    mock_db = MagicMock(create_training_run=MagicMock(return_value=(99, 99)),
                         delete_training_run=MagicMock(),
                         get_training_runs=MagicMock(return_value=[]))
 
@@ -807,3 +807,46 @@ def test_gpu_assignment_overrides_project_cuda_device_order(tmp_path):
     env = _launch_with_gpu_management(tmp_path, env_vars={"CUDA_DEVICE_ORDER": "FASTEST_FIRST"})
 
     assert env["CUDA_DEVICE_ORDER"] == "PCI_BUS_ID"
+
+
+def test_refused_start_does_not_consume_a_run_number(app, ready_project, mocker):
+    from services import process_manager
+    from services.db_service import get_db
+    projects_dir = app.config["PROJECTS_DIR"]
+    mocker.patch.object(process_manager, "_resolve_python_binary", return_value="/usr/bin/python3")
+    mocker.patch.object(process_manager.threading, "Thread")
+
+    first = process_manager.start_training(projects_dir, "myproject")
+    refused = process_manager.start_training(projects_dir, "myproject")  # parallel off → refused
+    assert "error" in refused
+
+    process_manager._running.clear()
+    third = process_manager.start_training(projects_dir, "myproject")
+    numbers = [r["run_number"] for r in get_db().get_training_runs("myproject", limit=None)]
+    assert sorted(numbers) == [1, 2]
+
+
+def test_concurrent_starts_leave_no_number_gap(app, ready_project, mocker):
+    import threading
+    from services import process_manager
+    from services.db_service import get_db
+    projects_dir = app.config["PROJECTS_DIR"]
+    RealThread = threading.Thread  # grab before patching: the patch replaces the shared module attr
+    mocker.patch.object(process_manager, "_resolve_python_binary", return_value="/usr/bin/python3")
+    mocker.patch.object(process_manager.threading, "Thread")
+
+    barrier = threading.Barrier(2)
+    results = []
+
+    def go():
+        barrier.wait()
+        results.append(process_manager.start_training(projects_dir, "myproject"))
+
+    ts = [RealThread(target=go) for _ in range(2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+
+    assert sum("error" in r for r in results) == 1
+    assert [r["run_number"] for r in get_db().get_training_runs("myproject", limit=None)] == [1]

@@ -8,6 +8,7 @@ from flask import (
 
 from models.project import Project, SETUP_ACTIVE_STATUSES
 from services.project_service import (
+    ProjectBusyError,
     create_project,
     delete_project,
     retry_setup,
@@ -435,6 +436,10 @@ def delete(name):
     if not os.path.isfile(config_path):
         abort(404)
 
+    try:
+        delete_project(projects_dir, name)
+    except ProjectBusyError as e:
+        flash(str(e), "error")
+        return redirect(url_for(_DETAIL_ROUTE, name=name))
     stop_tensorboard(name)
-    delete_project(projects_dir, name)
     return redirect(url_for("dashboard.index"))

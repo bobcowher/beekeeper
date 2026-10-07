@@ -14,6 +14,10 @@ from services.git_utils import git_env
 log = logging.getLogger(__name__)
 
 
+class ProjectBusyError(Exception):
+    """Raised when an operation needs the project to have no starting/running runs."""
+
+
 def ensure_data_dir_symlink(workspace_dir: str, data_dir_local: str, data_dir_remote: str) -> str | None:
     """Ensure the data directory symlink exists and points to the right target.
 
@@ -177,6 +181,8 @@ def rename_project(projects_dir, name, new_name):
         _json.dump(project_data, f, indent=2)
 
     from services.db_service import get_db
+    # Orphan rows under the destination name would merge into this history
+    get_db().delete_project_runs(new_name)
     get_db().rename_project_runs(name, new_name)
 
     if env_type == "conda":
@@ -197,6 +203,9 @@ def rename_project(projects_dir, name, new_name):
 
 def create_project(projects_dir, data):
     """Create a new project: save config, then clone/venv/install in background."""
+    from services.db_service import get_db
+    # Clear orphan history from a same-named project deleted before purge-on-delete existed
+    get_db().delete_project_runs(data["name"])
     project = Project(
         name=data["name"],
         git_url=data["git_url"],
@@ -414,7 +423,11 @@ def _create_conda_env(project, _save_status):
 
 
 def delete_project(projects_dir, name):
-    """Remove a project directory and its conda env (if any)."""
+    """Remove a project directory, its conda env (if any), and its run history."""
+    from services.process_manager import get_runs_for_project
+    if get_runs_for_project(name):
+        raise ProjectBusyError(f"Project '{name}' has an active run; stop it before deleting.")
+
     project_dir = os.path.join(projects_dir, name)
     config_path = os.path.join(project_dir, "project.json")  # NOSONAR
 
@@ -436,3 +449,6 @@ def delete_project(projects_dir, name):
 
     if os.path.isdir(project_dir):
         shutil.rmtree(project_dir)
+
+    from services.db_service import get_db
+    get_db().delete_project_runs(name)

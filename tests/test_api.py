@@ -536,3 +536,28 @@ def test_api_v1_rename_venv_project_does_not_touch_conda(client, app, mocker):
     assert r.get_json()["data"]["setup_status"] == "ready"
     conda_spy.assert_not_called()
     thread_spy.assert_not_called()
+
+
+# --- Project delete guard ---
+
+def _seed_starting_run():
+    from services import process_manager
+    process_manager._running[1] = {
+        "project_name": "myproject", "run_pk": 1, "starting": True, "process": None,
+    }
+
+
+def test_web_delete_refused_while_run_active(client, app, ready_project):
+    _seed_starting_run()
+    resp = client.post("/projects/myproject/delete")
+    assert resp.status_code == 302
+    assert "/projects/myproject" in resp.headers["Location"]
+    assert os.path.isdir(os.path.join(app.config["PROJECTS_DIR"], "myproject"))
+
+
+def test_api_delete_refused_while_run_active(client, app, ready_project):
+    _seed_starting_run()
+    r = client.delete("/api/v1/projects/myproject", headers={"Authorization": "Bearer test"})
+    assert r.status_code == 409
+    assert r.get_json()["error"]["code"] == "PROJECT_BUSY"
+    assert os.path.isdir(os.path.join(app.config["PROJECTS_DIR"], "myproject"))

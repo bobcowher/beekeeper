@@ -334,24 +334,19 @@ def delete_project_api(name):
     """
     Delete a project and all its data.
 
-    Stops TensorBoard if running. Cannot delete while training is running —
-    stop training first.
+    Stops TensorBoard if running. Cannot delete while a run is starting or
+    running — stop it first.
     """
     load_project(name)
 
-    status = get_training_status(name)
-    if status["status"] == "running":
-        return api_response(
-            error_code="TRAINING_RUNNING",
-            error_message="Cannot delete project while training is running — stop training first",
-            status_code=409
-        )
-
     from services.process_manager import stop_tensorboard
-    from services.project_service import delete_project
+    from services.project_service import ProjectBusyError, delete_project
     projects_dir = current_app.config["PROJECTS_DIR"]
+    try:
+        delete_project(projects_dir, name)
+    except ProjectBusyError as e:
+        return api_response(error_code="PROJECT_BUSY", error_message=str(e), status_code=409)
     stop_tensorboard(name)
-    delete_project(projects_dir, name)
 
     return api_response(data={"deleted": name})
 

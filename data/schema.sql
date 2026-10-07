@@ -39,6 +39,7 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
 CREATE TABLE IF NOT EXISTS training_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_name TEXT NOT NULL,
+    run_number INTEGER,
 
     -- Timing
     started_at TIMESTAMP NOT NULL,
@@ -109,3 +110,7 @@ CREATE TABLE IF NOT EXISTS metric_analyses (
     UNIQUE(run_pk, metric_name)
 );
 
+CREATE TABLE IF NOT EXISTS run_counters (
+    project_name TEXT PRIMARY KEY,
+    last_number  INTEGER NOT NULL
+);
