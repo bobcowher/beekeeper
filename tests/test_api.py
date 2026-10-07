@@ -543,7 +543,7 @@ def test_api_v1_rename_venv_project_does_not_touch_conda(client, app, mocker):
 def _seed_starting_run():
     from services import process_manager
     process_manager._running[1] = {
-        "project_name": "myproject", "run_pk": 1, "starting": True, "process": None,
+        "project_name": "myproject", "run_pk": 1, "run_id": 1, "starting": True, "process": None,
     }
 
 

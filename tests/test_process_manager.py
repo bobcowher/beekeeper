@@ -253,6 +253,7 @@ def test_get_runs_for_project_returns_active(tmp_path):
         "starting": False,
         "project_name": "myproject",
         "run_pk": 42,
+        "run_id": 7,
         "branch": "main",
         "workspace_dir": "/fake/workspace",
         "log_path": "/fake/train.log",
@@ -263,7 +264,9 @@ def test_get_runs_for_project_returns_active(tmp_path):
     with patch("services.resource_tracker.get_process_resources", return_value=None):
         runs = get_runs_for_project("myproject")
     assert len(runs) == 1
-    assert runs[0]["run_id"] == 42
+    assert runs[0]["run_id"] == 7
+    assert runs[0]["run_ref"] == "myproject-7"
+    assert "run_pk" not in runs[0]
     assert runs[0]["branch"] == "main"
     assert runs[0]["status"] == "running"
     process_manager._running.clear()
@@ -651,6 +654,7 @@ def test_start_training_returns_run_id(tmp_path):
         result = process_manager.start_training(projects_dir, "myproject")
 
     assert result.get("run_id") == 42
+    assert result.get("run_ref") == "myproject-42"
 
 
 def test_sequential_primary_runs_get_distinct_log_files(tmp_path):
@@ -692,8 +696,8 @@ def test_sequential_primary_runs_get_distinct_log_files(tmp_path):
     assert "error" not in result1
     assert "error" not in result2
 
-    log1 = os.path.join(projects_dir, "myproject", "train-50.log")
-    log2 = os.path.join(projects_dir, "myproject", "train-51.log")
+    log1 = os.path.join(projects_dir, "myproject", "train-1.log")
+    log2 = os.path.join(projects_dir, "myproject", "train-2.log")
     assert os.path.isfile(log1)
     assert os.path.isfile(log2)
     process_manager._running.clear()
@@ -757,7 +761,7 @@ def test_get_run_log_path_falls_back_to_live_file_when_unarchived(tmp_path):
     with open(live_log, "w") as f:
         f.write("[beekeeper] Pre-launch failed: Training file not found: train.py\n")
 
-    mock_db = MagicMock(get_training_run=MagicMock(return_value={"log_file_path": None}))
+    mock_db = MagicMock(get_run=MagicMock(return_value={"log_file_path": None}))
 
     with patch("services.process_manager.get_db", return_value=mock_db):
         resolved = process_manager.get_run_log_path(projects_dir, "myproject", run_id=5)
@@ -850,3 +854,149 @@ def test_concurrent_starts_leave_no_number_gap(app, ready_project, mocker):
 
     assert sum("error" in r for r in results) == 1
     assert [r["run_number"] for r in get_db().get_training_runs("myproject", limit=None)] == [1]
+
+
+def _prepare_launchable(app):
+    """Give the fixture project a workspace with a train file; return (projects_dir, mocks)."""
+    projects_dir = app.config["PROJECTS_DIR"]
+    ws = os.path.join(projects_dir, "myproject", "workspace")
+    os.makedirs(ws, exist_ok=True)
+    with open(os.path.join(ws, "train.py"), "w") as f:
+        f.write("print('training')")
+    return projects_dir
+
+
+def _launch_real_db(projects_dir, popen_side_effect=None):
+    from services import process_manager
+    with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
+         patch("services.process_manager._resolve_tensorboard_binary", return_value=None), \
+         patch("services.process_manager._update_project_json"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.subprocess.run", return_value=_ok_run()), \
+         patch("services.process_manager.subprocess.Popen",
+               side_effect=popen_side_effect or (lambda cmd, **kw: MagicMock(pid=9999))) as popen, \
+         patch("services.process_manager._monitor_process"):
+        result = process_manager.start_training(projects_dir, "myproject")
+    return result, popen
+
+
+def _create_run_in_other_project():
+    import datetime
+    from services.db_service import get_db
+    return get_db().create_training_run(
+        "other", {"started_at": datetime.datetime.now(), "status": "completed"})
+
+
+def test_start_training_returns_per_project_number_and_ref(app, ready_project, mocker):
+    from services import process_manager
+    projects_dir = app.config["PROJECTS_DIR"]
+    _create_run_in_other_project()
+    mocker.patch.object(process_manager, "_resolve_python_binary", return_value="/usr/bin/python3")
+    mocker.patch.object(process_manager.threading, "Thread")
+
+    result = process_manager.start_training(projects_dir, "myproject")
+
+    assert result == {"run_id": 1, "run_ref": "myproject-1", "status": "starting"}
+    assert process_manager.get_runs_for_project("myproject")[0]["run_id"] == 1
+    assert "run_pk" not in process_manager.get_runs_for_project("myproject")[0]
+
+
+def test_launch_uses_number_for_folder_and_env(app, ready_project):
+    from services.db_service import get_db
+    projects_dir = _prepare_launchable(app)
+    other_pk, _ = _create_run_in_other_project()
+    assert other_pk == 1
+
+    result, popen = _launch_real_db(projects_dir)
+
+    assert result["run_id"] == 1
+    env = popen.call_args.kwargs["env"]
+    assert env["BEEKEEPER_RUN_ID"] == "1"
+    assert env["BEEKEEPER_RUN_REF"] == "myproject-1"
+    assert env["BEEKEEPER_RUN_DIR"].endswith("persistent/runs/run_1")
+    row = get_db().get_run("myproject", 1)
+    assert row["persistent_dir"] == "persistent/runs/run_1"
+    assert row["id"] == 2  # pk differs from the number
+    assert os.path.isfile(os.path.join(projects_dir, "myproject", "train-1.log"))
+
+
+def test_launch_writes_marker_with_run_pk(app, ready_project):
+    from services.run_folder_migration import MARKER
+    projects_dir = _prepare_launchable(app)
+    _create_run_in_other_project()
+
+    result, _ = _launch_real_db(projects_dir)
+
+    assert "error" not in result
+    marker = os.path.join(projects_dir, "myproject", "persistent", "runs", "run_1", MARKER)
+    with open(marker) as f:
+        assert f.read().strip() == "2"  # this run's pk, not its number
+
+
+def test_launch_aborts_when_folder_belongs_to_another_run(app, ready_project):
+    from services import process_manager
+    from services.db_service import get_db
+    from services.run_folder_migration import MARKER
+    projects_dir = _prepare_launchable(app)
+    folder = os.path.join(projects_dir, "myproject", "persistent", "runs", "run_1")
+    os.makedirs(folder)
+    with open(os.path.join(folder, MARKER), "w") as f:
+        f.write("777")
+    with open(os.path.join(folder, "model.pt"), "w") as f:
+        f.write("precious")
+
+    result, popen = _launch_real_db(projects_dir)
+
+    popen.assert_not_called()
+    assert get_db().get_run("myproject", 1)["status"] == "crashed"
+    assert process_manager._running == {}
+    assert sorted(os.listdir(folder)) == sorted([MARKER, "model.pt"])
+    with open(os.path.join(folder, MARKER)) as f:
+        assert f.read() == "777"
+    with open(os.path.join(folder, "model.pt")) as f:
+        assert f.read() == "precious"
+    log_path = process_manager.get_run_log_path(projects_dir, "myproject", run_id=1)
+    assert "belongs to another run" in open(log_path).read()
+
+
+def test_launch_aborts_when_nonempty_folder_has_no_marker(app, ready_project):
+    from services.db_service import get_db
+    projects_dir = _prepare_launchable(app)
+    folder = os.path.join(projects_dir, "myproject", "persistent", "runs", "run_1")
+    os.makedirs(folder)
+    with open(os.path.join(folder, "model.pt"), "w") as f:
+        f.write("x")
+
+    _, popen = _launch_real_db(projects_dir)
+
+    popen.assert_not_called()
+    assert get_db().get_run("myproject", 1)["status"] == "crashed"
+    assert os.listdir(folder) == ["model.pt"]
+
+
+def test_launch_accepts_existing_empty_or_own_marker_folder(app, ready_project):
+    from services.run_folder_migration import MARKER
+    projects_dir = _prepare_launchable(app)
+    folder = os.path.join(projects_dir, "myproject", "persistent", "runs", "run_1")
+    os.makedirs(folder)
+
+    _, popen = _launch_real_db(projects_dir)
+
+    popen.assert_called_once()
+    assert os.path.isfile(os.path.join(folder, MARKER))
+
+
+def test_stop_training_by_per_project_number(app, ready_project, mocker):
+    from services import process_manager
+    projects_dir = app.config["PROJECTS_DIR"]
+    proc = mocker.MagicMock(pid=12345, returncode=0)
+    process_manager._running[99] = {
+        "process": proc, "run_pk": 99, "run_id": 3, "project_name": "myproject",
+        "workspace_dir": f"{projects_dir}/myproject/workspace",
+    }
+    mocker.patch.object(process_manager.os, "getpgid", return_value=12345)
+    mocker.patch.object(process_manager.os, "killpg")
+
+    assert "error" in process_manager.stop_training(projects_dir, "myproject", run_id=99)
+    result = process_manager.stop_training(projects_dir, "myproject", run_id=3)
+    assert result["run_id"] == 3 and result["run_ref"] == "myproject-3"
