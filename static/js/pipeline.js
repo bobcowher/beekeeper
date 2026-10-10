@@ -94,11 +94,14 @@
     function renderHistory() {
         const body = $('pipeline-runs').querySelector('tbody');
         body.innerHTML = runs.map(r => {
-            const stopped = r.status === 'succeeded' ? '' : (r.steps[r.current_step] || {}).name || '';
+            const stepName = (r.steps[r.current_step] || {}).name || '';
+            let progress = '';
+            if (r.status === 'running' && stepName) progress = `Running: ${stepName}`;
+            if (['failed', 'cancelled'].includes(r.status) && stepName) progress = `Stopped at ${stepName}`;
             return `<tr data-run="${r.run_id}"><td>#${r.run_id}</td>
                 <td><span class="status-badge status-${esc(r.status)}">${esc(r.status)}</span></td>
                 <td>${esc(new Date(r.started_at).toLocaleString())}</td>
-                <td>${duration(r.started_at, r.ended_at)}</td><td>${esc(stopped)}</td></tr>`;
+                <td>${duration(r.started_at, r.ended_at)}</td><td>${esc(progress)}</td></tr>`;
         }).join('');
         body.querySelectorAll('tr').forEach(tr => tr.addEventListener('click', () => {
             selected = Number(tr.dataset.run);

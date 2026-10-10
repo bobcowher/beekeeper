@@ -357,3 +357,49 @@ def test_pipeline_step_log_survives_periodic_refresh(live_server):
         assert log.evaluate("el => el.scrollTop") == scroll_top
         assert page.locator('[data-step-log="produce"]').get_attribute("aria-expanded") == "true"
         browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_history_labels_running_and_stopped_steps(live_server):
+    from playwright.sync_api import sync_playwright
+
+    yaml = "name: status-pipe\nsteps:\n  - {name: first, type: task, command: 'true'}\n  - {name: second, type: task, command: 'true'}\n"
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        response = page.request.fetch(
+            live_server + "/api/v1/pipelines",
+            method="POST",
+            headers={"Content-Type": "application/yaml"},
+            data=yaml,
+        )
+        assert response.ok
+
+        def run(run_id, status, current_step):
+            return {
+                "run_id": run_id,
+                "status": status,
+                "current_step": current_step,
+                "error": "",
+                "started_at": "2026-10-10T12:00:00",
+                "ended_at": None,
+                "steps": [
+                    {"name": "first", "type": "task", "status": "succeeded", "attempt": 1},
+                    {"name": "second", "type": "task", "status": "pending", "attempt": 0},
+                ],
+            }
+
+        runs = [run(4, "running", 0), run(3, "failed", 1), run(2, "cancelled", 0), run(1, "succeeded", 2)]
+        page.route(
+            "**/api/v1/pipelines/status-pipe/runs?limit=50",
+            lambda route: route.fulfill(json={"success": True, "data": {"runs": runs}}),
+        )
+        page.goto(live_server + "/pipelines/status-pipe")
+        page.locator('#pipeline-runs tr[data-run="4"]').wait_for()
+
+        assert page.locator("#pipeline-runs thead").inner_text().strip().endswith("PROGRESS")
+        assert page.locator('#pipeline-runs tr[data-run="4"] td').last.inner_text() == "Running: first"
+        assert page.locator('#pipeline-runs tr[data-run="3"] td').last.inner_text() == "Stopped at second"
+        assert page.locator('#pipeline-runs tr[data-run="2"] td').last.inner_text() == "Stopped at first"
+        assert page.locator('#pipeline-runs tr[data-run="1"] td').last.inner_text() == ""
+        browser.close()
