@@ -7,7 +7,8 @@ from flask import (
     request, redirect, url_for, abort, flash, jsonify,
 )
 
-from models.project import Project, SETUP_ACTIVE_STATUSES
+from models.project import Project, SETUP_ACTIVE_STATUSES, normalize_folder
+from services.folder_service import list_folders
 from services.project_service import (
     ProjectBusyError,
     create_project,
@@ -48,6 +49,10 @@ def _format_runtime(seconds: int) -> str:
     return " ".join(parts) if parts else "< 1m"
 
 
+def _folder_options():
+    return list_folders(current_app.config["PROJECTS_DIR"], current_app.config.get("PIPELINES_DIR"))
+
+
 @project_bp.route("/new", methods=["GET"])
 def new():
     python_versions = find_available()
@@ -56,6 +61,8 @@ def new():
         "create_project.html",
         python_versions=python_versions,
         conda_available=conda_available,
+        folders=_folder_options(),
+        project=None,
     )
 
 
@@ -77,6 +84,12 @@ def create():
     git_url = request.form.get("git_url", "").strip()
     if not git_url:
         flash("Git URL is required.", "error")
+        return redirect(url_for(_NEW_ROUTE))
+
+    try:
+        folder = normalize_folder(request.form.get("folder", ""))
+    except ValueError as e:
+        flash(str(e), "error")
         return redirect(url_for(_NEW_ROUTE))
 
     data_dir_enabled = request.form.get("data_dir_enabled") == "1"
@@ -112,6 +125,7 @@ def create():
     data = {
         "name": name,
         "git_url": git_url,
+        "folder": folder,
         "branch": request.form.get("branch", "main").strip() or "main",
         "python_version": request.form.get("python_version", "3.12"),
         "train_file": request.form.get("train_file", "train.py").strip() or "train.py",
@@ -178,7 +192,7 @@ def edit(name):
     with open(config_path) as f:
         project = json.load(f)
 
-    return render_template("edit_project.html", project=project)
+    return render_template("edit_project.html", project=project, folders=_folder_options())
 
 
 @project_bp.route("/<name>/edit", methods=["POST"])
@@ -190,6 +204,12 @@ def update(name):
 
     with open(config_path) as f:
         project_data = json.load(f)
+
+    try:
+        project_data["folder"] = normalize_folder(request.form.get("folder", project_data.get("folder", "")))
+    except ValueError as e:
+        flash(str(e), "error")
+        return redirect(url_for(_EDIT_ROUTE, name=name))
 
     # Update editable fields
     project_data["branch"] = request.form.get("branch", project_data["branch"]).strip()

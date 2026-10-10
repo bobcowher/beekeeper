@@ -80,3 +80,30 @@ def test_rename_folder_invalid_target_is_400(client, app):
     make_project_dir(app, "p1", folder="chess")
     r = client.post("/api/v1/folders/chess/rename", json={"new_name": "a/b"})
     assert r.status_code == 400
+
+
+def test_dashboard_rows_carry_folder(client, app):
+    make_project_dir(app, "p1", folder="chess")
+    html = client.get("/").get_data(as_text=True)
+    assert 'data-folder="chess"' in html
+    assert 'data-kind="project"' in html
+
+
+def test_edit_form_saves_folder(client, app):
+    make_project_dir(app, "p1")
+    client.post("/projects/p1/edit", data={
+        "branch": "main", "train_file": "train.py", "tensorboard_log_dir": "runs",
+        "requirements_file": "requirements.txt", "folder": " chess ",
+    })
+    path = os.path.join(app.config["PROJECTS_DIR"], "p1", "project.json")
+    assert json.load(open(path))["folder"] == "chess"
+
+
+def test_edit_form_rejects_bad_folder(client, app):
+    make_project_dir(app, "p1", folder="ok")
+    client.post("/projects/p1/edit", data={
+        "branch": "main", "train_file": "train.py", "tensorboard_log_dir": "runs",
+        "requirements_file": "requirements.txt", "folder": "a/b",
+    })
+    path = os.path.join(app.config["PROJECTS_DIR"], "p1", "project.json")
+    assert json.load(open(path))["folder"] == "ok"

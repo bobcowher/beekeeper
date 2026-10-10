@@ -37,7 +37,18 @@
                placeholder="https://github.com/user/repo.git">
     </div>
 
-    <div class="form-row">
+    <div class="form-group">
+        <label for="folder">Folder <span class="muted">(optional)</span></label>
+        <input type="text" id="folder" name="folder" list="folder-options"
+               value="{{ project.get('folder', '') if project else '' }}" maxlength="64"
+               placeholder="e.g. chess">
+        <datalist id="folder-options">
+            {% for f in folders %}<option value="{{ f }}">{% endfor %}
+        </datalist>
+        <p class="help-text">Groups this project on the dashboard. No slashes.</p>
+    </div>
+    
+<div class="form-row">
         <div class="form-group">
             <label for="branch">
                 Default Branch

@@ -55,6 +55,26 @@ def live_server(tmp_path_factory):
         "output_paths": [],
     }))
 
+    proj2 = projects_dir / "demo2"
+    proj2.mkdir()
+    (proj2 / "project.json").write_text(json.dumps({
+        "name": "demo2",
+        "git_url": str(remote_repo),
+        "branch": "main",
+        "python_version": "3.11",
+        "train_file": "train.py",
+        "tensorboard_log_dir": "runs",
+        "requirements_file": "requirements.txt",
+        "env_type": "venv",
+        "setup_status": "ready",
+        "setup_error": "",
+        "train_status": "idle",
+        "train_pid": 0,
+        "env_vars": {},
+        "output_paths": [],
+        "folder": "chess",
+    }))
+
     from app import create_app
     flask_app = create_app({
         "TESTING": True,
@@ -188,4 +208,26 @@ def test_project_detail_no_console_errors(live_server):
         page.wait_for_load_state("networkidle")
 
         assert errors == [], f"JavaScript errors on project detail: {errors}"
+        browser.close()
+
+
+@pytest.mark.browser
+def test_dashboard_folder_groups_collapse_and_persist(live_server):
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1280, "height": 800})
+        page.goto(live_server + "/")
+        label = page.locator(".folder-label", has_text="chess")
+        assert label.is_visible()
+        assert page.locator(".folder-label", has_text="Unfiled").is_visible()
+        row = page.locator('.project-row[data-name="demo2"]')
+        assert row.is_visible()
+        page.screenshot(path="/tmp/beekeeper-folders-open.png", full_page=True)
+        label.click()
+        assert not row.is_visible()
+        page.reload()
+        assert not page.locator('.project-row[data-name="demo2"]').is_visible()
+        page.screenshot(path="/tmp/beekeeper-folders.png", full_page=True)
         browser.close()

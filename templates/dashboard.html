@@ -30,6 +30,8 @@
         {% for p in projects %}
         <div class="project-row"
              data-name="{{ p.name }}"
+             data-kind="project"
+             data-folder="{{ p.get('folder', '') }}"
              data-pinned="{{ 'true' if p.get('pinned') else 'false' }}"
              data-last-run="{{ p.get('last_run_at', 0) }}"
              data-created-at="{{ p.get('created_at', 0) }}">

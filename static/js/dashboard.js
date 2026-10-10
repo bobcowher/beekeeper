@@ -4,6 +4,17 @@
     const list = document.getElementById("project-list");
     if (!list) return;
 
+    const COLLAPSE_KEY = "beekeeper.folders.collapsed";
+
+    function loadCollapsed() {
+        try { return new Set(JSON.parse(localStorage.getItem(COLLAPSE_KEY) || "[]")); }
+        catch (e) { return new Set(); }
+    }
+    function saveCollapsed(set) {
+        try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...set])); } catch (e) { /* private mode */ }
+    }
+    let collapsed = loadCollapsed();
+
     let currentSort = localStorage.getItem("beekeeperSort") || "recent";
 
     // ── Sort buttons ─────────────────────────────────────────────────────────
@@ -61,21 +72,57 @@
             return tb - ta;
         });
 
-        // Remove existing section labels before re-inserting
         list.querySelectorAll(".project-section-label").forEach(el => el.remove());
+        rows.forEach(r => r.classList.remove("folder-collapsed"));
 
-        // Re-insert rows in order
         if (pinned.length) {
-            const pinnedLabel = makeLabel("Pinned");
-            list.prepend(pinnedLabel);
+            list.appendChild(makeLabel("Pinned"));
             pinned.forEach(r => list.appendChild(r));
-
-            if (unpinned.length) {
-                list.appendChild(makeLabel("Projects"));
-            }
         }
 
-        unpinned.forEach(r => list.appendChild(r));
+        const folderOf = r => r.dataset.folder || "";
+        const folders = [...new Set(unpinned.map(folderOf).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b));
+
+        if (!folders.length) {
+            if (pinned.length && unpinned.length) list.appendChild(makeLabel("Projects"));
+            unpinned.forEach(r => list.appendChild(r));
+            return;
+        }
+
+        const groups = folders.map(f => [f, unpinned.filter(r => folderOf(r) === f)]);
+        const unfiled = unpinned.filter(r => !folderOf(r));
+        if (unfiled.length) groups.push(["", unfiled]);
+
+        groups.forEach(([folder, members]) => {
+            const key = folder || "__unfiled__";
+            const isCollapsed = collapsed.has(key);
+            list.appendChild(makeFolderLabel(folder || "Unfiled", key, members.length, isCollapsed));
+            members.forEach(r => {
+                r.classList.toggle("folder-collapsed", isCollapsed);
+                list.appendChild(r);
+            });
+        });
+    }
+
+    function makeFolderLabel(text, key, count, isCollapsed) {
+        const el = makeLabel("");
+        el.classList.add("folder-label");
+        el.dataset.folderKey = key;
+        el.setAttribute("role", "button");
+        el.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+        el.innerHTML = `<span class="collapse-icon">${isCollapsed ? "\u25B6" : "\u25BC"}</span> `;
+        el.appendChild(document.createTextNode(text));
+        const n = document.createElement("span");
+        n.className = "muted folder-count";
+        n.textContent = ` (${count})`;
+        el.appendChild(n);
+        el.addEventListener("click", () => {
+            if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key);
+            saveCollapsed(collapsed);
+            applySort();
+        });
+        return el;
     }
 
     function makeLabel(text) {
