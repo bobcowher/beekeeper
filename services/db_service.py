@@ -1,6 +1,7 @@
+import json
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from contextlib import contextmanager
 
@@ -130,6 +131,21 @@ class DatabaseService:
 
             conn.execute('''CREATE TABLE IF NOT EXISTS run_counters (
                 project_name TEXT PRIMARY KEY, last_number INTEGER NOT NULL)''')
+
+            conn.execute('''CREATE TABLE IF NOT EXISTS run_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_name TEXT NOT NULL,
+                branch TEXT,
+                env_vars TEXT,
+                source TEXT NOT NULL,
+                status TEXT NOT NULL,
+                wait_reason TEXT,
+                error TEXT,
+                run_pk INTEGER,
+                created_at TIMESTAMP NOT NULL,
+                started_at TIMESTAMP)''')
+            conn.execute('''CREATE INDEX IF NOT EXISTS idx_run_queue_project_status
+                            ON run_queue(project_name, status)''')
 
             conn.execute('''CREATE TABLE IF NOT EXISTS schema_migrations (
                 name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
@@ -722,6 +738,85 @@ class DatabaseService:
         with self._get_connection() as conn:
             conn.execute('DELETE FROM metric_analyses WHERE run_pk = ?', (run_pk,))
             conn.commit()
+
+    # --- Run queue -------------------------------------------------------------
+
+    @staticmethod
+    def _queue_row(row) -> dict:
+        entry = dict(row)
+        entry["env_vars"] = json.loads(entry["env_vars"]) if entry.get("env_vars") else {}
+        return entry
+
+    def enqueue_run(self, project_name: str, branch: str | None = None,
+                    env_vars: dict | None = None, source: str = "manual") -> int:
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                '''INSERT INTO run_queue (project_name, branch, env_vars, source, status, created_at)
+                   VALUES (?, ?, ?, ?, 'queued', ?)''',
+                (project_name, branch, json.dumps(env_vars) if env_vars else None, source,
+                 datetime.now().isoformat()))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_queue_entry(self, queue_id: int) -> dict | None:
+        with self._get_connection() as conn:
+            row = conn.execute('SELECT * FROM run_queue WHERE id = ?', (queue_id,)).fetchone()
+            return self._queue_row(row) if row else None
+
+    def list_queue(self, project_name: str) -> list[dict]:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM run_queue WHERE project_name = ? AND status = 'queued' ORDER BY id",
+                (project_name,)).fetchall()
+            return [self._queue_row(r) for r in rows]
+
+    def projects_with_queued_runs(self) -> list[str]:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT project_name FROM run_queue WHERE status = 'queued'").fetchall()
+            return [r["project_name"] for r in rows]
+
+    def _update_queue(self, queue_id: int, where_queued: bool = False, **fields) -> bool:
+        # Column names come only from the call sites in this file, never from user input.
+        cols = ", ".join(f"{k} = ?" for k in fields)
+        sql = f"UPDATE run_queue SET {cols} WHERE id = ?" + (" AND status = 'queued'" if where_queued else "")  # NOSONAR
+        with self._get_connection() as conn:
+            cursor = conn.execute(sql, (*fields.values(), queue_id))
+            conn.commit()
+            return cursor.rowcount == 1
+
+    def mark_queue_started(self, queue_id: int, run_pk: int):
+        self._update_queue(queue_id, status="started", run_pk=run_pk, wait_reason=None,
+                           started_at=datetime.now().isoformat())
+
+    def set_queue_wait_reason(self, queue_id: int, reason: str | None):
+        self._update_queue(queue_id, wait_reason=reason)
+
+    def mark_queue_failed(self, queue_id: int, error: str):
+        self._update_queue(queue_id, status="failed", error=error)
+
+    def cancel_queue_entry(self, queue_id: int, error: str | None = None) -> bool:
+        return self._update_queue(queue_id, where_queued=True, status="cancelled", error=error)
+
+    def rename_queue_project(self, old: str, new: str):
+        with self._get_connection() as conn:
+            conn.execute('UPDATE run_queue SET project_name = ? WHERE project_name = ?', (new, old))
+            conn.commit()
+
+    def cancel_project_queue(self, project_name: str, error: str):
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE run_queue SET status = 'cancelled', error = ? "
+                "WHERE project_name = ? AND status = 'queued'", (error, project_name))
+            conn.commit()
+
+    def purge_old_queue_entries(self, days: int = 30) -> int:
+        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM run_queue WHERE status != 'queued' AND created_at < ?", (cutoff,))
+            conn.commit()
+            return cursor.rowcount
 
 
 # Global database instance (initialized in app.py)
