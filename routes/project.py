@@ -329,7 +329,7 @@ def rename(name):
         return redirect(url_for(_EDIT_ROUTE, name=name))
 
     from services.project_service import rename_project
-    updated = rename_project(projects_dir, name, new_name)
+    updated = rename_project(projects_dir, name, new_name, current_app.config.get("PIPELINES_DIR"))
 
     if updated.get("env_type") == "conda":
         flash(

@@ -15,6 +15,13 @@ def _project_config_paths(projects_dir):
             yield path
 
 
+def _pipelines(pipelines_dir):
+    if not pipelines_dir:
+        return []
+    from services.pipeline_store import list_pipelines
+    return [p for p in list_pipelines(pipelines_dir) if not p.get("error")]
+
+
 def list_folders(projects_dir, pipelines_dir=None) -> list[str]:
     folders = set()
     for path in _project_config_paths(projects_dir):
@@ -24,6 +31,7 @@ def list_folders(projects_dir, pipelines_dir=None) -> list[str]:
             continue
         if folder:
             folders.add(folder)
+    folders.update(p["folder"] for p in _pipelines(pipelines_dir) if p["folder"])
     return sorted(folders, key=str.lower)
 
 
@@ -39,5 +47,11 @@ def rename_folder(projects_dir, old, new, pipelines_dir=None) -> int:
         if project.folder == old:
             project.folder = new
             project.save(projects_dir)
+            moved += 1
+    from services.pipeline_store import save_pipeline
+    for defn in _pipelines(pipelines_dir):
+        if defn["folder"] == old:
+            defn["folder"] = new
+            save_pipeline(pipelines_dir, defn)
             moved += 1
     return moved

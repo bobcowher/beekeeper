@@ -27,6 +27,8 @@ from routes.training import _tail_offset
 from routes.files import _safe_path, _fmt_size, _zip_directory
 from routes.runs import _resolve_run, _safe_run_path
 from services.run_refs import public_run, run_ref
+from services import pipeline_engine, pipeline_store
+from services.pipeline_schema import NAME_RE as PIPELINE_NAME_RE, PipelineValidationError, parse_text, to_yaml, validate as validate_pipeline
 
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
@@ -418,7 +420,7 @@ def rename_project_api(name):
         )
 
     from services.project_service import rename_project
-    updated = rename_project(projects_dir, name, new_name)
+    updated = rename_project(projects_dir, name, new_name, current_app.config.get("PIPELINES_DIR"))
 
     return api_response(data={
         "old_name": name,
@@ -571,6 +573,187 @@ def rename_folder_api(folder):
     except ValueError as e:
         return api_response(error_code="INVALID_FOLDER", error_message=str(e), status_code=400)
     return api_response(data={"renamed": moved})
+
+
+# ---------------------------------------------------------------------------
+# Pipelines
+# ---------------------------------------------------------------------------
+
+def _pipelines_dir():
+    return current_app.config["PIPELINES_DIR"]
+
+
+def _pipeline_error(e: pipeline_engine.PipelineError):
+    return api_response(error_code=e.code, error_message=e.message, status_code=e.status)
+
+
+def _invalid_pipeline(e: PipelineValidationError):
+    resp, status = api_response(error_code="INVALID_PIPELINE", error_message=str(e), status_code=400)
+    payload = resp.get_json()
+    payload["error"]["details"] = {"errors": e.errors}
+    return jsonify(payload), status
+
+
+def _require_pipeline(name):
+    # pipeline_exists rejects names that fail the name regex (fullmatch)
+    if not pipeline_store.pipeline_exists(_pipelines_dir(), name):
+        _abort_json(404, "NOT_FOUND", f"Pipeline '{name}' not found")
+
+
+def _parse_body() -> tuple[dict, str | None]:
+    """(parsed definition, raw YAML text or None for JSON bodies)."""
+    if request.is_json:
+        return request.get_json(silent=True), None
+    text = request.get_data(as_text=True)
+    return parse_text(text), text
+
+
+def _save_body(name: str | None):
+    data, text = _parse_body()
+    if text is not None:
+        target = name or (data.get("name") if isinstance(data, dict) else None)
+        if not isinstance(target, str) or not PIPELINE_NAME_RE.fullmatch(target):
+            validate_pipeline(data)            # raises with the precise name error
+        return pipeline_store.save_pipeline_text(_pipelines_dir(), target, text)
+    return pipeline_store.save_pipeline(_pipelines_dir(), data, expected_name=name)
+
+
+@api_v1_bp.route("/pipelines", methods=["GET"])
+@api_key_required
+def pipelines_list():
+    folder_filter = request.args.get("folder")
+    out = []
+    for defn in pipeline_store.list_pipelines(_pipelines_dir()):
+        if folder_filter is not None and defn["folder"] != folder_filter.strip():
+            continue
+        latest = get_db().latest_pipeline_run(defn["name"])
+        out.append({**defn, "last_run": pipeline_engine.describe_run(latest) if latest else None})
+    return api_response(data={"pipelines": out})
+
+
+@api_v1_bp.route("/pipelines", methods=["POST"])
+@api_key_required
+def pipelines_create():
+    """Create a pipeline from a YAML body (Content-Type: application/yaml) or JSON."""
+    try:
+        data, _ = _parse_body()
+        name = data.get("name") if isinstance(data, dict) else None
+        if isinstance(name, str) and pipeline_store.pipeline_exists(_pipelines_dir(), name):
+            return api_response(error_code="DUPLICATE_NAME", error_message=f"Pipeline '{name}' already exists",
+                                status_code=409)
+        defn = _save_body(None)
+    except PipelineValidationError as e:
+        return _invalid_pipeline(e)
+    return api_response(data={"pipeline": defn}, status_code=201)
+
+
+@api_v1_bp.route("/pipelines/validate", methods=["POST"])
+@api_key_required
+def pipelines_validate():
+    try:
+        data, _ = _parse_body()
+        defn = validate_pipeline(data)
+    except PipelineValidationError as e:
+        return api_response(data={"valid": False, "errors": e.errors, "normalized_yaml": None})
+    return api_response(data={"valid": True, "errors": [], "normalized_yaml": to_yaml(defn)})
+
+
+@api_v1_bp.route("/pipelines/<name>", methods=["GET"])
+@api_key_required
+def pipelines_get(name):
+    _require_pipeline(name)
+    try:
+        defn, text = pipeline_store.load_pipeline(_pipelines_dir(), name)
+    except PipelineValidationError as e:
+        return _invalid_pipeline(e)
+    return api_response(data={"pipeline": defn, "yaml": text})
+
+
+@api_v1_bp.route("/pipelines/<name>", methods=["PUT"])
+@api_key_required
+def pipelines_update(name):
+    _require_pipeline(name)
+    try:
+        defn = _save_body(name)
+    except PipelineValidationError as e:
+        return _invalid_pipeline(e)
+    return api_response(data={"pipeline": defn})
+
+
+@api_v1_bp.route("/pipelines/<name>", methods=["DELETE"])
+@api_key_required
+def pipelines_delete(name):
+    _require_pipeline(name)
+    latest = get_db().latest_pipeline_run(name)
+    if latest and latest["status"] == "running":
+        return api_response(error_code="PIPELINE_ACTIVE",
+                            error_message=f"Cancel {latest['pipeline_name']}#{latest['run_number']} first",
+                            status_code=409)
+    pipeline_store.delete_pipeline_files(_pipelines_dir(), name)
+    get_db().delete_pipeline_records(name)
+    return api_response(data={"deleted": True})
+
+
+@api_v1_bp.route("/pipelines/<name>/runs", methods=["POST"])
+@api_key_required
+def pipeline_runs_start(name):
+    _require_pipeline(name)
+    try:
+        result = pipeline_engine.start_pipeline_run(current_app.config["PROJECTS_DIR"], _pipelines_dir(), name)
+    except pipeline_engine.PipelineError as e:
+        return _pipeline_error(e)
+    except PipelineValidationError as e:
+        return _invalid_pipeline(e)
+    return api_response(data=result, status_code=201)
+
+
+@api_v1_bp.route("/pipelines/<name>/runs", methods=["GET"])
+@api_key_required
+def pipeline_runs_list(name):
+    _require_pipeline(name)
+    limit = request.args.get("limit", 20, type=int)
+    runs = get_db().list_pipeline_runs(name, limit=max(1, min(limit, 200)))
+    return api_response(data={"runs": [pipeline_engine.describe_run(r) for r in runs]})
+
+
+@api_v1_bp.route("/pipelines/<name>/runs/<int:run_id>", methods=["GET"])
+@api_key_required
+def pipeline_runs_get(name, run_id):
+    run = get_db().get_pipeline_run(name, run_id)
+    if not run:
+        return api_response(error_code="NOT_FOUND", error_message=f"{name}#{run_id} not found", status_code=404)
+    return api_response(data=pipeline_engine.describe_run(run))
+
+
+@api_v1_bp.route("/pipelines/<name>/runs/<int:run_id>/<action>", methods=["POST"])
+@api_key_required
+def pipeline_runs_action(name, run_id, action):
+    handlers = {"cancel": pipeline_engine.cancel_pipeline_run, "resume": pipeline_engine.resume_pipeline_run}
+    if action not in handlers:
+        return api_response(error_code="NOT_FOUND", error_message=f"Unknown action '{action}'", status_code=404)
+    try:
+        result = handlers[action](current_app.config["PROJECTS_DIR"], _pipelines_dir(), name, run_id)
+    except pipeline_engine.PipelineError as e:
+        return _pipeline_error(e)
+    return api_response(data=result)
+
+
+@api_v1_bp.route("/pipelines/<name>/runs/<int:run_id>/steps/<step_name>/log", methods=["GET"])
+@api_key_required
+def pipeline_step_log(name, run_id, step_name):
+    run = get_db().get_pipeline_run(name, run_id)
+    if not run:
+        return api_response(error_code="NOT_FOUND", error_message=f"{name}#{run_id} not found", status_code=404)
+    step = next((s for s in get_db().list_step_runs(run["id"]) if s["step_name"] == step_name), None)
+    if not step or not step["log_path"]:
+        return api_response(error_code="NOT_FOUND", error_message=f"No log for step '{step_name}'", status_code=404)
+    path = os.path.realpath(os.path.join(_pipelines_dir(), step["log_path"]))
+    if not path.startswith(os.path.realpath(_pipelines_dir()) + os.sep) or not os.path.isfile(path):
+        return api_response(error_code="NOT_FOUND", error_message="Log file missing", status_code=404)
+    tail = request.args.get("tail", 500, type=int)
+    with open(path, errors="replace") as f:
+        lines = f.readlines()
+    return api_response(data={"log": "".join(lines[-tail:] if tail > 0 else lines)})
 
 
 # ---------------------------------------------------------------------------
@@ -1042,7 +1225,8 @@ def check_busy():
       {
         "busy": true/false,
         "running_projects": ["project1", "project2"],
-        "setting_up_projects": ["project3"]
+        "setting_up_projects": ["project3"],
+        "running_tasks": ["pipeline#1:step"]
       }
     """
     projects_dir = current_app.config["PROJECTS_DIR"]
@@ -1063,10 +1247,13 @@ def check_busy():
                 if project.setup_status in SETUP_ACTIVE_STATUSES:
                     setting_up_projects.append(name)
 
+    running_tasks = pipeline_engine.running_task_labels()
+
     return api_response(data={
-        "busy": bool(running_projects or setting_up_projects),
+        "busy": bool(running_projects or setting_up_projects or running_tasks),
         "running_projects": running_projects,
         "setting_up_projects": setting_up_projects,
+        "running_tasks": running_tasks,
     })
 
 

@@ -31,6 +31,14 @@
             </div>
 
             <div class="form-group">
+                <label>
+                    <input type="checkbox" name="inline_tasks_enabled" value="true" {% if config.inline_tasks_enabled %}checked{% endif %}>
+                    Allow inline task steps in pipelines
+                </label>
+                <p class="help-text">Task steps run shell commands as the Beekeeper user. Anyone with an API key can define them.</p>
+            </div>
+
+            <div class="form-group">
                 <label for="session_lifetime_days">Session Lifetime (days)</label>
                 <input type="number" id="session_lifetime_days" name="session_lifetime_days"
                        value="{{ config.session_lifetime_days }}" min="1" max="365">

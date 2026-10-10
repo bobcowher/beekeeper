@@ -148,7 +148,7 @@ def _resolve_conda_env_path(conda_bin, env_name):
     return None
 
 
-def rename_project(projects_dir, name, new_name):
+def rename_project(projects_dir, name, new_name, pipelines_dir=None):
     """
     Rename a project directory, its JSON config, and its run history.
 
@@ -185,6 +185,12 @@ def rename_project(projects_dir, name, new_name):
     get_db().delete_project_runs(new_name)
     get_db().rename_project_runs(name, new_name)
     get_db().rename_queue_project(name, new_name)
+
+    if pipelines_dir:
+        from services.pipeline_store import rename_project_refs
+        changed = rename_project_refs(pipelines_dir, name, new_name)
+        if changed:
+            log.info("Updated project reference %s -> %s in pipelines: %s", name, new_name, ", ".join(changed))
 
     if env_type == "conda":
         conda_bin = _find_conda_bin()

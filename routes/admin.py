@@ -24,6 +24,7 @@ def index():
         'session_lifetime_days': get_config_int('session.lifetime_days', 7),
         'password_min_length': get_config_int(_PWD_MIN_LEN_KEY, 8),
         'api_rate_limit': get_config_int('api.rate_limit_per_minute', 100),
+        'inline_tasks_enabled': get_config_bool('pipelines.inline_tasks.enabled', True),
     }
 
     users = db.list_all_users()
@@ -42,6 +43,9 @@ def update_settings():
     """Update application settings."""
     auth_enabled = request.form.get('auth_enabled') == 'true'
     set_config('auth.enabled', 'true' if auth_enabled else 'false')
+
+    inline_tasks = request.form.get('inline_tasks_enabled') == 'true'
+    set_config('pipelines.inline_tasks.enabled', 'true' if inline_tasks else 'false')
 
     # Update other settings if provided
     if 'session_lifetime_days' in request.form:

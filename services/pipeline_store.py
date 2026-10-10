@@ -77,3 +77,19 @@ def delete_pipeline_files(pipelines_dir, name):
 def pipeline_run_dir(pipelines_dir, name, run_number) -> str:
     _check_name(name)
     return os.path.abspath(os.path.join(pipelines_dir, name, "runs", f"run_{run_number}"))
+
+
+def rename_project_refs(pipelines_dir, old, new) -> list[str]:
+    """Point every pipeline step that uses project `old` at `new`. Rewrites the YAML
+    (comments in those files are lost). Returns the pipelines changed."""
+    changed = []
+    for defn in list_pipelines(pipelines_dir):
+        if defn.get("error"):
+            continue
+        if any(s["type"] == "train" and s["project"] == old for s in defn["steps"]):
+            for s in defn["steps"]:
+                if s["type"] == "train" and s["project"] == old:
+                    s["project"] = new
+            save_pipeline(pipelines_dir, defn)
+            changed.append(defn["name"])
+    return changed
