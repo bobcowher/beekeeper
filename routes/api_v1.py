@@ -577,21 +577,66 @@ def rename_folder_api(folder):
 # Training
 # ---------------------------------------------------------------------------
 
+def _valid_env(env) -> bool:
+    return isinstance(env, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in env.items())
+
+
+def _queue_entry_view(entry: dict, position: int) -> dict:
+    return {
+        "queue_id": entry["id"], "position": position, "branch": entry["branch"],
+        "env_vars": entry["env_vars"], "source": entry["source"],
+        "wait_reason": entry["wait_reason"], "created_at": entry["created_at"],
+    }
+
+
 @api_v1_bp.route("/projects/<name>/training/start", methods=["POST"])
 @api_key_required
 def training_start(name):
-    """Start training for a project."""
+    """Start a run now, or with {"queue": true} add it to the project's run queue."""
     load_project(name)
     projects_dir = current_app.config["PROJECTS_DIR"]
     body = request.get_json() or {}
-    branch = body.get("branch")  # None → use project default
-    result = start_training(projects_dir, name, branch=branch)
+    branch = body.get("branch")  # None -> use project default
+    env_vars = body.get("env_vars")
+    if env_vars is not None and not _valid_env(env_vars):
+        return api_response(error_code="INVALID_ENV_VARS",
+                            error_message="env_vars must map strings to strings", status_code=400)
+    if body.get("queue"):
+        queue_id = get_db().enqueue_run(name, branch=branch, env_vars=env_vars or None, source="manual")
+        position = [e["id"] for e in get_db().list_queue(name)].index(queue_id) + 1
+        return api_response(data={"queue_id": queue_id, "position": position, "status": "queued"},
+                            status_code=202)
+    result = start_training(projects_dir, name, branch=branch, extra_env=env_vars or None)
     if "error" in result:
         resp, status = api_response(error_code="START_ERROR", error_message=result["error"], status_code=400)
-        body = resp.get_json()
-        body["error"]["details"] = {"code": result.get("code")}
-        return jsonify(body), status
+        payload = resp.get_json()
+        payload["error"]["details"] = {"code": result.get("code")}
+        return jsonify(payload), status
     return api_response(data=result)
+
+
+@api_v1_bp.route("/projects/<name>/queue", methods=["GET"])
+@api_key_required
+def queue_list(name):
+    """Queued runs for this project, in the order they will start."""
+    load_project(name)
+    entries = get_db().list_queue(name)
+    return api_response(data={"queue": [_queue_entry_view(e, i + 1) for i, e in enumerate(entries)]})
+
+
+@api_v1_bp.route("/projects/<name>/queue/<int:queue_id>", methods=["DELETE"])
+@api_key_required
+def queue_cancel(name, queue_id):
+    """Cancel a queued run. Fails with 409 once it has started."""
+    load_project(name)
+    entry = get_db().get_queue_entry(queue_id)
+    if not entry or entry["project_name"] != name:
+        return api_response(error_code="NOT_FOUND", error_message=f"Queue entry {queue_id} not found",
+                            status_code=404)
+    if not get_db().cancel_queue_entry(queue_id, error="cancelled by user"):
+        return api_response(error_code="NOT_QUEUED",
+                            error_message=f"Queue entry {queue_id} is {entry['status']}", status_code=409)
+    return api_response(data={"cancelled": True})
 
 
 @api_v1_bp.route("/projects/<name>/training/stop", methods=["POST"])

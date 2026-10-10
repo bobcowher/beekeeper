@@ -184,6 +184,7 @@ def rename_project(projects_dir, name, new_name):
     # Orphan rows under the destination name would merge into this history
     get_db().delete_project_runs(new_name)
     get_db().rename_project_runs(name, new_name)
+    get_db().rename_queue_project(name, new_name)
 
     if env_type == "conda":
         conda_bin = _find_conda_bin()
@@ -453,3 +454,4 @@ def delete_project(projects_dir, name):
 
     from services.db_service import get_db
     get_db().delete_project_runs(name)
+    get_db().cancel_project_queue(name, "project deleted")

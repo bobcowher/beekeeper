@@ -3,6 +3,7 @@ import datetime
 import pytest
 
 from services.db_service import get_db
+from tests.conftest import make_project_dir
 
 
 @pytest.fixture
@@ -68,3 +69,53 @@ def test_purge_keeps_queued_and_recent(db):
     assert db.get_queue_entry(old_done) is None
     assert db.get_queue_entry(old_queued) is not None
     assert db.get_queue_entry(recent_done) is not None
+
+
+def test_api_queue_roundtrip(client, app):
+    make_project_dir(app, "p")
+    r = client.post("/api/v1/projects/p/training/start",
+                    json={"queue": True, "branch": "dev", "env_vars": {"LR": "1"}})
+    assert r.status_code == 202
+    data = r.get_json()["data"]
+    assert data["status"] == "queued" and data["position"] == 1
+    listing = client.get("/api/v1/projects/p/queue").get_json()["data"]["queue"]
+    assert listing == [{
+        "queue_id": data["queue_id"], "position": 1, "branch": "dev", "env_vars": {"LR": "1"},
+        "source": "manual", "wait_reason": None, "created_at": listing[0]["created_at"],
+    }]
+    assert client.delete(f"/api/v1/projects/p/queue/{data['queue_id']}").status_code == 200
+    assert client.delete(f"/api/v1/projects/p/queue/{data['queue_id']}").status_code == 409
+
+
+def test_api_queue_rejects_bad_env(client, app):
+    make_project_dir(app, "p")
+    r = client.post("/api/v1/projects/p/training/start", json={"queue": True, "env_vars": {"A": 1}})
+    assert r.status_code == 400
+    assert r.get_json()["error"]["code"] == "INVALID_ENV_VARS"
+
+
+def test_api_queue_unknown_project_404(client):
+    assert client.post("/api/v1/projects/ghost/training/start", json={"queue": True}).status_code == 404
+
+
+def test_api_cancel_other_projects_entry_404(client, app):
+    make_project_dir(app, "p")
+    make_project_dir(app, "q")
+    qid = get_db().enqueue_run("q")
+    assert client.delete(f"/api/v1/projects/p/queue/{qid}").status_code == 404
+
+
+def test_rename_moves_queue(app):
+    from services.project_service import rename_project
+    make_project_dir(app, "old")
+    qid = get_db().enqueue_run("old")
+    rename_project(app.config["PROJECTS_DIR"], "old", "new")
+    assert get_db().get_queue_entry(qid)["project_name"] == "new"
+
+
+def test_delete_cancels_queue(app):
+    from services.project_service import delete_project
+    make_project_dir(app, "p")
+    qid = get_db().enqueue_run("p")
+    delete_project(app.config["PROJECTS_DIR"], "p")
+    assert get_db().get_queue_entry(qid)["status"] == "cancelled"
