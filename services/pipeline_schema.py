@@ -137,8 +137,10 @@ def validate(data, expected_name: str | None = None) -> dict:
     except ValueError as e:
         err("folder", str(e))
 
-    description = data.get("description", "") or ""
-    if not isinstance(description, str):
+    description = data.get("description")
+    if description is None:
+        description = ""
+    elif not isinstance(description, str):
         err("description", _not_string(description))
 
     steps = data.get("steps")

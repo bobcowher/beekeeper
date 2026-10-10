@@ -122,3 +122,9 @@ def test_invalid_yaml_and_non_mapping():
 def test_to_yaml_quotes_ambiguous_strings():
     d = validate({"name": "p", "steps": [{"name": "a", "type": "train", "project": "x", "branch": "no"}]})
     assert validate(parse_text(to_yaml(d)))["steps"][0]["branch"] == "no"
+
+
+@pytest.mark.parametrize("text", ["no", "0", "[]"])
+def test_falsy_non_string_description_rejected(text):
+    errs = errors_for(f"name: p\ndescription: {text}\nsteps:\n  - {{name: a, type: task, command: x}}\n")
+    assert "quote" in errs["description"]
