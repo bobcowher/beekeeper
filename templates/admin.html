@@ -22,6 +22,7 @@
     <section class="admin-section">
         <h2>Authentication Settings</h2>
         <form method="POST" action="{{ url_for('admin.update_settings') }}" class="settings-form">
+            <input type="hidden" name="security_section" value="1">
             <div class="form-group">
                 <label>
                     <input type="checkbox" name="auth_enabled" value="true" {% if config.auth_enabled %}checked{% endif %}>

@@ -41,11 +41,14 @@ def index():
 @admin_required
 def update_settings():
     """Update application settings."""
-    auth_enabled = request.form.get('auth_enabled') == 'true'
-    set_config('auth.enabled', 'true' if auth_enabled else 'false')
+    # Checkboxes are absent from the form when unchecked, so only touch them
+    # when the form that carries them was the one submitted.
+    if 'security_section' in request.form:
+        auth_enabled = request.form.get('auth_enabled') == 'true'
+        set_config('auth.enabled', 'true' if auth_enabled else 'false')
 
-    inline_tasks = request.form.get('inline_tasks_enabled') == 'true'
-    set_config('pipelines.inline_tasks.enabled', 'true' if inline_tasks else 'false')
+        inline_tasks = request.form.get('inline_tasks_enabled') == 'true'
+        set_config('pipelines.inline_tasks.enabled', 'true' if inline_tasks else 'false')
 
     # Update other settings if provided
     if 'session_lifetime_days' in request.form:
