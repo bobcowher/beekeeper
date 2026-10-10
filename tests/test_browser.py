@@ -55,10 +55,10 @@ def live_server(tmp_path_factory):
         "output_paths": [],
     }))
 
-    proj2 = projects_dir / "demo2"
+    proj2 = projects_dir / "chessbot"
     proj2.mkdir()
     (proj2 / "project.json").write_text(json.dumps({
-        "name": "demo2",
+        "name": "chessbot",
         "git_url": str(remote_repo),
         "branch": "main",
         "python_version": "3.11",
@@ -222,12 +222,12 @@ def test_dashboard_folder_groups_collapse_and_persist(live_server):
         label = page.locator(".folder-label", has_text="chess")
         assert label.is_visible()
         assert page.locator(".folder-label", has_text="Unfiled").is_visible()
-        row = page.locator('.project-row[data-name="demo2"]')
+        row = page.locator('.project-row[data-name="chessbot"]')
         assert row.is_visible()
         page.screenshot(path="/tmp/beekeeper-folders-open.png", full_page=True)
         label.click()
         assert not row.is_visible()
         page.reload()
-        assert not page.locator('.project-row[data-name="demo2"]').is_visible()
+        assert not page.locator('.project-row[data-name="chessbot"]').is_visible()
         page.screenshot(path="/tmp/beekeeper-folders.png", full_page=True)
         browser.close()

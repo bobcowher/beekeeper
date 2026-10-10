@@ -117,10 +117,17 @@
         n.className = "muted folder-count";
         n.textContent = ` (${count})`;
         el.appendChild(n);
-        el.addEventListener("click", () => {
+        el.tabIndex = 0;
+        const toggle = () => {
             if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key);
             saveCollapsed(collapsed);
             applySort();
+            const again = list.querySelector(`.folder-label[data-folder-key="${CSS.escape(key)}"]`);
+            if (again) again.focus();
+        };
+        el.addEventListener("click", toggle);
+        el.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
         });
         return el;
     }
