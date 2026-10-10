@@ -57,6 +57,77 @@ if (confirmStartBtn) {
     });
 }
 
+const confirmQueueBtn = document.getElementById('btn-confirm-queue');
+const queueSection = document.getElementById('queue-section');
+const queueListEl = document.getElementById('queue-list');
+const TRANSIENT_REFUSALS = new Set(['ALREADY_RUNNING', 'AT_CAPACITY', 'INSUFFICIENT_VRAM']);
+
+if (confirmQueueBtn) {
+    confirmQueueBtn.addEventListener('click', () => {
+        if (runBranchSelect) queueRun(runBranchSelect.value);
+    });
+}
+
+async function queueRun(branch) {
+    pickerManuallyOpen = false;
+    if (branchPicker) branchPicker.classList.remove('open');
+    if (cancelStartBtn) cancelStartBtn.style.display = 'none';
+    try {
+        const r = await apiFetch(`/api/v1/projects/${PROJECT_NAME}/training/start`, {
+            method: 'POST',
+            body: JSON.stringify({ branch, queue: true }),
+        });
+        const data = await r.json();
+        if (!data.success) {
+            alert(`Could not queue run: ${data.error?.message || 'unknown error'}`);
+            return;
+        }
+        refreshQueue();
+    } catch (e) {
+        alert(`Could not queue run: ${e}`);
+    }
+}
+
+function formatAge(iso) {
+    const secs = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+    return formatElapsed(secs) + ' ago';
+}
+
+async function refreshQueue() {
+    if (!queueListEl || !PROJECT_NAME) return;
+    try {
+        const r = await apiFetch(`/api/v1/projects/${PROJECT_NAME}/queue`);
+        const data = await r.json();
+        const entries = data?.data?.queue || [];
+        queueSection.style.display = entries.length ? '' : 'none';
+        queueListEl.innerHTML = '';
+        entries.forEach(e => {
+            const li = document.createElement('li');
+            li.className = 'queue-row';
+            li.innerHTML = `
+                <span class="run-branch">${escHtml(e.branch || DEFAULT_BRANCH)}</span>
+                <span class="muted queue-source">${escHtml(e.source)}</span>
+                <span class="muted">${escHtml(formatAge(e.created_at))}</span>
+                ${e.wait_reason ? `<span class="queue-wait">waiting: ${escHtml(e.wait_reason)}</span>` : ''}
+                <button class="btn btn-secondary btn-sm" data-queue-id="${e.queue_id}">Cancel</button>`;
+            li.querySelector('button').addEventListener('click', () => cancelQueued(e.queue_id));
+            queueListEl.appendChild(li);
+        });
+    } catch (err) {
+        console.warn('Could not load queue:', err);
+    }
+}
+
+async function cancelQueued(queueId) {
+    const r = await apiFetch(`/api/v1/projects/${PROJECT_NAME}/queue/${queueId}`, { method: 'DELETE' });
+    const data = await r.json();
+    if (!data.success) alert(`Could not cancel: ${data.error?.message || 'unknown error'}`);
+    refreshQueue();
+}
+
+refreshQueue();
+setInterval(refreshQueue, 5000);
+
 async function loadRunBranches() {
     if (!runBranchSelect || !PROJECT_NAME) return;
     try {
@@ -94,7 +165,13 @@ async function startRun(branch) {
         });
         const data = await r.json();
         if (!data.success) {
-            alert(`Could not start run: ${data.error?.message || 'unknown error'}`);
+            const code = data.error?.details?.code;
+            if (TRANSIENT_REFUSALS.has(code) &&
+                confirm(`${data.error.message}\n\nQueue this run to start when a slot frees up?`)) {
+                await queueRun(branch);
+            } else {
+                alert(`Could not start run: ${data.error?.message || 'unknown error'}`);
+            }
             return;
         }
         setTimeout(refreshRuns, 2000);

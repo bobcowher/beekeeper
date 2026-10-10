@@ -1818,3 +1818,9 @@ label {
     border-bottom-color: var(--accent);
     border-radius: 3px 3px 0 0;
 }
+
+.queue-section { margin-top: 0.75rem; }
+.queue-title { font-size: 0.9rem; margin: 0 0 0.25rem; color: var(--text-secondary); }
+.queue-list { margin: 0; padding-left: 1.25rem; }
+.queue-row { display: flex; gap: 0.75rem; align-items: center; padding: 0.25rem 0; }
+.queue-wait { color: var(--accent-dim); font-size: 0.8rem; }

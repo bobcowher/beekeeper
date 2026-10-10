@@ -100,7 +100,12 @@
             <option value="{{ project.get('branch', 'main') }}">{{ project.get('branch', 'main') }} (default)</option>
         </select>
         <button class="btn btn-success btn-sm" id="btn-confirm-start">Start</button>
+        <button class="btn btn-secondary btn-sm" id="btn-confirm-queue" title="Start when the project has a free slot">Add to Queue</button>
         <button class="btn btn-secondary btn-sm" id="btn-cancel-start" style="display:none">Cancel</button>
+    </div>
+    <div id="queue-section" class="queue-section" style="display:none">
+        <h3 class="queue-title">Queued</h3>
+        <ol id="queue-list" class="queue-list"></ol>
     </div>
 </section>
 

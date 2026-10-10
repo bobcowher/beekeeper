@@ -233,3 +233,23 @@ def test_dashboard_folder_groups_collapse_and_persist(live_server):
         assert not page.locator('.project-row[data-name="chessbot"]').is_visible()
         page.screenshot(path="/tmp/beekeeper-folders.png", full_page=True)
         browser.close()
+
+
+@pytest.mark.browser
+def test_queue_add_and_cancel(live_server):
+    """Add to Queue creates a queued row; Cancel removes it (dispatcher is off under TESTING)."""
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(f"{live_server}/projects/demo")
+        page.click("#btn-confirm-queue")
+        row = page.locator("#queue-list .queue-row")
+        row.first.wait_for(timeout=5000)
+        assert row.count() == 1
+        page.screenshot(path="/tmp/beekeeper-queue.png", full_page=True)
+        row.first.locator("button").click()
+        page.wait_for_function("document.querySelectorAll('#queue-list .queue-row').length === 0")
+        assert not page.locator("#queue-section").is_visible()
+        browser.close()

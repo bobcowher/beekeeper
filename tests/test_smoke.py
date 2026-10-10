@@ -296,3 +296,9 @@ def test_clear_tb_logs_not_found(client):
 def test_app_uses_test_db_path(app, tmp_path):
     from services.db_service import get_db
     assert get_db().db_path == str(tmp_path / "beekeeper-test.db")
+
+
+def test_project_page_has_queue_controls(client, ready_project):
+    html = client.get("/projects/myproject").get_data(as_text=True)
+    assert 'id="btn-confirm-queue"' in html
+    assert 'id="queue-section"' in html
