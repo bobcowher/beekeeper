@@ -72,3 +72,10 @@ def reset_pipeline_tasks():
     from services import pipeline_tasks
     for pk in pipeline_tasks.running_task_pks():
         pipeline_tasks.kill_task(pk)
+
+
+@pytest.fixture(autouse=True)
+def reset_pipeline_engine():
+    yield
+    from services import pipeline_engine
+    pipeline_engine._not_live_since.clear()

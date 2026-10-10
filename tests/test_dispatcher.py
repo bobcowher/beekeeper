@@ -98,3 +98,11 @@ def test_one_bad_project_does_not_stop_others(app, starts, monkeypatch):
 
 def test_dispatcher_not_started_in_testing(app):
     assert dispatcher._thread is None
+
+
+def test_tick_advances_pipelines(app, monkeypatch):
+    seen = []
+    from services import pipeline_engine
+    monkeypatch.setattr(pipeline_engine, "tick", lambda pd, pl: seen.append(pl))
+    tick(app)
+    assert seen == [app.config["PIPELINES_DIR"]]

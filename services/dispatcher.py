@@ -74,6 +74,12 @@ def tick(projects_dir, pipelines_dir=None) -> None:
             dispatch_project_queue(projects_dir, name)
         except Exception:
             log.exception("Queue dispatch failed for %s", name)
+    if pipelines_dir:
+        from services import pipeline_engine
+        try:
+            pipeline_engine.tick(projects_dir, pipelines_dir)
+        except Exception:
+            log.exception("Pipeline pass failed")
     try:
         _maybe_purge()
     except Exception:
