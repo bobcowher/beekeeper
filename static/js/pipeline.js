@@ -9,6 +9,7 @@
 
     let runs = [];
     let selected = null;   // run_id shown in the chain; null = latest
+    let expandedLog = null;
 
     async function api(url, opts = {}) {
         const r = await fetch(url, opts);
@@ -24,6 +25,11 @@
 
     function renderChain(run, definition) {
         const chain = $('step-chain');
+        const pre = $('step-log');
+        if (expandedLog && pre.style.display !== 'none') {
+            expandedLog.scrollTop = pre.scrollTop;
+            expandedLog.content = pre.textContent;
+        }
         chain.innerHTML = '';
         const steps = run ? run.steps : definition.steps.map((s, i) => ({ ...s, index: i, status: 'pending' }));
         steps.forEach(s => {
@@ -35,7 +41,8 @@
             } else if (s.type === 'train') {
                 link = `<span class="muted">${esc(s.project)}</span>`;
             } else if (s.has_log) {
-                link = `<a href="#" data-step-log="${esc(s.name)}">log</a>`;
+                const isExpanded = expandedLog && run && expandedLog.runId === run.run_id && expandedLog.stepName === s.name;
+                link = `<a href="#" data-step-log="${esc(s.name)}" aria-expanded="${isExpanded ? 'true' : 'false'}">log</a>`;
             }
             li.innerHTML = `
                 <div class="step-name">${esc(s.name)} <span class="muted">${esc(s.type)}</span></div>
@@ -47,12 +54,28 @@
                 ${s.error ? `<div class="pipeline-error">${esc(s.error)}</div>` : ''}`;
             chain.appendChild(li);
         });
+        const logStillSelected = expandedLog && run && expandedLog.runId === run.run_id &&
+            steps.some(s => s.name === expandedLog.stepName && s.has_log);
+        if (logStillSelected) {
+            pre.style.display = '';
+            pre.textContent = expandedLog.content;
+            pre.scrollTop = expandedLog.scrollTop;
+        } else {
+            pre.style.display = 'none';
+        }
         chain.querySelectorAll('[data-step-log]').forEach(a => a.addEventListener('click', async e => {
             e.preventDefault();
             const data = await api(`${API}/runs/${run.run_id}/steps/${a.dataset.stepLog}/log?tail=500`);
-            const pre = $('step-log');
+            expandedLog = {
+                runId: run.run_id,
+                stepName: a.dataset.stepLog,
+                content: data.success ? data.data.log : data.error.message,
+                scrollTop: 0,
+            };
             pre.style.display = '';
-            pre.textContent = data.success ? data.data.log : data.error.message;
+            pre.textContent = expandedLog.content;
+            chain.querySelectorAll('[data-step-log]').forEach(link => link.setAttribute('aria-expanded', 'false'));
+            a.setAttribute('aria-expanded', 'true');
         }));
     }
 

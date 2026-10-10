@@ -290,3 +290,70 @@ def test_pipeline_page_yaml_errors_and_run(live_server):
             assert mobile.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), path
         assert errors == []
         browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_step_log_survives_periodic_refresh(live_server):
+    from playwright.sync_api import sync_playwright
+
+    yaml = "name: log-pipe\nsteps:\n  - {name: produce, type: task, command: 'true'}\n"
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        response = page.request.fetch(
+            live_server + "/api/v1/pipelines",
+            method="POST",
+            headers={"Content-Type": "application/yaml"},
+            data=yaml,
+        )
+        assert response.ok
+
+        requests = {"runs": 0}
+        run = {
+            "run_id": 1,
+            "status": "running",
+            "current_step": 0,
+            "error": "",
+            "started_at": "2026-10-10T12:00:00",
+            "ended_at": None,
+            "steps": [{
+                "index": 0,
+                "name": "produce",
+                "type": "task",
+                "status": "running",
+                "attempt": 1,
+                "started_at": "2026-10-10T12:00:00",
+                "ended_at": None,
+                "has_log": True,
+            }],
+        }
+
+        def serve_runs(route):
+            requests["runs"] += 1
+            payload = dict(run)
+            if requests["runs"] > 1:
+                payload["error"] = "refreshed"
+            route.fulfill(json={"success": True, "data": {"runs": [payload]}})
+
+        page.route("**/api/v1/pipelines/log-pipe/runs?limit=50", serve_runs)
+        log_text = "".join(f"line {i}\n" for i in range(1000))
+        page.route(
+            "**/api/v1/pipelines/log-pipe/runs/1/steps/produce/log?tail=500",
+            lambda route: route.fulfill(json={"success": True, "data": {"log": log_text}}),
+        )
+
+        page.goto(live_server + "/pipelines/log-pipe")
+        page.click('[data-step-log="produce"]')
+        log = page.locator("#step-log")
+        log.wait_for(state="visible")
+        scroll_top = log.evaluate("el => { el.scrollTop = 200; return el.scrollTop; }")
+        assert scroll_top > 0
+
+        page.wait_for_function(
+            "document.getElementById('pipeline-run-error').textContent === 'refreshed'",
+            timeout=7000,
+        )
+        assert log.text_content() == log_text
+        assert log.evaluate("el => el.scrollTop") == scroll_top
+        assert page.locator('[data-step-log="produce"]').get_attribute("aria-expanded") == "true"
+        browser.close()
