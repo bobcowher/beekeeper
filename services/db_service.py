@@ -146,6 +146,37 @@ class DatabaseService:
                 started_at TIMESTAMP)''')
             conn.execute('''CREATE INDEX IF NOT EXISTS idx_run_queue_project_status
                             ON run_queue(project_name, status)''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS pipeline_run_counters (
+                pipeline_name TEXT PRIMARY KEY, last_number INTEGER NOT NULL)''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS pipeline_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pipeline_name TEXT NOT NULL,
+                run_number INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                definition TEXT NOT NULL,
+                current_step INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                started_at TIMESTAMP NOT NULL,
+                ended_at TIMESTAMP,
+                UNIQUE(pipeline_name, run_number))''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS pipeline_step_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pipeline_run_pk INTEGER NOT NULL,
+                step_index INTEGER NOT NULL,
+                step_name TEXT NOT NULL,
+                step_type TEXT NOT NULL,
+                attempt INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL,
+                queue_id INTEGER,
+                run_pk INTEGER,
+                exit_code INTEGER,
+                pid INTEGER,
+                log_path TEXT,
+                run_dir TEXT,
+                error TEXT,
+                started_at TIMESTAMP,
+                ended_at TIMESTAMP,
+                UNIQUE(pipeline_run_pk, step_index, attempt))''')
 
             conn.execute('''CREATE TABLE IF NOT EXISTS schema_migrations (
                 name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
@@ -817,6 +848,146 @@ class DatabaseService:
                 "DELETE FROM run_queue WHERE status != 'queued' AND created_at < ?", (cutoff,))
             conn.commit()
             return cursor.rowcount
+
+    # --- Pipelines ----------------------------------------------------------------
+
+    _PIPELINE_RUN_FIELDS = {"status", "current_step", "error", "ended_at"}
+    _STEP_RUN_FIELDS = {"status", "queue_id", "run_pk", "exit_code", "pid", "log_path",
+                        "run_dir", "error", "started_at", "ended_at"}
+
+    @staticmethod
+    def _pipeline_row(row) -> dict | None:
+        if row is None:
+            return None
+        run = dict(row)
+        run["definition"] = json.loads(run["definition"])
+        return run
+
+    def create_pipeline_run(self, pipeline_name: str, definition: dict) -> tuple[int, int] | None:
+        """Start a pipeline run with step 0 pending. None if one is already running."""
+        conn = sqlite3.connect(self.db_path, isolation_level=None, timeout=30)
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            active = conn.execute(
+                "SELECT 1 FROM pipeline_runs WHERE pipeline_name = ? AND status = 'running'",
+                (pipeline_name,)).fetchone()
+            if active:
+                conn.execute('ROLLBACK')
+                return None
+            number = conn.execute(
+                '''INSERT INTO pipeline_run_counters (pipeline_name, last_number) VALUES (?, 1)
+                   ON CONFLICT(pipeline_name) DO UPDATE SET last_number = last_number + 1
+                   RETURNING last_number''', (pipeline_name,)).fetchone()[0]
+            cursor = conn.execute(
+                '''INSERT INTO pipeline_runs (pipeline_name, run_number, status, definition, current_step, started_at)
+                   VALUES (?, ?, 'running', ?, 0, ?)''',
+                (pipeline_name, number, json.dumps(definition), datetime.now().isoformat()))
+            pk = cursor.lastrowid
+            first = definition["steps"][0]
+            conn.execute(
+                '''INSERT INTO pipeline_step_runs (pipeline_run_pk, step_index, step_name, step_type, attempt, status)
+                   VALUES (?, 0, ?, ?, 1, 'pending')''', (pk, first["name"], first["type"]))
+            conn.execute('COMMIT')
+            return pk, number
+        except Exception:
+            if conn.in_transaction:
+                conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def get_pipeline_run(self, pipeline_name: str, run_number: int) -> dict | None:
+        with self._get_connection() as conn:
+            return self._pipeline_row(conn.execute(
+                'SELECT * FROM pipeline_runs WHERE pipeline_name = ? AND run_number = ?',
+                (pipeline_name, run_number)).fetchone())
+
+    def get_pipeline_run_by_pk(self, pk: int) -> dict | None:
+        with self._get_connection() as conn:
+            return self._pipeline_row(conn.execute(
+                'SELECT * FROM pipeline_runs WHERE id = ?', (pk,)).fetchone())
+
+    def latest_pipeline_run(self, pipeline_name: str) -> dict | None:
+        with self._get_connection() as conn:
+            return self._pipeline_row(conn.execute(
+                'SELECT * FROM pipeline_runs WHERE pipeline_name = ? ORDER BY run_number DESC LIMIT 1',
+                (pipeline_name,)).fetchone())
+
+    def list_pipeline_runs(self, pipeline_name: str, limit: int = 20) -> list[dict]:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                'SELECT * FROM pipeline_runs WHERE pipeline_name = ? ORDER BY run_number DESC LIMIT ?',
+                (pipeline_name, limit)).fetchall()
+            return [self._pipeline_row(r) for r in rows]
+
+    def running_pipeline_runs(self) -> list[dict]:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM pipeline_runs WHERE status = 'running' ORDER BY id").fetchall()
+            return [self._pipeline_row(r) for r in rows]
+
+    def update_pipeline_run(self, pk: int, **fields):
+        bad = set(fields) - self._PIPELINE_RUN_FIELDS
+        if bad:
+            raise ValueError(f"not updatable: {sorted(bad)}")
+        cols = ", ".join(f"{k} = ?" for k in fields)
+        with self._get_connection() as conn:
+            conn.execute(f'UPDATE pipeline_runs SET {cols} WHERE id = ?', (*fields.values(), pk))  # NOSONAR
+            conn.commit()
+
+    def create_step_run(self, pipeline_run_pk: int, step_index: int, step_name: str,
+                        step_type: str, status: str = "pending") -> int:
+        with self._get_connection() as conn:
+            attempt = conn.execute(
+                'SELECT COALESCE(MAX(attempt), 0) + 1 FROM pipeline_step_runs '
+                'WHERE pipeline_run_pk = ? AND step_index = ?',
+                (pipeline_run_pk, step_index)).fetchone()[0]
+            cursor = conn.execute(
+                '''INSERT INTO pipeline_step_runs (pipeline_run_pk, step_index, step_name, step_type, attempt, status)
+                   VALUES (?, ?, ?, ?, ?, ?)''',
+                (pipeline_run_pk, step_index, step_name, step_type, attempt, status))
+            conn.commit()
+            return cursor.lastrowid
+
+    def current_step_run(self, pipeline_run_pk: int, step_index: int) -> dict | None:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                'SELECT * FROM pipeline_step_runs WHERE pipeline_run_pk = ? AND step_index = ? '
+                'ORDER BY attempt DESC LIMIT 1', (pipeline_run_pk, step_index)).fetchone()
+            return dict(row) if row else None
+
+    def list_step_runs(self, pipeline_run_pk: int) -> list[dict]:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                '''SELECT s.* FROM pipeline_step_runs s
+                   WHERE s.pipeline_run_pk = ? AND s.attempt = (
+                       SELECT MAX(t.attempt) FROM pipeline_step_runs t
+                       WHERE t.pipeline_run_pk = s.pipeline_run_pk AND t.step_index = s.step_index)
+                   ORDER BY s.step_index''', (pipeline_run_pk,)).fetchall()
+            return [dict(r) for r in rows]
+
+    def update_step_run(self, step_pk: int, **fields):
+        bad = set(fields) - self._STEP_RUN_FIELDS
+        if bad:
+            raise ValueError(f"not updatable: {sorted(bad)}")
+        cols = ", ".join(f"{k} = ?" for k in fields)
+        with self._get_connection() as conn:
+            conn.execute(f'UPDATE pipeline_step_runs SET {cols} WHERE id = ?', (*fields.values(), step_pk))  # NOSONAR
+            conn.commit()
+
+    def delete_skipped_steps(self, pipeline_run_pk: int):
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM pipeline_step_runs WHERE pipeline_run_pk = ? AND status = 'skipped'",
+                         (pipeline_run_pk,))
+            conn.commit()
+
+    def delete_pipeline_records(self, pipeline_name: str):
+        with self._get_connection() as conn:
+            conn.execute('''DELETE FROM pipeline_step_runs WHERE pipeline_run_pk IN
+                            (SELECT id FROM pipeline_runs WHERE pipeline_name = ?)''', (pipeline_name,))
+            conn.execute('DELETE FROM pipeline_runs WHERE pipeline_name = ?', (pipeline_name,))
+            conn.execute('DELETE FROM pipeline_run_counters WHERE pipeline_name = ?', (pipeline_name,))
+            conn.commit()
 
 
 # Global database instance (initialized in app.py)
