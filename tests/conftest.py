@@ -64,3 +64,11 @@ def reset_process_manager():
     yield
     process_manager._running.clear()
     process_manager._tb_running.clear()
+
+
+@pytest.fixture(autouse=True)
+def reset_pipeline_tasks():
+    yield
+    from services import pipeline_tasks
+    for pk in pipeline_tasks.running_task_pks():
+        pipeline_tasks.kill_task(pk)
