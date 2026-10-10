@@ -403,3 +403,51 @@ def test_pipeline_history_labels_running_and_stopped_steps(live_server):
         assert page.locator('#pipeline-runs tr[data-run="2"] td').last.inner_text() == "Stopped at first"
         assert page.locator('#pipeline-runs tr[data-run="1"] td').last.inner_text() == ""
         browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_save_does_not_overlap_deploy_badge(live_server):
+    from playwright.sync_api import sync_playwright
+
+    yaml = "name: layout-pipe\nsteps:\n  - {name: first, type: task, command: 'true'}\n"
+
+    def overlaps(first, second):
+        return not (
+            first["x"] + first["width"] <= second["x"] or
+            second["x"] + second["width"] <= first["x"] or
+            first["y"] + first["height"] <= second["y"] or
+            second["y"] + second["height"] <= first["y"]
+        )
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        setup = browser.new_page()
+        response = setup.request.fetch(
+            live_server + "/api/v1/pipelines",
+            method="POST",
+            headers={"Content-Type": "application/yaml"},
+            data=yaml,
+        )
+        assert response.ok
+        setup.close()
+
+        for width, height, label in ((390, 844, "390"), (1280, 900, "desktop")):
+            page = browser.new_page(viewport={"width": width, "height": height})
+            page.goto(live_server + "/pipelines/layout-pipe")
+            page.locator("#btn-yaml-save").wait_for()
+            if width == 390:
+                page.evaluate("""
+                    () => {
+                        const save = document.getElementById('btn-yaml-save').getBoundingClientRect();
+                        const badge = document.querySelector('.deploy-version').getBoundingClientRect();
+                        const targetTop = window.innerHeight - badge.height - 8;
+                        window.scrollBy(0, save.top - targetTop);
+                    }
+                """)
+            page.screenshot(path=f"/tmp/beekeeper-pipeline-layout-{label}.png", full_page=True)
+            save_box = page.locator("#btn-yaml-save").bounding_box()
+            badge_box = page.locator(".deploy-version").bounding_box()
+            assert save_box and badge_box
+            assert not overlaps(save_box, badge_box), label
+            page.close()
+        browser.close()

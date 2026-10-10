@@ -1853,6 +1853,14 @@ label {
 .status-queued { background: rgba(232, 185, 49, 0.15); color: var(--accent); }
 .status-cancelled, .status-skipped { background: rgba(133, 133, 133, 0.15); color: var(--text-secondary); }
 @media (max-width: 600px) {
+    .deploy-version {
+        position: static;
+        width: fit-content;
+        max-width: calc(100% - 2rem);
+        margin: 0 1rem 0.5rem auto;
+        overflow-wrap: anywhere;
+    }
+    .editor-actions { flex-wrap: wrap; }
     .step-chain { flex-direction: column; gap: 1.1rem; }
     .step-node { min-width: 0; width: 100%; }
     .step-node:not(:last-child)::after { content: "\2193"; right: auto; left: 50%; top: auto; bottom: -1.1rem; }
