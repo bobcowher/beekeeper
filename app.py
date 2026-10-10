@@ -59,12 +59,14 @@ def create_app(test_config=None):
     app.secret_key = _get_secret_key()
     app.config["BEEKEEPER_HOME"] = BEEKEEPER_HOME
     app.config["PROJECTS_DIR"] = os.path.join(BEEKEEPER_HOME, "projects")
+    app.config["PIPELINES_DIR"] = os.path.join(BEEKEEPER_HOME, "pipelines")
     app.config["DB_PATH"] = os.path.join(BEEKEEPER_HOME, "data", "beekeeper.db")
     app.config["DEPLOY_VERSION"] = get_deploy_version()
     if test_config:
         app.config.update(test_config)
 
     os.makedirs(app.config["PROJECTS_DIR"], exist_ok=True)
+    os.makedirs(app.config["PIPELINES_DIR"], exist_ok=True)
 
     from services.ssh_key_service import ensure_instance_key
     ensure_instance_key(BEEKEEPER_HOME)
@@ -83,6 +85,10 @@ def create_app(test_config=None):
         # Fail open: a row's stored path always names the folder holding its data
         # (run_<pk>, .migrating_<pk> or run_<number>), so a retry at next startup is safe.
         logging.getLogger(__name__).exception("Run folder migration failed; will retry on next startup")
+
+    if not app.config.get("TESTING"):
+        from services.dispatcher import start_dispatcher
+        start_dispatcher(app)
 
     # Register blueprints
     from routes.dashboard import dashboard_bp

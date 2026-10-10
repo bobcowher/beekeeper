@@ -8,9 +8,11 @@ from app import create_app
 @pytest.fixture
 def app(tmp_path):
     (tmp_path / "projects").mkdir()
+    (tmp_path / "pipelines").mkdir()
     application = create_app({
         "TESTING": True,
         "PROJECTS_DIR": str(tmp_path / "projects"),
+        "PIPELINES_DIR": str(tmp_path / "pipelines"),
         "DB_PATH": str(tmp_path / "beekeeper-test.db"),
     })
     return application

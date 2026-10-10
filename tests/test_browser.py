@@ -75,10 +75,12 @@ def live_server(tmp_path_factory):
         "folder": "chess",
     }))
 
+    (tmp / "pipelines").mkdir()
     from app import create_app
     flask_app = create_app({
         "TESTING": True,
         "PROJECTS_DIR": str(projects_dir),
+        "PIPELINES_DIR": str(tmp / "pipelines"),
         "DB_PATH": str(tmp / "beekeeper-test.db"),
     })
 
