@@ -7,6 +7,18 @@ from contextlib import contextmanager
 
 from models.user import User
 
+# Runs a pipeline may still hand off: steps of running pipeline runs, and of each
+# pipeline's latest run when it is failed/cancelled (resumable).
+_PIPELINE_PINNED_RUNS_SQL = '''
+    SELECT s.run_pk FROM pipeline_step_runs s
+    JOIN pipeline_runs r ON r.id = s.pipeline_run_pk
+    WHERE s.run_pk IS NOT NULL AND (
+        r.status = 'running'
+        OR (r.status IN ('failed', 'cancelled')
+            AND r.run_number = (SELECT MAX(r2.run_number) FROM pipeline_runs r2
+                                WHERE r2.pipeline_name = r.pipeline_name)))
+'''
+
 
 class DatabaseService:
     """Service for managing database operations."""
@@ -630,13 +642,14 @@ class DatabaseService:
             conn.commit()
 
     def prune_old_runs(self, project_name: str, keep_last: int = 20) -> list[dict]:
-        """Delete non-notable runs beyond retention limit. Notable runs are never pruned.
-        Returns list of deleted runs."""
+        """Delete non-notable runs beyond retention limit. Notable runs are never pruned,
+        nor are runs a pipeline may still hand off. Returns list of deleted runs."""
         with self._get_connection() as conn:
             # Only count/delete non-notable runs; notable runs are exempt
             rows = conn.execute(
-                '''SELECT * FROM training_runs
+                f'''SELECT * FROM training_runs
                    WHERE project_name = ? AND notable = 0
+                     AND id NOT IN ({_PIPELINE_PINNED_RUNS_SQL})
                    ORDER BY started_at DESC
                    LIMIT -1 OFFSET ?''',
                 (project_name, keep_last)
