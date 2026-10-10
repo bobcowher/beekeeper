@@ -8,3 +8,4 @@ numpy<2.0
 python-dateutil
 fastmcp
 requests
+PyYAML==6.0.3
