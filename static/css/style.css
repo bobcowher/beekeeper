@@ -1835,7 +1835,7 @@ label {
 .step-pill.step-cancelled, .step-pill.step-skipped { background: var(--text-secondary); }
 .step-chain { display: flex; flex-wrap: wrap; gap: 1.1rem; list-style: none; padding: 0; margin: 0.75rem 0; }
 .step-node { border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem 0.75rem; min-width: 150px; max-width: 100%; position: relative; background: var(--bg-secondary); overflow-wrap: anywhere; }
-.step-node:not(:last-child)::after { content: "\2192"; position: absolute; right: -1.05rem; top: 40%; color: var(--text-secondary); }
+.step-node:not(:last-child)::after { content: "\2192"; position: absolute; right: -1.05rem; top: 40%; color: var(--accent); font-weight: 700; }
 .step-node.step-running, .step-node.step-queued { border-color: var(--running); }
 .step-node.step-succeeded { border-color: var(--success); }
 .step-node.step-failed { border-color: var(--danger); }

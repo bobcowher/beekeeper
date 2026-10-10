@@ -451,3 +451,37 @@ def test_pipeline_save_does_not_overlap_deploy_badge(live_server):
             assert not overlaps(save_box, badge_box), label
             page.close()
         browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_chain_arrow_uses_accent_colour(live_server):
+    from playwright.sync_api import sync_playwright
+
+    yaml = "name: arrow-pipe\nsteps:\n  - {name: first, type: task, command: 'true'}\n  - {name: second, type: task, command: 'true'}\n"
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        response = page.request.fetch(
+            live_server + "/api/v1/pipelines",
+            method="POST",
+            headers={"Content-Type": "application/yaml"},
+            data=yaml,
+        )
+        assert response.ok
+        page.goto(live_server + "/pipelines/arrow-pipe")
+        page.locator("#step-chain .step-node").nth(1).wait_for()
+
+        colours = page.evaluate("""
+            () => {
+                const root = getComputedStyle(document.documentElement);
+                const probe = document.createElement('span');
+                probe.style.color = root.getPropertyValue('--accent');
+                document.body.appendChild(probe);
+                const accent = getComputedStyle(probe).color;
+                probe.remove();
+                const arrow = getComputedStyle(document.querySelector('.step-node'), '::after').color;
+                return {accent, arrow};
+            }
+        """)
+        assert colours["arrow"] == colours["accent"]
+        browser.close()
