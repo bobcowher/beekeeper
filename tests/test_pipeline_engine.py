@@ -249,3 +249,159 @@ def test_started_entry_with_deleted_run_record_fails_step(env):
     tick(env)
     assert step(1, 0)["status"] == "failed"
     assert "deleted" in step(1, 0)["error"]
+
+
+def _fail_step_updates(on):
+    """Make every UPDATE of pipeline_step_runs abort (simulates the step write failing)."""
+    import sqlite3
+    conn = sqlite3.connect(get_db().db_path)
+    if on:
+        conn.execute("CREATE TRIGGER fail_step_update BEFORE UPDATE ON pipeline_step_runs "
+                     "BEGIN SELECT RAISE(ABORT, 'simulated write failure'); END")
+    else:
+        conn.execute("DROP TRIGGER fail_step_update")
+    conn.commit()
+    conn.close()
+
+
+def test_train_launch_is_atomic_no_duplicate_enqueue(env):
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    _fail_step_updates(True)
+    tick(env)                                     # enqueue + step write fail together
+    assert get_db().list_queue("pre") == []
+    assert step(1, 0)["status"] == "pending"
+    _fail_step_updates(False)
+    tick(env)
+    tick(env)
+    assert len(get_db().list_queue("pre")) == 1
+    assert step(1, 0)["status"] == "queued" and step(1, 0)["queue_id"] == get_db().list_queue("pre")[0]["id"]
+
+
+def _task_only_pipeline(env):
+    store.save_pipeline(env["pl"], {"name": "tsk", "steps": [
+        {"name": "work", "type": "task", "command": "sleep 0.3"}]})
+    eng.start_pipeline_run(env["pd"], env["pl"], "tsk")
+    return get_db().get_pipeline_run("tsk", 1)
+
+
+def test_task_launch_not_respawned_after_failed_step_write(env, monkeypatch):
+    run = _task_only_pipeline(env)
+    spawns = []
+    real_spawn = eng.pipeline_tasks.spawn_task
+    monkeypatch.setattr(eng.pipeline_tasks, "spawn_task",
+                        lambda pk, *a, **k: spawns.append(pk) or real_spawn(pk, *a, **k))
+    real_update = get_db().update_step_run
+    calls = {"n": 0}
+
+    def flaky_update(pk, **fields):
+        if fields.get("status") == "running" and calls["n"] == 0:
+            calls["n"] += 1
+            raise RuntimeError("simulated write failure")
+        return real_update(pk, **fields)
+
+    monkeypatch.setattr(type(get_db()), "update_step_run", lambda self, pk, **f: flaky_update(pk, **f))
+    tick(env)                                     # spawned, step write fails
+    assert get_db().current_step_run(run["id"], 0)["status"] == "pending"
+    tick(env)                                     # already tracked: record, don't spawn
+    assert len(spawns) == 1
+    s = get_db().current_step_run(run["id"], 0)
+    assert s["status"] == "running" and s["log_path"]
+    deadline = time.time() + 10
+    while get_db().get_pipeline_run("tsk", 1)["status"] == "running" and time.time() < deadline:
+        tick(env); time.sleep(0.05)
+    assert get_db().get_pipeline_run("tsk", 1)["status"] == "succeeded"
+    assert len(spawns) == 1
+
+
+def test_resume_guards_missing_latest(env, monkeypatch):
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    run = get_db().get_pipeline_run("fac", 1)
+    get_db().update_pipeline_run(run["id"], status="failed")
+    monkeypatch.setattr(type(get_db()), "latest_pipeline_run", lambda self, name: None)
+    with pytest.raises(eng.PipelineError) as e:
+        eng.resume_pipeline_run(env["pd"], env["pl"], "fac", 1)
+    assert e.value.code == "NOT_LATEST"
+
+
+def _succeed_step0_without_advancing(env):
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    run = get_db().get_pipeline_run("fac", 1)
+    s0 = get_db().current_step_run(run["id"], 0)
+    get_db().update_step_run(s0["id"], status="succeeded", run_dir="/tmp")
+    return run
+
+
+def test_recovery_settles_succeeded_step_once(env):
+    run = _succeed_step0_without_advancing(env)
+    tick(env)                                     # settle: advance to step 1, create pending row
+    tick(env)                                     # launch step 1
+    tick(env)
+    assert get_db().get_pipeline_run("fac", 1)["current_step"] == 1
+    assert step(1, 1)["attempt"] == 1 and step(1, 1)["status"] == "queued"
+    assert len(get_db().list_queue("ft")) == 1
+    assert [s["step_index"] for s in get_db().list_step_runs(run["id"])] == [0, 1]
+
+
+def test_cancel_after_unsettled_success_advances_then_cancels(env):
+    run = _succeed_step0_without_advancing(env)
+    r = eng.cancel_pipeline_run(env["pd"], env["pl"], "fac", 1)
+    assert r["status"] == "cancelled"
+    run = get_db().get_pipeline_run("fac", 1)
+    assert run["status"] == "cancelled" and run["current_step"] == 1 and "fine-tune" in run["error"]
+    assert [s["status"] for s in get_db().list_step_runs(run["id"])] == ["succeeded", "cancelled", "skipped"]
+
+
+def test_cancel_after_unsettled_final_success_reports_succeeded(env):
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    run = get_db().get_pipeline_run("fac", 1)
+    for i, s in enumerate(PIPE["steps"]):
+        sr = get_db().current_step_run(run["id"], i) or {"id": get_db().create_step_run(run["id"], i, s["name"], s["type"])}
+        get_db().update_step_run(sr["id"], status="succeeded", run_dir="/tmp")
+    get_db().update_pipeline_run(run["id"], current_step=2)
+    r = eng.cancel_pipeline_run(env["pd"], env["pl"], "fac", 1)
+    assert r["status"] == "succeeded"
+    assert get_db().get_pipeline_run("fac", 1)["status"] == "succeeded"
+
+
+def test_cancel_with_missing_current_row_skips_rest(env):
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    run = get_db().get_pipeline_run("fac", 1)
+    s0 = get_db().current_step_run(run["id"], 0)
+    get_db().update_step_run(s0["id"], status="succeeded", run_dir="/tmp")
+    get_db().update_pipeline_run(run["id"], current_step=1)          # row for step 1 never written
+    eng.cancel_pipeline_run(env["pd"], env["pl"], "fac", 1)
+    run = get_db().get_pipeline_run("fac", 1)
+    assert run["status"] == "cancelled" and run["error"]
+    assert [s["status"] for s in get_db().list_step_runs(run["id"])] == ["succeeded", "cancelled", "skipped"]
+
+
+def test_cancel_with_terminal_failed_row_settles(env):
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    run = get_db().get_pipeline_run("fac", 1)
+    s0 = get_db().current_step_run(run["id"], 0)
+    get_db().update_step_run(s0["id"], status="failed", error="boom")
+    r = eng.cancel_pipeline_run(env["pd"], env["pl"], "fac", 1)
+    run = get_db().get_pipeline_run("fac", 1)
+    assert r["status"] == run["status"] == "failed" and "boom" in run["error"]
+    assert [s["status"] for s in get_db().list_step_runs(run["id"])] == ["failed", "skipped", "skipped"]
+
+
+def test_cancel_pending_task_kills_untracked_spawn(env, monkeypatch):
+    store.save_pipeline(env["pl"], {"name": "tsk", "steps": [
+        {"name": "work", "type": "task", "command": "sleep 30"}]})
+    eng.start_pipeline_run(env["pd"], env["pl"], "tsk")
+    real_update = get_db().update_step_run
+    original = type(get_db()).update_step_run
+
+    def failing_running_write(self, pk, **f):
+        if f.get("status") == "running":
+            raise RuntimeError("simulated write failure")
+        return real_update(pk, **f)
+
+    monkeypatch.setattr(type(get_db()), "update_step_run", failing_running_write)
+    tick(env)                                     # spawned, but the step stays 'pending'
+    assert eng.pipeline_tasks.running_task_pks()
+    monkeypatch.setattr(type(get_db()), "update_step_run", original)
+    eng.cancel_pipeline_run(env["pd"], env["pl"], "tsk", 1)
+    assert eng.pipeline_tasks.running_task_pks() == []
+    assert get_db().get_pipeline_run("tsk", 1)["status"] == "cancelled"

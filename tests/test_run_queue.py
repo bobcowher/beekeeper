@@ -119,3 +119,13 @@ def test_delete_cancels_queue(app):
     qid = get_db().enqueue_run("p")
     delete_project(app.config["PROJECTS_DIR"], "p")
     assert get_db().get_queue_entry(qid)["status"] == "cancelled"
+
+
+def test_mark_queue_started_only_from_queued(app):
+    db = get_db()
+    a = db.enqueue_run("p")
+    db.cancel_queue_entry(a, error="x")
+    assert db.mark_queue_started(a, run_pk=1) is False
+    assert db.get_queue_entry(a)["status"] == "cancelled"
+    b = db.enqueue_run("p")
+    assert db.mark_queue_started(b, run_pk=2) is True

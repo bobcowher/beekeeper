@@ -50,8 +50,13 @@ def dispatch_project_queue(projects_dir, name) -> None:
         projects_dir, name, branch=entry["branch"], extra_env=entry["env_vars"] or None)
     if "error" not in result:
         run = db.get_run(name, result["run_id"])
-        db.mark_queue_started(entry["id"], run["id"])
-        log.info("Queue: started %s from queue entry %s", result.get("run_ref"), entry["id"])
+        if db.mark_queue_started(entry["id"], run["id"]):
+            log.info("Queue: started %s from queue entry %s", result.get("run_ref"), entry["id"])
+        else:
+            # Cancelled while start_training ran: stop the run rather than orphan it.
+            log.warning("Queue: entry %s was cancelled during start; stopping %s",
+                        entry["id"], result.get("run_ref"))
+            process_manager.stop_training(projects_dir, name, run_id=result["run_id"])
     elif _is_transient(result.get("code"), projects_dir, name):
         if entry.get("wait_reason") != result["error"]:
             db.set_queue_wait_reason(entry["id"], result["error"])

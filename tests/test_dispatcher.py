@@ -106,3 +106,25 @@ def test_tick_advances_pipelines(app, monkeypatch):
     monkeypatch.setattr(pipeline_engine, "tick", lambda pd, pl: seen.append(pl))
     tick(app)
     assert seen == [app.config["PIPELINES_DIR"]]
+
+
+def test_cancel_between_start_and_mark_stops_run(app, starts, monkeypatch):
+    """Review Focus 2: a cancel lands after start_training but before mark_queue_started."""
+    make_project_dir(app, "p")
+    db = get_db()
+    qid = db.enqueue_run("p", source="pipeline:fac#1")
+    real_fake = dispatcher.process_manager.start_training
+
+    def start_then_cancel(projects_dir, name, branch=None, extra_env=None):
+        result = real_fake(projects_dir, name, branch=branch, extra_env=extra_env)
+        assert db.cancel_queue_entry(qid, error="pipeline cancelled")
+        return result
+
+    monkeypatch.setattr(dispatcher.process_manager, "start_training", start_then_cancel)
+    stops = []
+    monkeypatch.setattr(dispatcher.process_manager, "stop_training",
+                        lambda d, name, run_id=None: stops.append((name, run_id)) or {"status": "stopped"})
+    tick(app)
+    assert stops == [("p", 1)]
+    entry = db.get_queue_entry(qid)
+    assert entry["status"] == "cancelled" and entry["run_pk"] is None

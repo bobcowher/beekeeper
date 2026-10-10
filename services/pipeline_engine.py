@@ -86,21 +86,24 @@ def cancel_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:
         if run["status"] != "running":
             raise PipelineError("NOT_RUNNING", f"{pipeline_ref(name, run_number)} is {run['status']}", 409)
         sr = db.current_step_run(run["id"], run["current_step"])
-        if sr and sr["status"] == "queued":
-            if not db.cancel_queue_entry(sr["queue_id"], error="pipeline cancelled"):
-                entry = db.get_queue_entry(sr["queue_id"])
-                if entry and entry["status"] == "started":
-                    _stop_training_run(projects_dir, entry["run_pk"])
-        elif sr and sr["status"] == "running":
-            if sr["step_type"] == "train":
-                _stop_training_run(projects_dir, sr["run_pk"])
+        if sr and sr["status"] == "succeeded":
+            # Finished but never advanced (crash between writes): settle first, so a
+            # finished pipeline is not recorded as cancelled.
+            _settle(run, sr)
+            run = db.get_pipeline_run_by_pk(run["id"])
+            sr = db.current_step_run(run["id"], run["current_step"])
+        if run["status"] == "running":
+            if sr is None:
+                step = run["definition"]["steps"][run["current_step"]]
+                db.create_step_run(run["id"], run["current_step"], step["name"], step["type"])
+                sr = db.current_step_run(run["id"], run["current_step"])
+            if sr["status"] in ACTIVE_STEP_STATUSES:
+                _stop_active_step(projects_dir, sr)
+                _finish_step(run, sr, "cancelled", error="cancelled by user")
             else:
-                pipeline_tasks.kill_task(sr["id"])
-        if sr and sr["status"] in ACTIVE_STEP_STATUSES:
-            _finish_step(run, sr, "cancelled", error="cancelled by user")
-        else:
-            db.update_pipeline_run(run["id"], status="cancelled", ended_at=_now())
-    return {"run_id": run_number, "run_ref": pipeline_ref(name, run_number), "status": "cancelled"}
+                _settle(run, sr)   # terminal but unsettled: record its outcome, skip the rest
+        final = db.get_pipeline_run_by_pk(run["id"])["status"]
+    return {"run_id": run_number, "run_ref": pipeline_ref(name, run_number), "status": final}
 
 
 def resume_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:
@@ -110,7 +113,7 @@ def resume_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:
         if run["status"] not in ("failed", "cancelled"):
             raise PipelineError("NOT_RESUMABLE", f"{pipeline_ref(name, run_number)} is {run['status']}", 409)
         latest = db.latest_pipeline_run(name)
-        if latest["id"] != run["id"]:
+        if latest is None or latest["id"] != run["id"]:
             raise PipelineError("NOT_LATEST", "Only the latest run of a pipeline can be resumed", 409)
         idx = run["current_step"]
         steps = run["definition"]["steps"]
@@ -211,6 +214,23 @@ def _stop_training_run(projects_dir, run_pk):
         process_manager.stop_training(projects_dir, tr["project_name"], run_id=tr["run_number"])
 
 
+def _stop_active_step(projects_dir, sr):
+    """Stop whatever an active step has in flight (queue entry, training run or task)."""
+    db = get_db()
+    if sr["status"] == "queued":
+        if not db.cancel_queue_entry(sr["queue_id"], error="pipeline cancelled"):
+            entry = db.get_queue_entry(sr["queue_id"])
+            if entry and entry["status"] == "started":
+                _stop_training_run(projects_dir, entry["run_pk"])
+    elif sr["status"] == "running":
+        if sr["step_type"] == "train":
+            _stop_training_run(projects_dir, sr["run_pk"])
+        else:
+            pipeline_tasks.kill_task(sr["id"])
+    elif sr["step_type"] == "task":
+        pipeline_tasks.kill_task(sr["id"])   # pending, but a spawn whose step write failed may exist
+
+
 def _advance(projects_dir, pipelines_dir, run):
     db = get_db()
     idx = run["current_step"]
@@ -240,16 +260,21 @@ def _launch(projects_dir, pipelines_dir, run, step, sr):
     if step["type"] == "train":
         extra = dict(step.get("env_vars") or {})
         extra.update(env)
-        queue_id = db.enqueue_run(step["project"], branch=step.get("branch"), env_vars=extra,
-                                  source=f"pipeline:{pipeline_ref(name, n)}")
-        db.update_step_run(sr["id"], status="queued", queue_id=queue_id)
-        return
-    if not _tasks_enabled():
-        _finish_step(run, sr, "failed", error="Inline task steps are disabled by the administrator")
+        # One transaction: a failed step write must not leave an orphan queue entry behind.
+        db.enqueue_step_run(sr["id"], step["project"], step.get("branch"), extra,
+                            f"pipeline:{pipeline_ref(name, n)}")
         return
     run_dir = env["BEEKEEPER_PIPELINE_RUN_DIR"]
     suffix = f"_attempt{sr['attempt']}" if sr["attempt"] > 1 else ""
     log_rel = os.path.join(name, "runs", f"run_{n}", f"step_{idx}_{step['name']}{suffix}.log")
+    if sr["id"] in pipeline_tasks.running_task_pks():
+        # Spawned on an earlier tick whose step write failed: record it, never spawn twice.
+        db.update_step_run(sr["id"], status="running", log_path=log_rel,
+                           run_dir=run_dir, started_at=_now())
+        return
+    if not _tasks_enabled():
+        _finish_step(run, sr, "failed", error="Inline task steps are disabled by the administrator")
+        return
     proc_env = os.environ.copy()
     proc_env.update(env)
     try:

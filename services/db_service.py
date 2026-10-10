@@ -829,9 +829,10 @@ class DatabaseService:
             conn.commit()
             return cursor.rowcount == 1
 
-    def mark_queue_started(self, queue_id: int, run_pk: int):
-        self._update_queue(queue_id, status="started", run_pk=run_pk, wait_reason=None,
-                           started_at=datetime.now().isoformat())
+    def mark_queue_started(self, queue_id: int, run_pk: int) -> bool:
+        """Claim a queued entry as started. False if it left 'queued' (e.g. cancelled) meanwhile."""
+        return self._update_queue(queue_id, where_queued=True, status="started", run_pk=run_pk,
+                                  wait_reason=None, started_at=datetime.now().isoformat())
 
     def set_queue_wait_reason(self, queue_id: int, reason: str | None):
         self._update_queue(queue_id, wait_reason=reason)
@@ -961,6 +962,28 @@ class DatabaseService:
                 (pipeline_run_pk, step_index, step_name, step_type, attempt, status))
             conn.commit()
             return cursor.lastrowid
+
+    def enqueue_step_run(self, step_pk: int, project_name: str, branch: str | None,
+                         env_vars: dict | None, source: str) -> int | None:
+        """Enqueue a pipeline train step's run and mark the step queued in one transaction.
+
+        Returns the queue id, or None (nothing written) if the step is no longer pending.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                '''INSERT INTO run_queue (project_name, branch, env_vars, source, status, created_at)
+                   VALUES (?, ?, ?, ?, 'queued', ?)''',
+                (project_name, branch, json.dumps(env_vars) if env_vars else None, source,
+                 datetime.now().isoformat()))
+            queue_id = cursor.lastrowid
+            updated = conn.execute(
+                "UPDATE pipeline_step_runs SET status = 'queued', queue_id = ? "
+                "WHERE id = ? AND status = 'pending'", (queue_id, step_pk)).rowcount
+            if updated != 1:
+                conn.rollback()
+                return None
+            conn.commit()
+            return queue_id
 
     def current_step_run(self, pipeline_run_pk: int, step_index: int) -> dict | None:
         with self._get_connection() as conn:
