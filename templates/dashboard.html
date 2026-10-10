@@ -23,9 +23,10 @@
                 <button class="sort-btn" data-sort="alpha">A–Z</button>
             </div>
             <a href="{{ url_for('project.new') }}" class="btn btn-primary">+ New Project</a>
+            <a href="{{ url_for('pipelines.new') }}" class="btn btn-secondary">+ New Pipeline</a>
         </div>
     </div>
-    {% if projects %}
+    {% if projects or pipelines %}
     <div class="project-list" id="project-list">
         {% for p in projects %}
         <div class="project-row"
@@ -58,9 +59,36 @@
                     title="{{ 'Unpin' if p.get('pinned') else 'Pin to top' }}">&#128204;</button>
         </div>
         {% endfor %}
+        {% for pl in pipelines %}
+        <div class="project-row pipeline-row"
+             data-kind="pipeline"
+             data-name="{{ pl.defn.name }}"
+             data-folder="{{ pl.defn.folder }}"
+             data-pinned="false"
+             data-last-run="{{ pl.last_run_at }}"
+             data-created-at="0">
+            <a href="/pipelines/{{ pl.defn.name }}" class="project-item">
+                <span class="project-name"><span class="pipeline-icon" aria-hidden="true">&#9939;</span> {{ pl.defn.name }}</span>
+                <span class="project-meta">
+                    {% if pl.defn.error %}
+                    <span class="project-status status-badge status-error">invalid</span>
+                    {% else %}
+                    <span class="step-strip" title="{{ pl.last.run_ref if pl.last else 'never run' }}">
+                        {% for s in (pl.last.steps if pl.last else pl.defn.steps) %}
+                        <span class="step-pill step-{{ s.status if pl.last else 'pending' }}" title="{{ s.name }}"></span>
+                        {% endfor %}
+                    </span>
+                    {% if pl.last %}
+                    <span class="project-status status-badge status-{{ pl.last.status }}">{{ pl.last.run_ref }} {{ pl.last.status }}</span>
+                    {% endif %}
+                    {% endif %}
+                </span>
+            </a>
+        </div>
+        {% endfor %}
     </div>
     {% else %}
-    <p class="muted">No projects yet. Create one to get started.</p>
+    <p class="muted">No projects or pipelines yet.</p>
     {% endif %}
 </section>
 {% endblock %}

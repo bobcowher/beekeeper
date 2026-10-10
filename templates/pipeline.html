@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ name }} · Pipeline{% endblock %}
+{% block content %}
+<div class="page-header">
+    <a href="/" class="back-btn">&larr; Back</a>
+</div>
+<section class="card" id="pipeline-header" data-name="{{ name }}">
+    <div class="card-header">
+        <h2><span class="pipeline-icon" aria-hidden="true">&#9939;</span> {{ name }}</h2>
+        <div class="dashboard-controls">
+            <button class="btn btn-success btn-sm" id="btn-pipeline-start">&#9654; Run Pipeline</button>
+            <button class="btn btn-danger btn-sm" id="btn-pipeline-cancel" style="display:none">&#9632; Cancel</button>
+            <button class="btn btn-secondary btn-sm" id="btn-pipeline-resume" style="display:none">&#8635; Resume</button>
+            <button class="btn btn-danger btn-sm" id="btn-pipeline-delete">Delete</button>
+        </div>
+    </div>
+    <p class="muted" id="pipeline-description"></p>
+    <div class="run-select-row">
+        <label for="pipeline-run-select">Run:</label>
+        <select id="pipeline-run-select"></select>
+        <span id="pipeline-run-status" class="status-badge"></span>
+        <span id="pipeline-run-error" class="pipeline-error"></span>
+    </div>
+    <ol id="step-chain" class="step-chain"></ol>
+    <pre id="step-log" class="run-log-terminal" style="display:none"></pre>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>Definition</h2>
+        <div class="tab-row" id="definition-tabs">
+            <button class="tab-btn active" data-tab="yaml">YAML</button>
+        </div>
+    </div>
+    <div id="tab-yaml">
+        <textarea id="pipeline-yaml" class="code-editor" spellcheck="false" rows="20"></textarea>
+        <div class="editor-actions">
+            <button class="btn btn-secondary btn-sm" id="btn-yaml-validate">Validate</button>
+            <button class="btn btn-primary btn-sm" id="btn-yaml-save">Save</button>
+            <span id="yaml-status" class="muted"></span>
+        </div>
+        <ul id="yaml-errors" class="validation-errors"></ul>
+    </div>
+</section>
+
+<section class="card">
+    <h2>Run History</h2>
+    <div class="table-scroll">
+    <table class="run-history-table" id="pipeline-runs">
+        <thead><tr><th>Run</th><th>Status</th><th>Started</th><th>Duration</th><th>Stopped at</th></tr></thead>
+        <tbody></tbody>
+    </table>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/pipeline.js') }}"></script>
+{% endblock %}

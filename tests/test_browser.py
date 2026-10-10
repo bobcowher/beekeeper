@@ -253,3 +253,40 @@ def test_queue_add_and_cancel(live_server):
         page.wait_for_function("document.querySelectorAll('#queue-list .queue-row').length === 0")
         assert not page.locator("#queue-section").is_visible()
         browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_page_yaml_errors_and_run(live_server):
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        page.goto(live_server + "/pipelines/new")
+        page.fill("#name", "ui-pipe")
+        page.click("button[type=submit]")
+        page.wait_for_url("**/pipelines/ui-pipe")
+        page.locator("#step-chain .step-node").first.wait_for()
+        page.fill("#pipeline-yaml", "name: ui-pipe\nsteps:\n  - {name: a, type: train, project: demo, branch: no}\n")
+        page.click("#btn-yaml-save")
+        page.locator("#yaml-errors li").first.wait_for()
+        assert "quote" in page.locator("#yaml-errors").inner_text()
+        page.fill("#pipeline-yaml", "name: ui-pipe\nsteps:\n  - {name: a, type: train, project: demo}\n  - {name: b, type: task, command: 'true'}\n")
+        page.click("#btn-yaml-save")
+        page.wait_for_function("document.getElementById('yaml-status').textContent === 'Saved'")
+        page.click("#btn-pipeline-start")
+        page.locator("#step-chain .step-pending, #step-chain .step-queued, #step-chain .step-failed, #step-chain .step-running").first.wait_for()
+        page.screenshot(path="/tmp/beekeeper-pipeline.png", full_page=True)
+        page.goto(live_server + "/")
+        assert page.locator('.pipeline-row[data-name="ui-pipe"]').is_visible()
+        page.screenshot(path="/tmp/beekeeper-dashboard-pipelines.png", full_page=True)
+        mobile = browser.new_page(viewport={"width": 390, "height": 844})
+        for path, shot in (("/pipelines/ui-pipe", "pipeline-390"), ("/", "dashboard-pipelines-390")):
+            mobile.goto(live_server + path)
+            mobile.wait_for_load_state("networkidle")
+            mobile.screenshot(path=f"/tmp/beekeeper-{shot}.png", full_page=True)
+            assert mobile.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), path
+        assert errors == []
+        browser.close()

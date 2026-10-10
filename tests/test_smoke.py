@@ -31,7 +31,7 @@ MOCK_PY_VERSIONS = [
 def test_dashboard_empty(client):
     resp = client.get("/")
     assert resp.status_code == 200
-    assert b"No projects yet" in resp.data
+    assert b"No projects or pipelines yet" in resp.data
 
 
 def test_base_layout_shows_deploy_version(client):
@@ -302,3 +302,32 @@ def test_project_page_has_queue_controls(client, ready_project):
     html = client.get("/projects/myproject").get_data(as_text=True)
     assert 'id="btn-confirm-queue"' in html
     assert 'id="queue-section"' in html
+
+
+def test_dashboard_lists_pipeline_rows(client, app):
+    from services import pipeline_store
+    pipeline_store.save_pipeline(app.config["PIPELINES_DIR"], {
+        "name": "fac", "folder": "chess", "steps": [{"name": "a", "type": "task", "command": "true"}]})
+    html = client.get("/").get_data(as_text=True)
+    assert 'data-kind="pipeline"' in html and 'href="/pipelines/fac"' in html
+
+
+def test_new_pipeline_creates_template_and_redirects(client, app):
+    r = client.post("/pipelines/new", data={"name": "fresh", "folder": "x"})
+    assert r.status_code == 302 and r.headers["Location"].endswith("/pipelines/fresh")
+    from services import pipeline_store
+    defn, _ = pipeline_store.load_pipeline(app.config["PIPELINES_DIR"], "fresh")
+    assert defn["folder"] == "x" and defn["steps"][0]["type"] == "task"
+
+
+def test_new_pipeline_rejects_bad_name(client):
+    r = client.post("/pipelines/new", data={"name": "Bad Name"})
+    assert r.status_code == 302 and r.headers["Location"].endswith("/pipelines/new")
+
+
+def test_pipeline_page_renders(client, app):
+    client.post("/pipelines/new", data={"name": "fresh"})
+    html = client.get("/pipelines/fresh").get_data(as_text=True)
+    for dom_id in ("step-chain", "pipeline-yaml", "btn-pipeline-start", "pipeline-runs"):
+        assert f'id="{dom_id}"' in html
+    assert client.get("/pipelines/ghost").status_code == 404

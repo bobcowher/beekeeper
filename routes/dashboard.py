@@ -1,7 +1,9 @@
+import datetime
 import os
 import json
 from flask import Blueprint, render_template, current_app
 from services.process_manager import get_runs_for_project
+from services import pipeline_engine, pipeline_store
 from services.db_service import get_db
 
 dashboard_bp = Blueprint("dashboard", __name__)
@@ -50,4 +52,13 @@ def index():
                 p["total_runtime"] = _format_runtime(raw)
                 projects.append(p)
 
-    return render_template("dashboard.html", projects=projects)
+    pipelines = []
+    for defn in pipeline_store.list_pipelines(current_app.config["PIPELINES_DIR"]):
+        latest = get_db().latest_pipeline_run(defn["name"])
+        last = pipeline_engine.describe_run(latest) if latest else None
+        started = 0.0
+        if latest:
+            started = datetime.datetime.fromisoformat(latest["started_at"]).timestamp()
+        pipelines.append({"defn": defn, "last": last, "last_run_at": started})
+
+    return render_template("dashboard.html", projects=projects, pipelines=pipelines)
