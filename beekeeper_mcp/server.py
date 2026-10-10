@@ -313,7 +313,8 @@ def get_project_instructions(project_name: str) -> str:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def start_training(project_name: str, branch: str | None = None) -> dict:
+def start_training(project_name: str, branch: str | None = None,
+                   env_vars: dict | None = None, queue: bool = False) -> dict:
     """
     Start training for a project. branch overrides the project's configured default.
     The pre-launch sequence (git sync, pip install) runs first — 30-120s.
@@ -326,8 +327,20 @@ def start_training(project_name: str, branch: str | None = None) -> dict:
     check runs before launching. The run is rejected if free VRAM is below
     gpu_memory_minimum. On success, GPU_DEVICE, GPU_OFFLOAD, and GPU_MEMORY_* env vars
     are injected into the training process. See update_project() for full details.
+
+    env_vars: per-run overrides merged over the project's env vars for this run only.
+    queue=True: don't start now; add to the project's run queue. It starts automatically
+    (within ~5s) when the project has a free slot. Returns queue_id and position.
+    A start refused because the project is busy (error.details.code ALREADY_RUNNING /
+    AT_CAPACITY / INSUFFICIENT_VRAM) can be retried with queue=True.
     """
-    body = {"branch": branch} if branch else {}
+    body = {}
+    if branch:
+        body["branch"] = branch
+    if env_vars:
+        body["env_vars"] = env_vars
+    if queue:
+        body["queue"] = True
     try:
         return _post(f"/projects/{project_name}/training/start", body, timeout=180)
     except requests.exceptions.ReadTimeout:
@@ -335,6 +348,18 @@ def start_training(project_name: str, branch: str | None = None) -> dict:
             "success": True,
             "message": "Pre-launch sequence is running. Check training_status in 30s.",
         }
+
+
+@mcp.tool()
+def list_queue(project_name: str) -> dict:
+    """Runs queued for a project, in start order, with any wait_reason."""
+    return _get(f"/projects/{project_name}/queue")
+
+
+@mcp.tool()
+def cancel_queued_run(project_name: str, queue_id: int) -> dict:
+    """Cancel a queued run before it starts."""
+    return _delete(f"/projects/{project_name}/queue/{queue_id}")
 
 
 @mcp.tool()

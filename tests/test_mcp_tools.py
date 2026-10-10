@@ -65,3 +65,21 @@ def test_update_project_empty_folder_unfiles(calls):
 def test_update_project_without_folder_omits_key(calls):
     server.update_project("p1", branch="dev")
     assert "folder" not in calls[-1][2]
+
+
+def test_start_training_queue(calls):
+    server.start_training("p", branch="dev", env_vars={"LR": "1"}, queue=True)
+    assert calls[-1] == ("_post", "/projects/p/training/start",
+                         {"branch": "dev", "env_vars": {"LR": "1"}, "queue": True})
+
+
+def test_start_training_plain_body_unchanged(calls):
+    server.start_training("p")
+    assert calls[-1] == ("_post", "/projects/p/training/start", {})
+
+
+def test_list_and_cancel_queue(calls):
+    server.list_queue("p")
+    assert calls[-1] == ("_get", "/projects/p/queue", None)
+    server.cancel_queued_run("p", 7)
+    assert calls[-1] == ("_delete", "/projects/p/queue/7", None)
