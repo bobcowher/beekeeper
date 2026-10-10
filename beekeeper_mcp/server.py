@@ -29,6 +29,8 @@ Claude Code / Claude Desktop config:
 
 import os
 import time
+from urllib.parse import quote
+
 import requests
 from fastmcp import FastMCP
 
@@ -108,9 +110,27 @@ def get_version() -> dict:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def list_projects() -> dict:
-    """List all projects and their current setup/training status."""
-    return _get("/projects")
+def list_projects(folder: str | None = None) -> dict:
+    """
+    List all projects and their current setup/training status.
+
+    folder: only list projects in this folder; folder="" lists unfiled projects.
+    """
+    if folder is None:
+        return _get("/projects")
+    return _get(f"/projects?folder={quote(folder)}")
+
+
+@mcp.tool()
+def list_folders() -> dict:
+    """Folder names in use. Folders are flat labels on projects and pipelines."""
+    return _get("/folders")
+
+
+@mcp.tool()
+def rename_folder(folder: str, new_name: str) -> dict:
+    """Rename a folder by moving all its projects and pipelines to new_name."""
+    return _post(f"/folders/{quote(folder)}/rename", {"new_name": new_name})
 
 
 @mcp.tool()
@@ -128,6 +148,7 @@ def create_project(
     train_file: str = "train.py",
     env_type: str = "venv",
     output_paths: list[str] | None = None,
+    folder: str | None = None,
 ) -> dict:
     """
     Create a new project. Setup (clone, env creation, pip install) runs automatically
@@ -138,6 +159,8 @@ def create_project(
     should survive workspace cleanup (e.g. ["saved_models", "exports"]).
     TensorBoard logs are protected automatically — do not include the TB log dir here.
     Defaults to [] (env vars still point at persistent storage; only symlinks differ).
+
+    folder: dashboard grouping label (flat, no '/'); '' removes it from its folder.
     """
     body: dict = {
         "name": project_name,
@@ -148,6 +171,8 @@ def create_project(
         "env_type": env_type,
         "output_paths": output_paths or [],
     }
+    if folder is not None:
+        body["folder"] = folder
     return _post("/projects", body)
 
 
@@ -168,12 +193,16 @@ def update_project(
     data_dir_enabled: bool | None = None,
     data_dir_local: str | None = None,
     data_dir_remote: str | None = None,
+    folder: str | None = None,
 ) -> dict:
     """
     Update editable settings for an existing project. Only the fields you provide
     are changed — omitted fields are left as-is. Training must be stopped first.
 
     env_vars replaces the entire env_vars dict; pass the full desired set of variables.
+
+    folder: dashboard grouping label (flat, no '/'); '' removes it from its folder.
+    Folder-only changes are allowed while training.
 
     Static data directory (mounts a read-only system path into the workspace):
       data_dir_enabled — enable the symlink (default: false)
@@ -230,6 +259,8 @@ def update_project(
         body["data_dir_local"] = data_dir_local
     if data_dir_remote is not None:
         body["data_dir_remote"] = data_dir_remote
+    if folder is not None:
+        body["folder"] = folder
     return _patch(f"/projects/{project_name}", body)
 
 
