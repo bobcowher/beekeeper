@@ -1,7 +1,9 @@
 import datetime
 
 import pytest
+from flask import Flask
 
+from app import _should_start_dispatcher
 from services import dispatcher
 from services.db_service import get_db
 from tests.conftest import make_project_dir
@@ -98,6 +100,24 @@ def test_one_bad_project_does_not_stop_others(app, starts, monkeypatch):
 
 def test_dispatcher_not_started_in_testing(app):
     assert dispatcher._thread is None
+
+
+def test_dispatcher_starts_only_in_debug_reloader_child(monkeypatch):
+    application = Flask(__name__)
+    application.debug = True
+
+    monkeypatch.delenv("WERKZEUG_RUN_MAIN", raising=False)
+    assert not _should_start_dispatcher(application)
+
+    monkeypatch.setenv("WERKZEUG_RUN_MAIN", "true")
+    assert _should_start_dispatcher(application)
+
+    application.debug = False
+    monkeypatch.delenv("WERKZEUG_RUN_MAIN", raising=False)
+    assert _should_start_dispatcher(application)
+
+    application.config["TESTING"] = True
+    assert not _should_start_dispatcher(application)
 
 
 def test_tick_advances_pipelines(app, monkeypatch):

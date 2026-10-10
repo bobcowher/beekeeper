@@ -54,6 +54,12 @@ def _get_secret_key() -> str:
     return key
 
 
+def _should_start_dispatcher(app):
+    if app.config.get("TESTING"):
+        return False
+    return not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+
+
 def create_app(test_config=None):
     app = Flask(__name__)
     app.secret_key = _get_secret_key()
@@ -86,7 +92,7 @@ def create_app(test_config=None):
         # (run_<pk>, .migrating_<pk> or run_<number>), so a retry at next startup is safe.
         logging.getLogger(__name__).exception("Run folder migration failed; will retry on next startup")
 
-    if not app.config.get("TESTING"):
+    if _should_start_dispatcher(app):
         from services.dispatcher import start_dispatcher
         start_dispatcher(app)
 
@@ -133,5 +139,5 @@ def create_app(test_config=None):
 
 
 if __name__ == "__main__":
-    app = create_app()
+    app = create_app({"DEBUG": True})
     app.run(debug=True, host="0.0.0.0", port=5000)
