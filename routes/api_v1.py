@@ -587,7 +587,10 @@ def training_start(name):
     branch = body.get("branch")  # None → use project default
     result = start_training(projects_dir, name, branch=branch)
     if "error" in result:
-        return api_response(error_code="START_ERROR", error_message=result["error"], status_code=400)
+        resp, status = api_response(error_code="START_ERROR", error_message=result["error"], status_code=400)
+        body = resp.get_json()
+        body["error"]["details"] = {"code": result.get("code")}
+        return jsonify(body), status
     return api_response(data=result)
 
 

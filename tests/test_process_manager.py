@@ -10,7 +10,11 @@ import json
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from services import process_manager as pm
 from services.process_manager import start_training
+from tests.conftest import make_project_dir
 
 
 def _make_project(tmp_path, **overrides):
@@ -1050,3 +1054,87 @@ def test_launch_archives_pk_named_log_of_older_run_before_truncating(app, ready_
     assert rel and rel.endswith("-0001.log")
     with open(process_manager.get_run_log_path(projects_dir, "myproject", run_id=1)) as f:
         assert f.read() == "old run log"
+
+@pytest.fixture
+def fake_python(monkeypatch):
+    monkeypatch.setattr(pm, "_resolve_python_binary", lambda d, p: "/usr/bin/python3")
+
+
+@pytest.fixture
+def no_launch(monkeypatch):
+    """Capture the background thread's args instead of running the pre-launch sequence."""
+    captured = {}
+
+    class FakeThread:
+        def __init__(self, target, args, daemon):
+            captured["args"] = args
+        def start(self):
+            pass
+
+    monkeypatch.setattr(pm.threading, "Thread", FakeThread)
+    return captured
+
+
+def test_refusal_not_found(app):
+    assert pm.start_training(app.config["PROJECTS_DIR"], "ghost")["code"] == "NOT_FOUND"
+
+
+def test_refusal_setup_incomplete(app):
+    make_project_dir(app, "p", setup_status="installing_deps")
+    assert pm.start_training(app.config["PROJECTS_DIR"], "p")["code"] == "SETUP_INCOMPLETE"
+
+
+def test_refusal_no_python(app, monkeypatch):
+    make_project_dir(app, "p")
+    monkeypatch.setattr(pm, "_resolve_python_binary", lambda d, p: None)
+    assert pm.start_training(app.config["PROJECTS_DIR"], "p")["code"] == "NO_PYTHON"
+
+
+def test_refusal_already_running(app, fake_python):
+    make_project_dir(app, "p")
+    pm._running[999] = {"project_name": "p", "process": None, "starting": True,
+                        "run_pk": 999, "run_id": 1, "branch": "main", "workspace_dir": "x"}
+    assert pm.start_training(app.config["PROJECTS_DIR"], "p")["code"] == "ALREADY_RUNNING"
+
+
+def test_refusal_at_capacity(app, fake_python):
+    make_project_dir(app, "p", parallel_runs_enabled=True, max_parallel_runs=1)
+    pm._running[999] = {"project_name": "p", "process": None, "starting": True,
+                        "run_pk": 999, "run_id": 1, "branch": "main", "workspace_dir": "x"}
+    assert pm.start_training(app.config["PROJECTS_DIR"], "p")["code"] == "AT_CAPACITY"
+
+
+def test_refusal_invalid_env(app, fake_python):
+    make_project_dir(app, "p")
+    r = pm.start_training(app.config["PROJECTS_DIR"], "p", extra_env={"A": 1})
+    assert r["code"] == "INVALID_ENV"
+
+
+def test_extra_env_reaches_execute_training(app, fake_python, no_launch):
+    make_project_dir(app, "p")
+    r = pm.start_training(app.config["PROJECTS_DIR"], "p", extra_env={"LR": "1e-5"})
+    assert "error" not in r
+    assert no_launch["args"][-1] == {"LR": "1e-5"}
+
+
+def test_merge_run_env_precedence_and_reserved():
+    merged, reserved = pm._merge_run_env({"A": "1", "B": "1"}, {"B": "2", "BEEKEEPER_RUN_ID": "x"})
+    assert merged == {"A": "1", "B": "2", "BEEKEEPER_RUN_ID": "x"}
+    assert reserved == ["BEEKEEPER_RUN_ID"]
+
+
+def test_merge_run_env_handles_none():
+    assert pm._merge_run_env(None, None) == ({}, [])
+
+
+def test_is_run_live():
+    pm._running[5] = {"project_name": "p"}
+    assert pm.is_run_live(5) is True
+    assert pm.is_run_live(6) is False
+
+
+def test_api_start_error_includes_code(client, app):
+    make_project_dir(app, "p", setup_status="error")
+    r = client.post("/api/v1/projects/p/training/start", json={})
+    assert r.status_code == 400
+    assert r.get_json()["error"]["details"]["code"] == "SETUP_INCOMPLETE"

@@ -45,6 +45,19 @@ _GPU_ENV_KEYS = {
 }
 
 
+def _merge_run_env(project_env, extra_env):
+    """Project env vars with this run's overrides on top. Returns (merged, reserved keys set)."""
+    merged = dict(project_env or {})
+    merged.update(extra_env or {})
+    return merged, sorted(_BEEKEEPER_RUN_ENV_KEYS & set(merged))
+
+
+def is_run_live(run_pk: int) -> bool:
+    """True while process_manager is tracking the run (starting or running)."""
+    with _lock:
+        return run_pk in _running
+
+
 def _persistent_run_paths(projects_dir: str, name: str, run_id: int) -> tuple[str, str]:
     rel = f"persistent/runs/run_{run_id}"
     return rel, os.path.join(projects_dir, name, rel)  # NOSONAR
@@ -543,17 +556,23 @@ def _prune_old_runs(projects_dir: str, project_name: str, keep_last: int = 20):
         delete_run_storage(projects_dir, project_name, run)
 
 
-def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential pre-launch pipeline
+def start_training(projects_dir, name, branch=None, extra_env=None):  # NOSONAR — sequential pre-launch pipeline
     """Validate, reserve a training slot, and launch the pre-launch sequence in background."""
     config_path = os.path.join(projects_dir, name, _PROJECT_FILE)  # NOSONAR
     if not os.path.isfile(config_path):
-        return {"error": "Project not found"}
+        return {"error": "Project not found", "code": "NOT_FOUND"}
 
     with open(config_path) as f:
         project = json.load(f)
 
     if project.get("setup_status") != "ready":
-        return {"error": "Project setup is not complete"}
+        return {"error": "Project setup is not complete", "code": "SETUP_INCOMPLETE"}
+
+    if extra_env is not None and not (
+        isinstance(extra_env, dict)
+        and all(isinstance(k, str) and isinstance(v, str) for k, v in extra_env.items())
+    ):
+        return {"error": "env_vars must map strings to strings", "code": "INVALID_ENV"}
 
     python_bin = _resolve_python_binary(projects_dir, project)
     if not python_bin:
@@ -561,7 +580,7 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
             hint = f"conda env beekeeper-{name}"
         else:
             hint = os.path.join(projects_dir, name, "venv", "bin")
-        return {"error": f"Could not find Python binary (checked {hint})"}
+        return {"error": f"Could not find Python binary (checked {hint})", "code": "NO_PYTHON"}
 
     if branch is None:
         branch = project.get("branch", "main")
@@ -574,10 +593,10 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
         max_runs = project.get("max_parallel_runs", 2)
 
         if not parallel_enabled and len(active_runs) > 0:
-            return {"error": "Training is already running. To run multiple runs simultaneously, enable Parallel Runs in Edit Project."}
+            return {"error": "Training is already running. To run multiple runs simultaneously, enable Parallel Runs in Edit Project.", "code": "ALREADY_RUNNING"}
 
         if parallel_enabled and len(active_runs) >= max_runs:
-            return {"error": f"At capacity ({max_runs} parallel runs)"}
+            return {"error": f"At capacity ({max_runs} parallel runs)", "code": "AT_CAPACITY"}
 
         # GPU pre-flight check — atomic with slot reservation so parallel starts
         # can't both see the same free VRAM and both pass.
@@ -585,7 +604,7 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
         if project.get("gpu_enabled", False):
             gpus = get_gpu_stats()
             if not gpus:
-                return {"error": "GPU management is enabled but no NVIDIA GPUs were detected"}
+                return {"error": "GPU management is enabled but no NVIDIA GPUs were detected", "code": "NO_GPU"}
             minimum_mb = project.get("gpu_memory_minimum", 0)
             best = max(gpus, key=lambda g: g["mem_total"] - g["mem_used"])
             free_mb = (best["mem_total"] - best["mem_used"]) // (1024 * 1024)
@@ -594,7 +613,8 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
                     "error": (
                         f"Insufficient VRAM: {minimum_mb} MB required, "
                         f"{free_mb} MB free on {best['name']} (GPU {best['index']})"
-                    )
+                    ),
+                    "code": "INSUFFICIENT_VRAM",
                 }
             gpu_assignment = {"index": best["index"], "free_mb": free_mb}
 
@@ -628,7 +648,7 @@ def start_training(projects_dir, name, branch=None):  # NOSONAR — sequential p
 
     thread = threading.Thread(
         target=_execute_training,
-        args=(projects_dir, name, project, python_bin, run_pk, run_id, branch, workspace_dir, gpu_assignment),
+        args=(projects_dir, name, project, python_bin, run_pk, run_id, branch, workspace_dir, gpu_assignment, extra_env),
         daemon=True,
     )
     thread.start()
@@ -651,7 +671,7 @@ def _archive_older_runs_pk_named_log(projects_dir: str, name: str, run_id: int, 
     get_db().update_training_run(old["id"], log_file_path=rel)
 
 
-def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, branch, workspace_dir, gpu_assignment=None):  # NOSONAR — sequential pre-launch pipeline
+def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, branch, workspace_dir, gpu_assignment=None, extra_env=None):  # NOSONAR — sequential pre-launch pipeline
     """Run the full pre-launch sequence and start the training subprocess (runs in background thread)."""
     is_parallel = workspace_dir != os.path.join(projects_dir, name, "workspace")
     log_path = os.path.join(projects_dir, name, f"train-{run_id}.log")
@@ -887,8 +907,10 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
         os.write(log_fd, b"\n")
 
     proc_env = os.environ.copy()
-    project_env = project.get("env_vars") or {}
-    for key in sorted(_BEEKEEPER_RUN_ENV_KEYS & set(project_env)):
+    project_env, reserved_keys = _merge_run_env(project.get("env_vars"), extra_env)
+    if extra_env:
+        os.write(log_fd, f"[beekeeper] Run env overrides: {', '.join(sorted(extra_env))}\n".encode())
+    for key in reserved_keys:
         warning = f"Project env var {key} is reserved by Beekeeper and was overridden for this run."
         prelaunch_warnings.append(warning)
         os.write(log_fd, f"[beekeeper] WARNING: {warning}\n".encode())
