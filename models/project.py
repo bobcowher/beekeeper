@@ -1,11 +1,27 @@
 import json
 import os
+import re
 import tempfile
 from dataclasses import dataclass, field, asdict
 
 # setup_status values where the background setup thread (project_service._setup_project)
 # is still running — clone, env creation, setup script, or pip install in flight.
 SETUP_ACTIVE_STATUSES = {"pending", "cloning", "creating_env", "running_setup_script", "installing_deps"}
+
+
+FOLDER_RE = re.compile(r"^[A-Za-z0-9 _.-]{0,64}$")
+
+
+def normalize_folder(value) -> str:
+    """Trimmed folder name ('' = unfiled). Folders are flat: no '/'. Raises ValueError."""
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError("folder must be a string")
+    value = value.strip()
+    if not FOLDER_RE.match(value):
+        raise ValueError("folder may use letters, digits, spaces, '_', '.', '-' (max 64) and no '/'")
+    return value
 
 
 @dataclass
@@ -38,6 +54,7 @@ class Project:
     gpu_enabled: bool = False
     gpu_memory_minimum: int = 0   # MB — hard floor; run rejected if free VRAM is below this
     gpu_memory_preferred: int = 0  # MB — full ask including offloadable allocations
+    folder: str = ""  # flat grouping label; '' = unfiled
 
     def to_dict(self):
         return asdict(self)

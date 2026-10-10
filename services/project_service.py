@@ -221,6 +221,7 @@ def create_project(projects_dir, data):
         data_dir_remote=data.get("data_dir_remote", ""),
         output_paths=data.get("output_paths", []),
         env_vars=data.get("env_vars", {}),
+        folder=data.get("folder", ""),
         created_at=time.time(),
     )
     project.save(projects_dir)

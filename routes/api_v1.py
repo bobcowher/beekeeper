@@ -12,7 +12,8 @@ import time
 from typing import NoReturn
 from flask import Blueprint, abort, current_app, jsonify, request, Response
 
-from models.project import Project, SETUP_ACTIVE_STATUSES
+from models.project import Project, SETUP_ACTIVE_STATUSES, normalize_folder
+from services.folder_service import list_folders, rename_folder
 from services.process_manager import start_training, stop_training, get_training_status, get_runs_for_project, get_run_log_path
 from services.stats_service import get_all_stats, get_cpu_stats, get_memory_stats, get_gpu_stats, get_gpu_platform_info
 from services.db_service import get_db
@@ -77,6 +78,7 @@ def list_projects():
     """List all projects with basic info and training status."""
     projects_dir = current_app.config["PROJECTS_DIR"]
     projects = []
+    folder_filter = request.args.get("folder")
 
     if not os.path.isdir(projects_dir):
         return api_response(data={"projects": []})
@@ -86,6 +88,8 @@ def list_projects():
         if os.path.isfile(config_path):
             try:
                 project = Project.load(config_path)
+                if folder_filter is not None and project.folder != folder_filter.strip():
+                    continue
                 status = get_training_status(name)
                 projects.append({
                     "name": project.name,
@@ -95,6 +99,7 @@ def list_projects():
                     "train_status": status["status"],
                     "pinned": project.pinned,
                     "last_run_at": project.last_run_at,
+                    "folder": project.folder,
                 })
             except Exception:
                 continue
@@ -134,6 +139,11 @@ def create_project():
             error_message="Git URL is required",
             status_code=400
         )
+
+    try:
+        folder = normalize_folder(data.get("folder", ""))
+    except ValueError as e:
+        return api_response(error_code="INVALID_FOLDER", error_message=str(e), status_code=400)
 
     projects_dir = current_app.config["PROJECTS_DIR"]
 
@@ -187,6 +197,7 @@ def create_project():
         "data_dir_local": data.get("data_dir_local", "data").strip() or "data",
         "data_dir_remote": data.get("data_dir_remote", "").strip(),
         "output_paths": output_paths,
+        "folder": folder,
     }
 
     # Create the project
@@ -426,7 +437,7 @@ def update_project_api(name):
 
     Editable fields: branch, train_file, tensorboard_log_dir, requirements_file,
     setup_script, env_vars (dict), tb_logs_max_runs (int), run_history_max_runs (int),
-    data_dir_enabled (bool), data_dir_local (str), data_dir_remote (str).
+    data_dir_enabled (bool), data_dir_local (str), data_dir_remote (str), folder (str).
     """
     from services.project_service import ensure_data_dir_symlink
 
@@ -434,12 +445,19 @@ def update_project_api(name):
     data = request.get_json() or {}
 
     status = get_training_status(name)
-    if status["status"] == "running":
+    cosmetic_only = set(data) <= {"folder"}
+    if status["status"] == "running" and not cosmetic_only:
         return api_response(
             error_code="TRAINING_RUNNING",
             error_message="Cannot update project while training is running — stop training first",
             status_code=409
         )
+
+    if "folder" in data:
+        try:
+            project.folder = normalize_folder(data["folder"])
+        except ValueError as e:
+            return api_response(error_code="INVALID_FOLDER", error_message=str(e), status_code=400)
 
     if "branch" in data:
         project.branch = data["branch"].strip() or project.branch
@@ -531,6 +549,28 @@ def update_project_api(name):
     project.save(projects_dir)
 
     return api_response(data={"project": project.to_dict()})
+
+
+@api_v1_bp.route("/folders", methods=["GET"])
+@api_key_required
+def list_folders_api():
+    """All folder names in use, alphabetical."""
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    pipelines_dir = current_app.config.get("PIPELINES_DIR")
+    return api_response(data={"folders": list_folders(projects_dir, pipelines_dir)})
+
+
+@api_v1_bp.route("/folders/<folder>/rename", methods=["POST"])
+@api_key_required
+def rename_folder_api(folder):
+    """Rename a folder by moving every member to new_name."""
+    data = request.get_json() or {}
+    try:
+        moved = rename_folder(current_app.config["PROJECTS_DIR"], folder,
+                              data.get("new_name", ""), current_app.config.get("PIPELINES_DIR"))
+    except ValueError as e:
+        return api_response(error_code="INVALID_FOLDER", error_message=str(e), status_code=400)
+    return api_response(data={"renamed": moved})
 
 
 # ---------------------------------------------------------------------------
