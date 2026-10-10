@@ -9,9 +9,13 @@ from services.pipeline_schema import NAME_RE, PipelineValidationError, parse_tex
 PIPELINE_FILE = "pipeline.yaml"
 
 
-def _path(pipelines_dir, name):
-    if not NAME_RE.match(name or ""):
+def _check_name(name):
+    if not isinstance(name, str) or not NAME_RE.fullmatch(name):
         raise FileNotFoundError(name)
+
+
+def _path(pipelines_dir, name):
+    _check_name(name)
     return os.path.join(pipelines_dir, name, PIPELINE_FILE)  # NOSONAR — name validated above
 
 
@@ -71,4 +75,5 @@ def delete_pipeline_files(pipelines_dir, name):
 
 
 def pipeline_run_dir(pipelines_dir, name, run_number) -> str:
+    _check_name(name)
     return os.path.abspath(os.path.join(pipelines_dir, name, "runs", f"run_{run_number}"))

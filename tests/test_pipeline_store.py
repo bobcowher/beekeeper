@@ -33,7 +33,8 @@ def test_save_text_rejects_name_mismatch(pdir):
 def test_save_dict_and_list(pdir):
     store.save_pipeline(pdir, DEFN)
     os.makedirs(os.path.join(pdir, "broken"))
-    open(os.path.join(pdir, "broken", "pipeline.yaml"), "w").write("name: [")
+    with open(os.path.join(pdir, "broken", "pipeline.yaml"), "w") as f:
+        f.write("name: [")
     listing = {p["name"]: p for p in store.list_pipelines(pdir)}
     assert listing["pl"]["steps"][1]["project"] == "p"
     assert "error" in listing["broken"]
@@ -84,3 +85,16 @@ def test_delete_pipeline_records_resets_numbering(app):
     db.delete_pipeline_records("pl")
     assert db.latest_pipeline_run("pl") is None
     assert db.create_pipeline_run("pl", DEFN)[1] == 1
+
+
+@pytest.mark.parametrize("bad", ["../x", "", "pl\n", None, 5])
+def test_run_dir_rejects_bad_names(pdir, bad):
+    with pytest.raises(FileNotFoundError):
+        store.pipeline_run_dir(pdir, bad, 1)
+
+
+def test_bad_names_not_found(pdir):
+    assert store.pipeline_exists(pdir, "../x") is False
+    store.save_pipeline_text(pdir, "pl", TEXT)
+    with pytest.raises(FileNotFoundError):
+        store.load_pipeline(pdir, "pl\n")
