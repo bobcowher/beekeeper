@@ -33,12 +33,34 @@ def step_dir_var(step_name: str) -> str:
 
 def parse_text(text: str) -> dict:
     try:
+        node = yaml.compose(text, Loader=yaml.SafeLoader)
+        _reject_duplicate_keys(node)
         data = yaml.safe_load(text)
     except yaml.YAMLError as e:
         raise PipelineValidationError([{"path": "", "message": f"Invalid YAML: {e}"}])
     if not isinstance(data, dict):
         raise PipelineValidationError([{"path": "", "message": "A pipeline must be a mapping"}])
     return data
+
+
+def _reject_duplicate_keys(node):
+    """Reject duplicate YAML mapping keys before safe_load's last-value-wins construction."""
+    if isinstance(node, yaml.MappingNode):
+        seen = set()
+        for key_node, value_node in node.value:
+            key = (key_node.tag, key_node.value) if isinstance(key_node, yaml.ScalarNode) else str(key_node)
+            if key in seen:
+                label = repr(key_node.value) if isinstance(key_node, yaml.ScalarNode) else "mapping key"
+                raise PipelineValidationError([{
+                    "path": "",
+                    "message": f"Invalid YAML: duplicate mapping key {label} at line {key_node.start_mark.line + 1}",
+                }])
+            seen.add(key)
+            _reject_duplicate_keys(key_node)
+            _reject_duplicate_keys(value_node)
+    elif isinstance(node, yaml.SequenceNode):
+        for item in node.value:
+            _reject_duplicate_keys(item)
 
 
 def _not_string(value) -> str:
@@ -63,7 +85,7 @@ def _env_field(env, path, err):
         return None
     ok = True
     for key, value in env.items():
-        if not isinstance(key, str) or not ENV_KEY_RE.match(key):
+        if not isinstance(key, str) or not ENV_KEY_RE.fullmatch(key):
             err(f"{path}.{key}", "invalid environment variable name")
             ok = False
         elif key.startswith("BEEKEEPER_"):
@@ -80,7 +102,7 @@ def _validate_step(step, path, err):
         err(path, "must be a mapping")
         return None
     name = _str_field(step, "name", path, err, required=True)
-    if name is not None and not STEP_NAME_RE.match(name):
+    if name is not None and not STEP_NAME_RE.fullmatch(name):
         err(f"{path}.name", "use lowercase letters, digits, '_' or '-' (max 32)")
         name = None
     stype = step.get("type")
@@ -97,11 +119,14 @@ def _validate_step(step, path, err):
             err(f"{path}.project", "must name a project using only letters, digits, '_' or '-'")
             project = None
         branch = _str_field(step, "branch", path, err)
+        branch_ok = branch is None or bool(branch.strip())
+        if not branch_ok:
+            err(f"{path}.branch", "must not be empty")
         env = _env_field(step.get("env_vars", {}), f"{path}.env_vars", err)
-        if name is None or project is None or env is None:
+        if name is None or project is None or env is None or not branch_ok:
             return None
         out = {"name": name, "type": "train", "project": project, "env_vars": env}
-        if branch:
+        if branch is not None:
             out["branch"] = branch
         return out
 
@@ -130,7 +155,7 @@ def validate(data, expected_name: str | None = None) -> dict:
         err(str(key), "unknown key")
 
     name = data.get("name")
-    if not isinstance(name, str) or not NAME_RE.match(name):
+    if not isinstance(name, str) or not NAME_RE.fullmatch(name):
         err("name", "required; lowercase letters, digits, '_' or '-' (max 64), starting with a letter or digit")
     elif expected_name is not None and name != expected_name:
         err("name", f"must match the pipeline name '{expected_name}'")

@@ -66,6 +66,36 @@ def test_yaml_bool_branch_rejected_with_quote_hint():
     assert "quote" in errs["steps[0].branch"]
 
 
+@pytest.mark.parametrize("branch", ["", "   "])
+def test_empty_train_branch_rejected(branch):
+    errs = errors_for({
+        "name": "p",
+        "steps": [{"name": "a", "type": "train", "project": "x", "branch": branch}],
+    })
+    assert "empty" in errs["steps[0].branch"]
+
+
+@pytest.mark.parametrize("text,key", [
+    ("name: p\nname: q\nsteps: []\n", "'name'"),
+    ("name: p\nsteps:\n  - name: a\n    type: task\n    command: x\n    command: y\n", "'command'"),
+])
+def test_duplicate_yaml_mapping_keys_rejected(text, key):
+    with pytest.raises(PipelineValidationError) as exc:
+        parse_text(text)
+    assert "duplicate mapping key" in str(exc.value)
+    assert key in str(exc.value)
+
+
+@pytest.mark.parametrize("doc,path", [
+    ({"name": "p\n", "steps": [{"name": "a", "type": "task", "command": "x"}]}, "name"),
+    ({"name": "p", "steps": [{"name": "a\n", "type": "task", "command": "x"}]}, "steps[0].name"),
+    ({"name": "p", "steps": [{"name": "a", "type": "train", "project": "x",
+                                  "env_vars": {"BAD\n": "x"}}]}, "steps[0].env_vars.BAD\n"),
+])
+def test_pattern_fields_reject_trailing_newline(doc, path):
+    assert path in errors_for(doc)
+
+
 def test_yaml_float_env_rejected():
     errs = errors_for("name: p\nsteps:\n  - {name: a, type: train, project: x, env_vars: {LR: 0.001}}\n")
     assert "quote" in errs["steps[0].env_vars.LR"]
