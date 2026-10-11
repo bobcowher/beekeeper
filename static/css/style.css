@@ -352,6 +352,32 @@ body {
     width: fit-content;
 }
 
+.activity-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.activity-row {
+    display: grid;
+    grid-template-columns: minmax(150px, 1fr) minmax(180px, 2fr) auto;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    text-decoration: none;
+    background: var(--bg-secondary);
+}
+
+.activity-row:hover { border-color: var(--accent-dim); background: var(--bg-input); }
+.activity-identity { display: flex; flex-direction: column; min-width: 0; }
+.activity-kind { color: var(--text-secondary); font-size: 11px; text-transform: uppercase; }
+.activity-name { color: var(--accent); font-family: var(--font-mono); overflow-wrap: anywhere; }
+.activity-detail { overflow-wrap: anywhere; }
+
 .project-branch {
     color: var(--text-secondary);
     font-size: 12px;
@@ -1829,6 +1855,7 @@ label {
 .queue-list { margin: 0; padding-left: 1.25rem; }
 .queue-row { display: flex; gap: 0.75rem; align-items: center; padding: 0.25rem 0; }
 .queue-wait { color: var(--accent-dim); font-size: 0.8rem; }
+.start-reason { font-size: 0.8rem; max-width: 32rem; }
 
 /* Pipelines */
 [hidden] { display: none !important; }
@@ -1875,5 +1902,7 @@ label {
     .step-chain { flex-direction: column; gap: 1.1rem; }
     .step-node { min-width: 0; width: 100%; }
     .step-node:not(:last-child)::after { content: "\2193"; right: auto; left: 50%; top: auto; bottom: -1.1rem; }
+    .activity-row { grid-template-columns: 1fr auto; }
+    .activity-detail { grid-column: 1 / -1; grid-row: 2; }
 }
 .card-header .dashboard-controls { flex-wrap: wrap; justify-content: flex-end; }

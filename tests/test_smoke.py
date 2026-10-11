@@ -31,7 +31,8 @@ MOCK_PY_VERSIONS = [
 def test_dashboard_empty(client):
     resp = client.get("/")
     assert resp.status_code == 200
-    assert b"No projects or pipelines yet" in resp.data
+    assert b"Running now" in resp.data
+    assert b"Recent activity" in resp.data
 
 
 def test_base_layout_shows_deploy_version(client):
@@ -41,15 +42,25 @@ def test_base_layout_shows_deploy_version(client):
     assert b"v1.1.0 " in resp.data
 
 
-def test_dashboard_shows_project(client, ready_project):
-    resp = client.get("/")
+def test_projects_page_shows_project(client, ready_project):
+    resp = client.get("/projects")
     assert resp.status_code == 200
     assert b"myproject" in resp.data
 
 
-def test_dashboard_shows_status_badge(client, ready_project):
-    resp = client.get("/")
+def test_projects_page_shows_status_badge(client, ready_project):
+    resp = client.get("/projects")
     assert b"ready" in resp.data
+
+
+def test_sidebar_highlights_collection_for_subpages(client, ready_project, app):
+    from services import pipeline_store
+    pipeline_store.save_pipeline(app.config["PIPELINES_DIR"], {
+        "name": "fac", "steps": [{"name": "a", "type": "task", "command": "true"}]})
+    project_html = client.get("/projects/myproject").get_data(as_text=True)
+    pipeline_html = client.get("/pipelines/fac").get_data(as_text=True)
+    assert 'href="/projects" class="active"' in project_html
+    assert 'href="/pipelines" class="active"' in pipeline_html
 
 
 # --- Create project form ---
@@ -181,12 +192,12 @@ def test_edit_not_found(client):
 
 # --- Delete ---
 
-def test_delete_redirects_to_dashboard(client, ready_project, mocker):
+def test_delete_redirects_to_projects(client, ready_project, mocker):
     mocker.patch("routes.project.stop_tensorboard")
     mocker.patch("routes.project.delete_project")
     resp = client.post("/projects/myproject/delete", follow_redirects=False)
     assert resp.status_code == 302
-    assert resp.headers["Location"] == "/"
+    assert resp.headers["Location"] == "/projects"
 
 
 def test_delete_not_found(client):
@@ -304,13 +315,68 @@ def test_project_page_has_queue_controls(client, ready_project):
     assert 'id="queue-section"' in html
 
 
-def test_dashboard_lists_pipeline_rows(client, app):
+def test_pipelines_page_lists_pipeline_rows(client, app):
     from services import pipeline_store
     pipeline_store.save_pipeline(app.config["PIPELINES_DIR"], {
         "name": "fac", "folder": "chess", "steps": [{"name": "a", "type": "task", "command": "true"}]})
-    html = client.get("/").get_data(as_text=True)
+    html = client.get("/pipelines").get_data(as_text=True)
     assert 'data-kind="pipeline"' in html and 'href="/pipelines/fac"' in html
     assert 'aria-label="a: pending"' in html
+
+
+def test_dashboard_activity_merges_recent_runs_and_queue(client, app):
+    import datetime
+    from services import pipeline_store
+    from services.db_service import get_db
+
+    db = get_db()
+    training_pk, _ = db.create_training_run("myproject", {
+        "started_at": datetime.datetime(2026, 10, 11, 10, 0),
+        "status": "running", "branch": "main",
+    })
+    db.update_training_run(
+        training_pk, status="completed", ended_at=datetime.datetime(2026, 10, 11, 10, 5),
+        duration_seconds=300,
+    )
+    pipeline_store.save_pipeline(app.config["PIPELINES_DIR"], {
+        "name": "fac", "steps": [{"name": "a", "type": "task", "command": "true"}]})
+    pipeline_pk, _ = db.create_pipeline_run("fac", {
+        "name": "fac", "folder": "", "description": "",
+        "steps": [{"name": "a", "type": "task", "command": "true", "timeout_s": 10}],
+    })
+    db.update_pipeline_run(pipeline_pk, status="failed", ended_at="2026-10-11T10:06:00")
+    db.enqueue_run("myproject", branch="dev")
+
+    data = client.get("/dashboard/activity").get_json()
+
+    assert data["queued"][0] == {
+        "project": "myproject", "branch": "dev", "position": 1,
+        "url": "/projects/myproject",
+    }
+    assert [item["run_ref"] for item in data["recent"]] == ["fac#1", "myproject-1"]
+    assert [item["status"] for item in data["recent"]] == ["failed", "completed"]
+
+
+def test_dashboard_activity_reports_live_training_and_pipeline_step(client, app):
+    from services import pipeline_store, process_manager
+    from services.db_service import get_db
+
+    make_project_dir(app, "trainer")
+    process_manager._running[10] = {
+        "project_name": "trainer", "run_pk": 10, "run_id": 4, "branch": "experiment",
+        "process": None, "starting": True, "workspace_dir": "x",
+    }
+    definition = {
+        "name": "fac", "folder": "", "description": "",
+        "steps": [{"name": "deploy", "type": "task", "command": "true", "timeout_s": 10}],
+    }
+    pipeline_store.save_pipeline(app.config["PIPELINES_DIR"], definition)
+    get_db().create_pipeline_run("fac", definition)
+
+    running = client.get("/dashboard/activity").get_json()["running"]
+
+    assert any(item["run_ref"] == "trainer-4" and item["branch"] == "experiment" for item in running)
+    assert any(item["run_ref"] == "fac#1" and item["current_step"] == "deploy" for item in running)
 
 
 def test_new_pipeline_creates_template_and_redirects(client, app):

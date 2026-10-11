@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Beekeeper - Pipelines{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Pipelines</h1></div>
+<section class="card">
+    <div class="card-header">
+        <h2>Pipelines</h2>
+        <div class="dashboard-controls">
+            <div class="sort-toggle">
+                <button class="sort-btn" data-sort="recent">Last Run</button>
+                <button class="sort-btn" data-sort="alpha">A–Z</button>
+            </div>
+            <a href="{{ url_for('pipelines.new') }}" class="btn btn-primary">+ New Pipeline</a>
+        </div>
+    </div>
+    {% if pipelines %}
+    <div class="project-list" id="project-list">
+        {% for pl in pipelines %}
+        <div class="project-row pipeline-row" data-kind="pipeline"
+             data-name="{{ pl.defn.name }}" data-folder="{{ pl.defn.folder }}"
+             data-pinned="false" data-last-run="{{ pl.last_run_at }}" data-created-at="0">
+            <a href="/pipelines/{{ pl.defn.name }}" class="project-item">
+                <span class="project-name"><span class="pipeline-icon" aria-hidden="true">&#9939;</span> {{ pl.defn.name }}</span>
+                <span class="project-meta">
+                    {% if pl.defn.error %}
+                    <span class="project-status status-badge status-error">invalid</span>
+                    {% else %}
+                    <span class="step-strip" role="group"
+                          aria-label="{{ (pl.last.run_ref ~ ' step progress') if pl.last else 'Pipeline has never run' }}"
+                          title="{{ pl.last.run_ref if pl.last else 'never run' }}">
+                        {% for s in (pl.last.steps if pl.last else pl.defn.steps) %}
+                        {% set step_status = s.status if pl.last else 'pending' %}
+                        <span class="step-pill step-{{ step_status }}" role="img"
+                              aria-label="{{ s.name }}: {{ step_status }}" title="{{ s.name }}"></span>
+                        {% endfor %}
+                    </span>
+                    {% if pl.last %}
+                    <span class="project-status status-badge status-{{ pl.last.status }}">{{ pl.last.run_ref }} {{ pl.last.status }}</span>
+                    {% endif %}
+                    {% endif %}
+                </span>
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}<p class="muted">No pipelines yet.</p>{% endif %}
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>{% endblock %}

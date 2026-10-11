@@ -16,6 +16,8 @@
             </div>
             <ul class="sidebar-nav">
                 <li><a href="/" class="{% if request.path == '/' %}active{% endif %}">Dashboard</a></li>
+                <li><a href="/projects" class="{% if request.path.startswith('/projects') %}active{% endif %}">Projects</a></li>
+                <li><a href="/pipelines" class="{% if request.path.startswith('/pipelines') %}active{% endif %}">Pipelines</a></li>
                 {% if not auth_enabled or (user and user.is_admin) %}
                 <li><a href="/admin" class="{% if request.path.startswith('/admin') %}active{% endif %}">Admin</a></li>
                 {% endif %}

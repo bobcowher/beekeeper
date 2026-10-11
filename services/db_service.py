@@ -189,6 +189,8 @@ class DatabaseService:
                 started_at TIMESTAMP,
                 ended_at TIMESTAMP,
                 UNIQUE(pipeline_run_pk, step_index, attempt))''')
+            conn.execute('''CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started
+                            ON pipeline_runs(started_at DESC)''')
 
             conn.execute('''CREATE TABLE IF NOT EXISTS schema_migrations (
                 name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
@@ -595,6 +597,15 @@ class DatabaseService:
 
             return [dict(row) for row in rows]
 
+    def recent_finished_training_runs(self, limit: int = 20) -> list[dict]:
+        """Fetch recent terminal training runs across all projects."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM training_runs WHERE status NOT IN ('running', 'starting') "
+                "ORDER BY started_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def get_training_run(self, run_pk: int) -> dict:
         """Fetch single run details."""
         with self._get_connection() as conn:
@@ -814,6 +825,17 @@ class DatabaseService:
                 (project_name,)).fetchall()
             return [self._queue_row(r) for r in rows]
 
+    def list_all_queued_runs(self) -> list[dict]:
+        """Queued runs across projects with a per-project FIFO position."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                '''SELECT q.*,
+                          ROW_NUMBER() OVER (PARTITION BY project_name ORDER BY id) AS position
+                   FROM run_queue q WHERE status = 'queued'
+                   ORDER BY created_at, id'''
+            ).fetchall()
+            return [self._queue_row(r) for r in rows]
+
     def queue_position(self, queue_id: int) -> int | None:
         """Return the entry's current FIFO position, or None if it already left the queue."""
         with self._get_connection() as conn:
@@ -943,6 +965,15 @@ class DatabaseService:
             rows = conn.execute(
                 'SELECT * FROM pipeline_runs WHERE pipeline_name = ? ORDER BY run_number DESC LIMIT ?',
                 (pipeline_name, limit)).fetchall()
+            return [self._pipeline_row(r) for r in rows]
+
+    def recent_finished_pipeline_runs(self, limit: int = 20) -> list[dict]:
+        """Fetch recent terminal pipeline runs across all pipelines."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM pipeline_runs WHERE status != 'running' "
+                "ORDER BY started_at DESC LIMIT ?", (limit,)
+            ).fetchall()
             return [self._pipeline_row(r) for r in rows]
 
     def running_pipeline_runs(self) -> list[dict]:

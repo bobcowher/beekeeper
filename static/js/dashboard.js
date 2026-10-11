@@ -66,8 +66,9 @@
                 return a.dataset.name.localeCompare(b.dataset.name);
             }
             // recent: use last_run_at, fall back to created_at for never-run projects
-            const ta = parseFloat(a.dataset.lastRun) || parseFloat(a.dataset.createdAt) || 0;
-            const tb = parseFloat(b.dataset.lastRun) || parseFloat(b.dataset.createdAt) || 0;
+            const timestamp = value => parseFloat(value) || Date.parse(value) || 0;
+            const ta = timestamp(a.dataset.lastRun) || timestamp(a.dataset.createdAt);
+            const tb = timestamp(b.dataset.lastRun) || timestamp(b.dataset.createdAt);
             if (ta === 0 && tb === 0) return a.dataset.name.localeCompare(b.dataset.name);
             return tb - ta;
         });

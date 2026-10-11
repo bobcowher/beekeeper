@@ -355,7 +355,7 @@
         try {
             const data = await api(API, { method: 'DELETE' });
             if (!data.success) throw new Error(errorMessage(data, 'Delete failed'));
-            location.href = '/';
+            location.href = '/pipelines';
         } catch (error) {
             showPageError(`Could not delete pipeline: ${error.message}`);
             button.disabled = false;

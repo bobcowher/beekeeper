@@ -1,64 +1,86 @@
 import datetime
 import os
-import json
-from flask import Blueprint, render_template, current_app
-from services.process_manager import get_runs_for_project
-from services import pipeline_engine, pipeline_store
+
+from flask import Blueprint, current_app, jsonify, render_template
+
+from services import pipeline_engine
 from services.db_service import get_db
+from services.process_manager import get_runs_for_project
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
 
-def _format_runtime(seconds: int) -> str:
-    if not seconds:
-        return ""
-    d, rem = divmod(int(seconds), 86400)
-    h, rem = divmod(rem, 3600)
-    m, _ = divmod(rem, 60)
-    parts = []
-    if d:
-        parts.append(f"{d}d")
-    if h:
-        parts.append(f"{h}h")
-    if m:
-        parts.append(f"{m}m")
-    return " ".join(parts) if parts else "< 1m"
+def _seconds_between(start, end=None):
+    if not start:
+        return None
+    started = datetime.datetime.fromisoformat(start)
+    ended = datetime.datetime.fromisoformat(end) if end else datetime.datetime.now()
+    return max(0, int((ended - started).total_seconds()))
 
 
-def _effective_train_status(name: str, stored_status: str) -> str:
-    """Return live status if any run is active; otherwise return stored status."""
-    live_runs = get_runs_for_project(name)
-    if any(r.get("status") in ("running", "starting") for r in live_runs):
-        return "running"
-    return stored_status
+def _activity_data():
+    db = get_db()
+    running = []
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    if os.path.isdir(projects_dir):
+        for name in sorted(os.listdir(projects_dir)):
+            if not os.path.isfile(os.path.join(projects_dir, name, "project.json")):
+                continue
+            for run in get_runs_for_project(name):
+                running.append({
+                    "kind": "training", "name": name, "run_id": run["run_id"],
+                    "run_ref": run["run_ref"], "branch": run.get("branch") or "",
+                    "elapsed": run.get("elapsed"), "status": run.get("status", "running"),
+                    "url": f"/projects/{name}",
+                })
+
+    for row in db.running_pipeline_runs():
+        run = pipeline_engine.describe_run(row)
+        index = run.get("current_step", 0)
+        step = run["steps"][index] if index < len(run["steps"]) else None
+        running.append({
+            "kind": "pipeline", "name": run["pipeline"], "run_id": run["run_id"],
+            "run_ref": run["run_ref"], "current_step": step["name"] if step else "",
+            "elapsed": _seconds_between(run.get("started_at")), "status": "running",
+            "url": f"/pipelines/{run['pipeline']}",
+        })
+
+    queued = [{
+        "project": entry["project_name"], "branch": entry.get("branch") or "",
+        "position": entry["position"], "url": f"/projects/{entry['project_name']}",
+    } for entry in db.list_all_queued_runs()]
+
+    recent = []
+    for run in db.recent_finished_training_runs(limit=20):
+        recent.append({
+            "kind": "training", "name": run["project_name"],
+            "run_id": run["run_number"],
+            "run_ref": f"{run['project_name']}-{run['run_number']}",
+            "status": run["status"], "duration": run.get("duration_seconds"),
+            "timestamp": run.get("ended_at") or run["started_at"],
+            "url": f"/projects/{run['project_name']}/history/{run['run_number']}/log",
+        })
+    for run in db.recent_finished_pipeline_runs(limit=20):
+        status = "completed" if run["status"] == "succeeded" else run["status"]
+        recent.append({
+            "kind": "pipeline", "name": run["pipeline_name"],
+            "run_id": run["run_number"],
+            "run_ref": f"{run['pipeline_name']}#{run['run_number']}",
+            "status": status,
+            "duration": _seconds_between(run["started_at"], run.get("ended_at")),
+            "timestamp": run.get("ended_at") or run["started_at"],
+            "url": f"/pipelines/{run['pipeline_name']}",
+        })
+    recent.sort(key=lambda item: item["timestamp"] or "", reverse=True)
+
+    return {"running": running, "queued": queued, "recent": recent[:20]}
 
 
 @dashboard_bp.route("/", methods=["GET"])
 def index():
-    projects_dir = current_app.config["PROJECTS_DIR"]
-    projects = []
+    return render_template("dashboard.html", activity=_activity_data())
 
-    if os.path.exists(projects_dir):
-        for name in sorted(os.listdir(projects_dir)):
-            config_path = os.path.join(projects_dir, name, "project.json")
-            if os.path.isfile(config_path):
-                with open(config_path) as f:
-                    p = json.load(f)
-                p["train_status"] = _effective_train_status(
-                    name, p.get("train_status", "idle")
-                )
-                raw = get_db().get_project_total_runtime(name)
-                p["total_runtime_seconds"] = raw
-                p["total_runtime"] = _format_runtime(raw)
-                projects.append(p)
 
-    pipelines = []
-    for defn in pipeline_store.list_pipelines(current_app.config["PIPELINES_DIR"]):
-        latest = get_db().latest_pipeline_run(defn["name"])
-        last = pipeline_engine.describe_run(latest) if latest else None
-        started = 0.0
-        if latest:
-            started = datetime.datetime.fromisoformat(latest["started_at"]).timestamp()
-        pipelines.append({"defn": defn, "last": last, "last_run_at": started})
-
-    return render_template("dashboard.html", projects=projects, pipelines=pipelines)
+@dashboard_bp.route("/dashboard/activity", methods=["GET"])
+def activity():
+    return jsonify(_activity_data())

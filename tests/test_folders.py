@@ -101,9 +101,9 @@ def test_rename_folder_invalid_target_is_400(client, app):
     assert r.status_code == 400
 
 
-def test_dashboard_rows_carry_folder(client, app):
+def test_projects_page_rows_carry_folder(client, app):
     make_project_dir(app, "p1", folder="chess")
-    html = client.get("/").get_data(as_text=True)
+    html = client.get("/projects").get_data(as_text=True)
     assert 'data-folder="chess"' in html
     assert 'data-kind="project"' in html
 

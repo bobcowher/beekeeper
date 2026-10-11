@@ -53,6 +53,27 @@ def _folder_options():
     return list_folders(current_app.config["PROJECTS_DIR"], current_app.config.get("PIPELINES_DIR"))
 
 
+@project_bp.route("", methods=["GET"])
+def index():
+    projects = []
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    if os.path.isdir(projects_dir):
+        for name in sorted(os.listdir(projects_dir)):
+            config_path = os.path.join(projects_dir, name, _PROJECT_FILE)
+            if not os.path.isfile(config_path):
+                continue
+            with open(config_path) as f:
+                project = json.load(f)
+            live = get_runs_for_project(name)
+            if any(run.get("status") in ("running", "starting") for run in live):
+                project["train_status"] = "running"
+            runtime = get_db().get_project_total_runtime(name)
+            project["total_runtime_seconds"] = runtime
+            project["total_runtime"] = _format_runtime(runtime)
+            projects.append(project)
+    return render_template("projects.html", projects=projects)
+
+
 @project_bp.route("/new", methods=["GET"])
 def new():
     python_versions = find_available()
@@ -493,4 +514,4 @@ def delete(name):
         flash(str(e), "error")
         return redirect(url_for(_DETAIL_ROUTE, name=name))
     stop_tensorboard(name)
-    return redirect(url_for("dashboard.index"))
+    return redirect(url_for("project.index"))

@@ -1,13 +1,27 @@
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
 
 from models.project import normalize_folder
-from services import pipeline_store
+from services import pipeline_engine, pipeline_store
+from services.db_service import get_db
 from services.folder_service import list_folders
 from services.pipeline_schema import NAME_RE
 
 pipelines_bp = Blueprint("pipelines", __name__, url_prefix="/pipelines")
 
 _TEMPLATE_STEP = {"name": "hello", "type": "task", "command": 'echo "Pipeline run dir: $BEEKEEPER_PIPELINE_RUN_DIR"'}
+
+
+@pipelines_bp.route("", methods=["GET"])
+def index():
+    pipelines = []
+    for defn in pipeline_store.list_pipelines(current_app.config["PIPELINES_DIR"]):
+        latest = get_db().latest_pipeline_run(defn["name"])
+        pipelines.append({
+            "defn": defn,
+            "last": pipeline_engine.describe_run(latest) if latest else None,
+            "last_run_at": latest["started_at"] if latest else "",
+        })
+    return render_template("pipelines.html", pipelines=pipelines)
 
 
 @pipelines_bp.route("/new", methods=["GET"])
