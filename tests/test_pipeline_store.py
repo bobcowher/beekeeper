@@ -30,6 +30,19 @@ def test_save_text_rejects_name_mismatch(pdir):
     assert not store.pipeline_exists(pdir, "other")
 
 
+def test_atomic_write_cleanup_does_not_mask_write_error(pdir, monkeypatch):
+    def write_error(*args, **kwargs):
+        raise OSError("write failed")
+
+    def cleanup_error(*args, **kwargs):
+        raise OSError("cleanup failed")
+
+    monkeypatch.setattr(store.os, "replace", write_error)
+    monkeypatch.setattr(store.os, "unlink", cleanup_error)
+    with pytest.raises(OSError, match="write failed"):
+        store.save_pipeline_text(pdir, "pl", TEXT)
+
+
 def test_save_dict_and_list(pdir):
     store.save_pipeline(pdir, DEFN)
     os.makedirs(os.path.join(pdir, "broken"))
@@ -76,6 +89,16 @@ def test_step_attempts_and_listing(app):
     rows = db.list_step_runs(pk)
     assert [(r["step_index"], r["attempt"], r["status"]) for r in rows] == [(0, 2, "pending")]
     assert rows[0]["id"] == retry
+
+
+def test_internal_updates_require_at_least_one_field(app):
+    db = get_db()
+    pk, _ = db.create_pipeline_run("pl", DEFN)
+    step = db.current_step_run(pk, 0)
+    with pytest.raises(ValueError, match="at least one pipeline run field"):
+        db.update_pipeline_run(pk)
+    with pytest.raises(ValueError, match="at least one step run field"):
+        db.update_step_run(step["id"])
 
 
 def test_delete_pipeline_records_resets_numbering(app):

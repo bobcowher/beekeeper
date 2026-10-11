@@ -952,6 +952,8 @@ class DatabaseService:
             return [self._pipeline_row(r) for r in rows]
 
     def update_pipeline_run(self, pk: int, **fields):
+        if not fields:
+            raise ValueError("at least one pipeline run field is required")
         bad = set(fields) - self._PIPELINE_RUN_FIELDS
         if bad:
             raise ValueError(f"not updatable: {sorted(bad)}")
@@ -1014,6 +1016,8 @@ class DatabaseService:
             return [dict(r) for r in rows]
 
     def update_step_run(self, step_pk: int, **fields):
+        if not fields:
+            raise ValueError("at least one step run field is required")
         bad = set(fields) - self._STEP_RUN_FIELDS
         if bad:
             raise ValueError(f"not updatable: {sorted(bad)}")

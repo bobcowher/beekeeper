@@ -34,7 +34,10 @@ def _atomic_write(path, text):
             f.write(text if text.endswith("\n") else text + "\n")
         os.replace(tmp, path)
     except BaseException:
-        os.unlink(tmp)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
         raise
 
 
