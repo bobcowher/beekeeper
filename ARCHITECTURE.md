@@ -19,6 +19,7 @@ routes/
   files.py                  File browser, zip download, inline file viewer
   stats.py                  GET /api/stats — GPU/CPU/memory polling
   api_v1.py                 Full REST API under /api/v1/ (used by MCP and external clients)
+  pipelines.py              Pipeline creation and detail pages
   auth.py                   Login, logout, register (first-user setup)
   admin.py                  User management, API key management, config UI
 
@@ -35,6 +36,11 @@ services/
   agent_sdk_generator.py    Generates a downloadable Python SDK for a given project
   rate_limiter.py           Request rate limiting
   resource_tracker.py       GPU/CPU resource tracking across runs
+  dispatcher.py             Daemon tick: drain project queues, then advance pipelines
+  pipeline_schema.py        Strict YAML parsing, validation, and serialization
+  pipeline_store.py         Pipeline definitions and per-run storage paths
+  pipeline_engine.py        Durable pipeline state machine over queue/run records
+  pipeline_tasks.py         Inline task subprocess lifecycle and log capture
 
 models/
   project.py                Project dataclass — fields, save(), load(), to_dict()
@@ -71,6 +77,11 @@ BEEKEEPER_HOME/             = the directory beekeeper is installed/checked out i
       persistent/
         runs/
           run_<id>/         Survives workspace cleanup: TensorBoard logs, model outputs
+  pipelines/
+    <name>/
+      pipeline.yaml         Validated pipeline definition
+      runs/
+        run_<n>/            Pipeline run outputs and inline task logs
   data/
     beekeeper.db            SQLite: users, sessions, api_keys, training_runs
   .secret_key               Flask session signing key (chmod 600, never committed)
@@ -93,6 +104,17 @@ BEEKEEPER_HOME/             = the directory beekeeper is installed/checked out i
 3. Thread: git fetch + reset → data dir symlink → setup script → pip install → `Popen` the training script
 4. A second thread `_monitor_process()` polls `process.poll()` until exit, then archives the log, finalises the DB record, and cleans up parallel workspaces
 5. On clean exit, a third thread runs `tensorboard_service.parse_run_metrics()` to extract TB scalars into the DB
+
+### Run queue and pipelines
+1. The in-process dispatcher wakes every 5 seconds and begins a tick
+2. Its queue pass visits each project with queued work and tries the oldest entry; transient
+   capacity/setup failures remain queued with a wait reason
+3. Its pipeline pass advances every running pipeline by one idempotent state-machine step
+4. Train steps enter the same project run queue as manual work; task steps run in their own
+   process groups and write logs beneath the pipeline run directory
+5. Cancelling stops the current queued/training/task step. If that step finishes during the
+   race, the cancel response reports the true terminal status (`succeeded` or `failed`) rather
+   than rewriting it to `cancelled`
 
 ### Log streaming
 1. `GET /<name>/logs/stream?tail=N` → SSE generator in `training.py`
@@ -160,6 +182,7 @@ nvitop provides per-process GPU utilization and VRAM breakdown, which nvidia-smi
 - **Do not add a second gunicorn worker** without first replacing the in-memory state in `process_manager.py` with a shared store (Redis, SQLite, etc.).
 - **Do not use `git pull`.** Always `fetch` + `reset --hard origin/<branch>`.
 - **Auth is optional.** All routes must remain accessible when auth is disabled. The `api_key_required` decorator is a no-op when auth is off.
+- **The pipeline layer talks to the core only via the run queue, run records, `is_run_live` and `stop_training`.**
 
 ---
 

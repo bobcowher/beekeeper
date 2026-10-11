@@ -2,7 +2,18 @@
 
 ## [Unreleased]
 
+### New Features
+
+- **Folders:** projects and pipelines can share flat folder labels for dashboard grouping,
+  filtering, and bulk rename.
+- **Run queue:** training runs can be queued per project, inspected with wait reasons, and
+  cancelled before the dispatcher starts them.
+- **Pipelines:** YAML definitions compose queued training steps and optional host task steps;
+  handoff environment variables expose prior outputs, failed/cancelled runs can be resumed,
+  and administrators can disable inline tasks.
+
 ### Changed
+- **Breaking:** `/api/v1/busy` now also reports `running_tasks`; MCP >= 0.4.0 is required.
 - **Breaking:** deleting a project is refused while one of its runs is starting or running.
   The API returns error code `PROJECT_BUSY` (409), replacing `TRAINING_RUNNING`, and also
   covers runs that are still starting.
@@ -17,7 +28,7 @@
   if its `run_<n>` folder already belongs to another run.
 - Startup migration also re-points workspace TensorBoard/output symlinks to the renamed
   folders, and never blocks startup (failures are logged and retried on next start).
-- MCP server 0.3.0; the API now requires MCP >= 0.3.0.
+- MCP server 0.4.0; the API now requires MCP >= 0.4.0.
 
 ### Fixed
 - Deleting a project now removes its run history, so a recreated project with the same

@@ -151,6 +151,68 @@
 </section>
 
 <section class="card">
+    <h2 id="pipelines">Pipelines</h2>
+    <p>
+        Pipelines are YAML-defined sequences of queued training steps and optional inline task
+        steps. Definitions and run histories use the standard JSON response envelope.
+    </p>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /pipelines</h3>
+        <p>List pipelines with their latest run. Use <code>?folder=name</code> to filter; an empty value lists unfiled pipelines.</p>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method post">POST</span> /pipelines</h3>
+        <p>Create a pipeline from an <code>application/yaml</code> body. Validation errors are returned as HTTP 400.</p>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /pipelines/{name}</h3>
+        <p>Get both the parsed pipeline definition and its raw YAML.</p>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method put">PUT</span> /pipelines/{name}</h3>
+        <p>Replace the YAML definition. Existing runs retain the snapshot they started with.</p>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method post">POST</span> /pipelines/{name}/runs</h3>
+        <p>Start a pipeline run. Train steps enter their projects' run queues.</p>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /pipelines/{name}/runs</h3>
+        <p>List pipeline runs. Use <code>?limit=N</code> to return between 1 and 200 runs.</p>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /pipelines/{name}/runs/{run_id}</h3>
+        <p>Get one pipeline run with per-step statuses, training run references, wait reasons, and errors.</p>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method post">POST</span> /pipelines/{name}/runs/{run_id}/cancel</h3>
+        <p>
+            Cancel a running pipeline and stop its current step. If the run finishes while the
+            cancellation is processed, the response reports its true status
+            (<code>succeeded</code> or <code>failed</code>), not <code>cancelled</code>.
+        </p>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method post">POST</span> /pipelines/{name}/runs/{run_id}/resume</h3>
+        <p>Resume the latest failed or cancelled run from the stopped step, reusing earlier outputs.</p>
+    </div>
+
+    <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /pipelines/{name}/runs/{run_id}/steps/{step_name}/log</h3>
+        <p>Read an inline task step log. Use <code>?tail=N</code> to limit the returned lines.</p>
+    </div>
+</section>
+
+<section class="card">
     <h2 id="logs">Logs & Monitoring</h2>
 
     <div class="api-endpoint">

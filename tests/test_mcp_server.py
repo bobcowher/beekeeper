@@ -1,5 +1,9 @@
 """MCP server: run_ref propagation in analyze_run, version pin."""
+import pathlib
+import tomllib
+
 from beekeeper_mcp import server
+from routes.api_v1 import MIN_MCP_VERSION
 
 
 def _fake_get(responses):
@@ -16,8 +20,11 @@ def _run(n):
                              "status": "running"}}}
 
 
-def test_mcp_version_is_0_3_0():
-    assert server.MCP_VERSION == "0.3.0"
+def test_mcp_version_is_0_4_0_everywhere():
+    pyproject = tomllib.loads(
+        pathlib.Path(__file__).parents[1].joinpath("pyproject.toml").read_text()
+    )
+    assert server.MCP_VERSION == MIN_MCP_VERSION == pyproject["project"]["version"] == "0.4.0"
 
 
 def test_analyze_run_explicit_run_id_has_run_ref(mocker):

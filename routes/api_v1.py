@@ -33,7 +33,7 @@ from services.pipeline_schema import NAME_RE as PIPELINE_NAME_RE, PipelineValida
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
 SERVER_VERSION = "1.1.0"
-MIN_MCP_VERSION = "0.3.0"
+MIN_MCP_VERSION = "0.4.0"
 PROJECT_FILE = "project.json"
 MCP_SERVER_FILE = "mcp_server.py"
 
@@ -1875,21 +1875,40 @@ Read both outputs before taking any action.
 
 | Tool | Description |
 |------|-------------|
-| `list_projects()` | All projects and status |
+| `list_projects(folder=None)` | All projects and status; optionally filter by folder |
+| `list_folders()` | Folder names used by projects and pipelines |
+| `rename_folder(folder, new_name)` | Rename a folder across projects and pipelines |
 | `get_project(name)` | Detailed project info |
 | `create_project(name, git_url, ...)` | Create project (setup runs in background) |
+| `update_project(name, ...)` | Update project settings or folder |
 | `retry_setup(name)` | Retry failed setup, polls until done |
 | `delete_project(name)` | Delete project and all data |
 | `get_project_instructions(name)` | Full project-specific agent context |
-| `start_training(name)` | Start training (pre-launch: git pull + pip install) |
+| `start_training(name, queue=False)` | Start training or add it to the run queue |
+| `list_queue(name)` | List queued runs and their wait reasons |
+| `cancel_queued_run(name, queue_id)` | Remove a run that has not started |
 | `stop_training(name)` | Stop training |
 | `training_status(name)` | Current training status |
 | `get_logs(name, tail)` | Raw log output (default: last 100 lines) |
 | `analyze_run(name)` | TensorBoard metrics + episode log trends |
+| `list_pipelines(folder=None)` | Pipelines and their latest runs |
+| `get_pipeline(name)` | Parsed pipeline definition and raw YAML |
+| `create_pipeline(definition_yaml)` | Create a YAML pipeline |
+| `update_pipeline(name, definition_yaml)` | Replace a pipeline definition |
+| `delete_pipeline(name)` | Delete a pipeline and pipeline run history |
+| `start_pipeline(name)` | Start a pipeline run |
+| `pipeline_status(name, run_id=None)` | Latest or specified pipeline run and steps |
+| `cancel_pipeline(name, run_id)` | Cancel a run and stop its current step |
+| `resume_pipeline(name, run_id)` | Resume the latest failed/cancelled run |
+| `get_step_log(name, run_id, step_name, tail=200)` | Task-step log output |
 | `list_branches(name)` | Available branches |
 | `switch_branch(name, branch)` | Switch branch (training must be stopped) |
 | `get_stats()` | GPU, CPU, RAM stats |
 | `check_busy()` | Is any training currently running? |
+
+`cancel_pipeline` reports the run's true terminal status. If the run finishes while
+the cancellation is being processed, its response status may be `succeeded` or `failed`
+instead of `cancelled`.
 
 ## Artifact Storage
 
@@ -2016,15 +2035,31 @@ Remember the answer. This determines what counts as a good run.
 | Tool | Description |
 |------|-------------|
 | `training_status("{name}")` | Current training status |
-| `start_training("{name}")` | Start training |
+| `start_training("{name}", queue=False)` | Start training or queue it |
+| `list_queue("{name}")` | List this project's queued runs |
+| `cancel_queued_run("{name}", queue_id)` | Cancel a queued run |
 | `stop_training("{name}")` | Stop training |
 | `analyze_run("{name}")` | TensorBoard metrics + episode log trends |
 | `get_logs("{name}", tail=100)` | Raw log output |
 | `list_branches("{name}")` | Available branches |
 | `switch_branch("{name}", branch)` | Switch branch (training must be stopped) |
 | `get_project("{name}")` | Project config details |
+| `list_folders()` | Folder names used by projects and pipelines |
+| `list_pipelines(folder=None)` | Pipelines and latest runs |
+| `get_pipeline(name)` | Pipeline definition and YAML |
+| `create_pipeline(definition_yaml)` | Create a pipeline from YAML |
+| `update_pipeline(name, definition_yaml)` | Replace pipeline YAML |
+| `delete_pipeline(name)` | Delete a pipeline and its pipeline run history |
+| `start_pipeline(name)` | Start a pipeline run |
+| `pipeline_status(name, run_id=None)` | Pipeline and step status |
+| `cancel_pipeline(name, run_id)` | Cancel a pipeline run |
+| `resume_pipeline(name, run_id)` | Resume a stopped pipeline run |
+| `get_step_log(name, run_id, step_name)` | Read a task-step log |
 | `get_stats()` | GPU, CPU, RAM |
 | `check_busy()` | Is any training running? |
+
+If a pipeline finishes while `cancel_pipeline` is being processed, the response preserves
+the truth: its status may be `succeeded` or `failed`, not `cancelled`.
 
 ## Workflows
 

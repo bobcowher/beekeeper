@@ -37,7 +37,7 @@ from fastmcp import FastMCP
 BEEKEEPER_HOST = os.environ.get("BEEKEEPER_HOST", "http://localhost:5000").rstrip("/")
 BEEKEEPER_API_KEY = os.environ.get("BEEKEEPER_API_KEY", "")
 
-MCP_VERSION = "0.3.0"
+MCP_VERSION = "0.4.0"
 
 mcp = FastMCP("Beekeeper")
 
@@ -73,6 +73,16 @@ def _patch(path: str, body: dict | None = None) -> dict:
 def _delete(path: str) -> dict:
     url = f"{BEEKEEPER_HOST}/api/v1{path}"
     r = requests.delete(url, headers=_headers(), timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
+def _send_yaml(method: str, path: str, text: str) -> dict:
+    url = f"{BEEKEEPER_HOST}/api/v1{path}"
+    headers = {**_headers(), "Content-Type": "application/yaml"}
+    r = requests.request(method, url, data=text.encode(), headers=headers, timeout=30)
+    if r.status_code == 400:
+        return r.json()
     r.raise_for_status()
     return r.json()
 
@@ -360,6 +370,97 @@ def list_queue(project_name: str) -> dict:
 def cancel_queued_run(project_name: str, queue_id: int) -> dict:
     """Cancel a queued run before it starts."""
     return _delete(f"/projects/{project_name}/queue/{queue_id}")
+
+
+# ---------------------------------------------------------------------------
+# Pipelines
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def list_pipelines(folder: str | None = None) -> dict:
+    """List pipelines with their latest run. folder filters ("" = unfiled)."""
+    return _get("/pipelines" if folder is None else f"/pipelines?folder={quote(folder)}")
+
+
+@mcp.tool()
+def get_pipeline(name: str) -> dict:
+    """Pipeline definition (parsed) and its raw YAML."""
+    return _get(f"/pipelines/{name}")
+
+
+@mcp.tool()
+def create_pipeline(definition_yaml: str) -> dict:
+    """Create a pipeline from YAML. Returns validation errors on failure.
+
+    Pipeline YAML:
+      name: chess-factory          # lowercase, digits, '_' '-'
+      folder: chess                # optional
+      steps:
+        - name: pretrain           # unique; exposed to later steps as $BEEKEEPER_STEP_PRETRAIN_DIR
+          type: train
+          project: chess-pretrain  # an existing project; the run is queued on it
+          branch: main             # optional
+          env_vars: {LR: "1e-5"}   # optional, values must be quoted strings
+        - name: deploy
+          type: task               # shell command run on the Beekeeper host
+          timeout_s: 600           # optional, default 3600
+          command: |
+            cp "$BEEKEEPER_STEP_PRETRAIN_DIR/model.pt" /srv/models/
+    Every step also gets BEEKEEPER_PIPELINE_RUN_DIR and BEEKEEPER_PREV_STEP_DIR.
+    A step that exits non-zero fails the pipeline; later steps are skipped.
+    """
+    return _send_yaml("POST", "/pipelines", definition_yaml)
+
+
+@mcp.tool()
+def update_pipeline(name: str, definition_yaml: str) -> dict:
+    """Replace a pipeline's YAML. Running pipeline runs keep the definition they started with."""
+    return _send_yaml("PUT", f"/pipelines/{name}", definition_yaml)
+
+
+@mcp.tool()
+def delete_pipeline(name: str) -> dict:
+    """Delete a pipeline and its run history (training runs are kept). Refused while running."""
+    return _delete(f"/pipelines/{name}")
+
+
+@mcp.tool()
+def start_pipeline(name: str) -> dict:
+    """Start a pipeline run. Returns run_id and run_ref (e.g. "chess-factory#3").
+    Train steps are queued on their projects and wait behind any runs already there."""
+    return _post(f"/pipelines/{name}/runs")
+
+
+@mcp.tool()
+def pipeline_status(name: str, run_id: int | None = None) -> dict:
+    """Status of a pipeline run (latest if run_id is omitted), with per-step status,
+    training run refs, wait reasons and errors."""
+    if run_id is None:
+        return _get(f"/pipelines/{name}/runs?limit=1")
+    return _get(f"/pipelines/{name}/runs/{run_id}")
+
+
+@mcp.tool()
+def cancel_pipeline(name: str, run_id: int) -> dict:
+    """Cancel a running pipeline run and stop its current step.
+
+    If the run finishes during cancellation, the returned status is its true terminal
+    state ("succeeded" or "failed"), not "cancelled".
+    """
+    return _post(f"/pipelines/{name}/runs/{run_id}/cancel")
+
+
+@mcp.tool()
+def resume_pipeline(name: str, run_id: int) -> dict:
+    """Re-run a failed/cancelled pipeline run from the step that stopped it, reusing earlier
+    steps' outputs. Only the latest run of a pipeline can be resumed."""
+    return _post(f"/pipelines/{name}/runs/{run_id}/resume")
+
+
+@mcp.tool()
+def get_step_log(name: str, run_id: int, step_name: str, tail: int = 200) -> dict:
+    """Log of a task step. For train steps use get_logs(project, run_id) with the step's run_id."""
+    return _get(f"/pipelines/{name}/runs/{run_id}/steps/{step_name}/log?tail={tail}")
 
 
 @mcp.tool()

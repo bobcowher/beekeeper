@@ -15,6 +15,15 @@ def calls(monkeypatch):
     return log
 
 
+@pytest.fixture
+def yaml_calls(monkeypatch, calls):
+    def fake(method, path, text):
+        calls.append(("_send_yaml", method, path, text))
+        return {"success": True, "data": {}}
+    monkeypatch.setattr(server, "_send_yaml", fake)
+    return calls
+
+
 def test_list_projects_folder_filter(calls):
     server.list_projects(folder="chess")
     assert calls[-1] == ("_get", "/projects?folder=chess", None)
@@ -83,3 +92,41 @@ def test_list_and_cancel_queue(calls):
     assert calls[-1] == ("_get", "/projects/p/queue", None)
     server.cancel_queued_run("p", 7)
     assert calls[-1] == ("_delete", "/projects/p/queue/7", None)
+
+
+def test_create_and_update_pipeline_send_yaml(yaml_calls):
+    server.create_pipeline("name: p\nsteps: []\n")
+    assert yaml_calls[-1] == ("_send_yaml", "POST", "/pipelines", "name: p\nsteps: []\n")
+    server.update_pipeline("p", "x")
+    assert yaml_calls[-1] == ("_send_yaml", "PUT", "/pipelines/p", "x")
+
+
+def test_pipeline_definition_tools(calls):
+    server.get_pipeline("p")
+    assert calls[-1] == ("_get", "/pipelines/p", None)
+    server.delete_pipeline("p")
+    assert calls[-1] == ("_delete", "/pipelines/p", None)
+
+
+def test_pipeline_run_tools(calls):
+    server.start_pipeline("p")
+    assert calls[-1] == ("_post", "/pipelines/p/runs", None)
+    server.pipeline_status("p")
+    assert calls[-1] == ("_get", "/pipelines/p/runs?limit=1", None)
+    server.pipeline_status("p", run_id=3)
+    assert calls[-1] == ("_get", "/pipelines/p/runs/3", None)
+    server.cancel_pipeline("p", 3)
+    assert calls[-1] == ("_post", "/pipelines/p/runs/3/cancel", None)
+    server.resume_pipeline("p", 3)
+    assert calls[-1] == ("_post", "/pipelines/p/runs/3/resume", None)
+    server.get_step_log("p", 3, "deploy", tail=50)
+    assert calls[-1] == ("_get", "/pipelines/p/runs/3/steps/deploy/log?tail=50", None)
+    server.list_pipelines(folder="chess")
+    assert calls[-1] == ("_get", "/pipelines?folder=chess", None)
+
+
+def test_list_pipelines_filters(calls):
+    server.list_pipelines()
+    assert calls[-1] == ("_get", "/pipelines", None)
+    server.list_pipelines(folder="")
+    assert calls[-1] == ("_get", "/pipelines?folder=", None)
