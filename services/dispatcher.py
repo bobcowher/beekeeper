@@ -49,8 +49,20 @@ def dispatch_project_queue(projects_dir, name) -> None:
     result = process_manager.start_training(
         projects_dir, name, branch=entry["branch"], extra_env=entry["env_vars"] or None)
     if "error" not in result:
-        run = db.get_run(name, result["run_id"])
-        if db.mark_queue_started(entry["id"], run["id"]):
+        try:
+            run = db.get_run(name, result["run_id"])
+            if run is None:
+                raise RuntimeError(f"Started run {name}#{result['run_id']} has no database record")
+            claimed = db.mark_queue_started(entry["id"], run["id"])
+        except Exception:
+            # start_training has already reserved/launched work. If the durable
+            # queue handoff fails, stop it so a later tick cannot launch a duplicate.
+            try:
+                process_manager.stop_training(projects_dir, name, run_id=result["run_id"])
+            except Exception:
+                log.exception("Queue: could not stop %s after handoff failure", result.get("run_ref"))
+            raise
+        if claimed:
             log.info("Queue: started %s from queue entry %s", result.get("run_ref"), entry["id"])
         else:
             # Cancelled while start_training ran: stop the run rather than orphan it.

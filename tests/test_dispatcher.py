@@ -148,3 +148,24 @@ def test_cancel_between_start_and_mark_stops_run(app, starts, monkeypatch):
     assert stops == [("p", 1)]
     entry = db.get_queue_entry(qid)
     assert entry["status"] == "cancelled" and entry["run_pk"] is None
+
+
+def test_started_run_is_stopped_when_queue_handoff_fails(app, starts, monkeypatch):
+    """A DB error after start_training must not leave queued work able to launch twice."""
+    make_project_dir(app, "p")
+    db = get_db()
+    qid = db.enqueue_run("p")
+
+    def fail_lookup(name, run_id):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(db, "get_run", fail_lookup)
+    stops = []
+    monkeypatch.setattr(dispatcher.process_manager, "stop_training",
+                        lambda d, name, run_id=None: stops.append((name, run_id)) or {"status": "stopped"})
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        dispatcher.dispatch_project_queue(app.config["PROJECTS_DIR"], "p")
+
+    assert stops == [("p", 1)]
+    assert db.get_queue_entry(qid)["status"] == "queued"
