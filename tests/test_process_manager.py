@@ -549,8 +549,8 @@ def test_reserved_run_env_var_is_overridden_and_warned(tmp_path):
     process_manager._running.clear()
 
 
-def test_run_history_cleanup_deletes_only_non_notable_old_run_storage(tmp_path):
-    """Retention cleanup keeps notable runs and removes non-notable run storage."""
+def test_run_history_cleanup_uses_pipeline_aware_pruning(tmp_path):
+    """The launch-time limit must use the same pipeline-aware pruning as periodic cleanup."""
     from services import process_manager
     process_manager._running.clear()
     projects_dir = _make_project(tmp_path, run_history_max_runs=1)
@@ -566,8 +566,8 @@ def test_run_history_cleanup_deletes_only_non_notable_old_run_storage(tmp_path):
         {"id": 11, "started_at": "2026-05-02T12:00:00", "notable": 0, "persistent_dir": "persistent/runs/run_11"},
     ]
     mock_db = MagicMock(create_training_run=MagicMock(return_value=(46, 46)),
-                        delete_training_run=MagicMock(),
-                        get_training_runs=MagicMock(return_value=old_runs))
+                        get_training_runs=MagicMock(return_value=old_runs),
+                        prune_old_runs=MagicMock(return_value=[old_runs[-1]]))
 
     with patch("services.process_manager._resolve_python_binary", return_value="/fake/python"), \
          patch("services.process_manager._resolve_tensorboard_binary", return_value=None), \
@@ -583,7 +583,7 @@ def test_run_history_cleanup_deletes_only_non_notable_old_run_storage(tmp_path):
     assert "error" not in result
     assert os.path.isdir(notable_dir)
     assert not os.path.exists(old_dir)
-    mock_db.delete_training_run.assert_called_once_with(11)
+    mock_db.prune_old_runs.assert_called_once_with("myproject", keep_last=1)
     process_manager._running.clear()
 
 

@@ -554,6 +554,7 @@ def _prune_old_runs(projects_dir: str, project_name: str, keep_last: int = 20):
 
     for run in deleted_runs:
         delete_run_storage(projects_dir, project_name, run)
+    return len(deleted_runs) if isinstance(deleted_runs, list) else 0
 
 
 def start_training(projects_dir, name, branch=None, extra_env=None):  # NOSONAR — sequential pre-launch pipeline
@@ -888,16 +889,11 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
 
     run_history_max_runs = project.get("run_history_max_runs", 10)
     if run_history_max_runs > 0:
-        runs = get_db().get_training_runs(name, limit=1000)
-        runs.sort(key=lambda r: r["started_at"], reverse=True)
-        deleted_count = 0
-        for r in runs[run_history_max_runs:]:
-            if not r.get("notable", 0):
-                delete_run_storage(projects_dir, name, r)
-                get_db().delete_training_run(r["id"])
-                deleted_count += 1
+        # Keep retention policy in the database service: it also excludes runs
+        # whose artifacts are needed by a running or resumable pipeline.
+        deleted_count = _prune_old_runs(projects_dir, name, keep_last=run_history_max_runs)
         if deleted_count > 0:
-            log.info(f"Auto-cleanup: deleted {deleted_count} old run(s)")
+            log.info("Auto-cleanup: deleted %s old run(s)", deleted_count)
 
     log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
     _write_run_header(log_fd, run_meta, project)
