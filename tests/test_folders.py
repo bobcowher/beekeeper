@@ -79,6 +79,22 @@ def test_list_and_rename_folder(client, app):
     assert client.get("/api/v1/folders").get_json()["data"]["folders"] == ["Chess Engines", "go"]
 
 
+def test_rename_folder_validates_all_projects_before_saving(app):
+    from services.folder_service import rename_folder
+
+    make_project_dir(app, "a-good", folder="chess")
+    make_project_dir(app, "z-corrupt", folder="chess")
+    corrupt_path = os.path.join(app.config["PROJECTS_DIR"], "z-corrupt", "project.json")
+    with open(corrupt_path, "w") as f:
+        f.write("{not json")
+
+    with pytest.raises(json.JSONDecodeError):
+        rename_folder(app.config["PROJECTS_DIR"], "chess", "renamed")
+
+    good_path = os.path.join(app.config["PROJECTS_DIR"], "a-good", "project.json")
+    assert json.load(open(good_path))["folder"] == "chess"
+
+
 def test_rename_folder_invalid_target_is_400(client, app):
     make_project_dir(app, "p1", folder="chess")
     r = client.post("/api/v1/folders/chess/rename", json={"new_name": "a/b"})

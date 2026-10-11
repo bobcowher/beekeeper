@@ -41,15 +41,16 @@ def rename_folder(projects_dir, old, new, pipelines_dir=None) -> int:
     new = normalize_folder(new)
     if not old:
         raise ValueError("folder to rename is required")
+    projects = [Project.load(path) for path in _project_config_paths(projects_dir)]
+    pipelines = _pipelines(pipelines_dir)
     moved = 0
-    for path in _project_config_paths(projects_dir):
-        project = Project.load(path)
+    for project in projects:
         if project.folder == old:
             project.folder = new
             project.save(projects_dir)
             moved += 1
     from services.pipeline_store import save_pipeline
-    for defn in _pipelines(pipelines_dir):
+    for defn in pipelines:
         if defn["folder"] == old:
             defn["folder"] = new
             save_pipeline(pipelines_dir, defn)
