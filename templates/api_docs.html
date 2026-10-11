@@ -138,6 +138,11 @@
     </div>
 
     <div class="api-endpoint">
+        <h3><span class="http-method get">GET</span> /projects/{name}/training/can-start</h3>
+        <p>Run the start preflight without launching anything. Returns <code>can_start</code>, a refusal <code>code</code>, and a human-readable <code>message</code>.</p>
+    </div>
+
+    <div class="api-endpoint">
         <h3><span class="http-method post">POST</span> /projects/{name}/training/stop</h3>
         <p>Stop running training.</p>
         <pre class="api-examples">curl -X POST http://{{ request.host }}/api/v1/projects/my-project/training/stop</pre>

@@ -4,7 +4,7 @@
 
 {% block content %}
 <div class="page-header">
-    <a href="/" class="back-btn">&larr; Back</a>
+    <a href="/projects" class="back-btn">&larr; Back</a>
     <h1>{{ project.name }}</h1>
     {% set train_status = project.get('train_status', 'idle') %}
     {% set display_status = train_status if train_status != 'idle' else project.get('setup_status', 'pending') %}
@@ -100,7 +100,8 @@
             <option value="{{ project.get('branch', 'main') }}">{{ project.get('branch', 'main') }} (default)</option>
         </select>
         <button class="btn btn-success btn-sm" id="btn-confirm-start">Start</button>
-        <button class="btn btn-secondary btn-sm" id="btn-confirm-queue" title="Start when the project has a free slot">Add to Queue</button>
+        <button class="btn btn-secondary btn-sm" id="btn-confirm-queue" title="Start when the project has a free slot" hidden>Add to Queue</button>
+        <span class="muted start-reason" id="start-reason" role="status" aria-live="polite"></span>
         <button class="btn btn-secondary btn-sm" id="btn-cancel-start" style="display:none">Cancel</button>
     </div>
     <div id="queue-section" class="queue-section" style="display:none">

@@ -29,6 +29,12 @@ const branchPicker = document.getElementById('branch-picker');
 const runBranchSelect = document.getElementById('run-branch-select');
 const confirmStartBtn = document.getElementById('btn-confirm-start');
 const cancelStartBtn = document.getElementById('btn-cancel-start');
+const confirmQueueBtn = document.getElementById('btn-confirm-queue');
+const startReasonEl = document.getElementById('start-reason');
+const TRANSIENT_REFUSALS = new Set(['ALREADY_RUNNING', 'AT_CAPACITY', 'INSUFFICIENT_VRAM']);
+let canStartRefreshInFlight = null;
+let canStartState = null;
+let activeRunCount = 0;
 
 // True when user clicked "Start Run..." while runs were active.
 // Prevents refreshRuns from closing the picker mid-fill.
@@ -40,7 +46,7 @@ if (startBtn) {
         if (runListActions) runListActions.style.display = 'none';
         if (branchPicker) branchPicker.classList.add('open');
         if (cancelStartBtn) cancelStartBtn.style.display = '';
-        await loadRunBranches();
+        await Promise.all([loadRunBranches(), refreshCanStart()]);
     });
 }
 if (cancelStartBtn) {
@@ -57,10 +63,8 @@ if (confirmStartBtn) {
     });
 }
 
-const confirmQueueBtn = document.getElementById('btn-confirm-queue');
 const queueSection = document.getElementById('queue-section');
 const queueListEl = document.getElementById('queue-list');
-const TRANSIENT_REFUSALS = new Set(['ALREADY_RUNNING', 'AT_CAPACITY', 'INSUFFICIENT_VRAM']);
 let queueRefreshInFlight = null;
 let queueRefreshAgain = false;
 let queuePollTimer = null;
@@ -179,6 +183,23 @@ window.addEventListener('pageshow', event => {
 });
 
 refreshQueue().finally(scheduleQueuePoll);
+
+async function refreshCanStart() {
+    if (!confirmStartBtn || !confirmQueueBtn || !PROJECT_NAME) return;
+    if (canStartRefreshInFlight) return canStartRefreshInFlight;
+    canStartRefreshInFlight = (async () => {
+        try {
+            const response = await apiFetch(`/api/v1/projects/${PROJECT_NAME}/training/can-start`);
+            const result = await response.json();
+            if (!response.ok || !result.success) return;
+            canStartState = result.data;
+            applyStartAvailability();
+        } catch (error) {
+            console.warn('Could not check whether training can start:', error);
+        }
+    })().finally(() => { canStartRefreshInFlight = null; });
+    return canStartRefreshInFlight;
+}
 
 async function loadRunBranches() {
     if (!runBranchSelect || !PROJECT_NAME) return;
@@ -394,6 +415,7 @@ async function refreshRuns() {
         const runs = data?.data?.runs || [];
         reconcileRunList(runs);
         updateStartButton(runs);
+        refreshCanStart();
         syncTbPort(data?.data);
     } catch (e) {
         console.warn('Could not refresh runs:', e);
@@ -443,25 +465,35 @@ function reconcileRunList(runs) {
 }
 
 function updateStartButton(runs) {
-    if (runs.length === 0) {
-        // Idle: show picker, hide start button and cancel
-        pickerManuallyOpen = false;
+    activeRunCount = runs.length;
+    applyStartAvailability();
+}
+
+function applyStartAvailability() {
+    if (!canStartState) return;
+    const queueInstead = !canStartState.can_start && TRANSIENT_REFUSALS.has(canStartState.code);
+    confirmStartBtn.hidden = queueInstead;
+    confirmStartBtn.disabled = !canStartState.can_start && !queueInstead;
+    confirmQueueBtn.hidden = !queueInstead;
+    if (startReasonEl) {
+        startReasonEl.textContent = canStartState.can_start ? '' : canStartState.message;
+    }
+
+    if (activeRunCount === 0 || queueInstead || !canStartState.can_start) {
         if (runListActions) runListActions.style.display = 'none';
-        if (cancelStartBtn) cancelStartBtn.style.display = 'none';
+        if (cancelStartBtn) cancelStartBtn.style.display = pickerManuallyOpen ? '' : 'none';
         if (branchPicker && !branchPicker.classList.contains('open')) {
             branchPicker.classList.add('open');
         }
-    } else if (!PARALLEL_ENABLED) {
-        // Single-run mode with an active run: hide both
-        if (!pickerManuallyOpen && branchPicker) branchPicker.classList.remove('open');
-        if (runListActions) runListActions.style.display = 'none';
-    } else {
-        // Parallel enabled, runs active: show button below run list, hide picker (unless user opened it)
+    } else if (PARALLEL_ENABLED) {
         if (!pickerManuallyOpen) {
             if (runListActions) runListActions.style.display = '';
             if (branchPicker) branchPicker.classList.remove('open');
             if (cancelStartBtn) cancelStartBtn.style.display = 'none';
         }
+    } else {
+        if (branchPicker) branchPicker.classList.remove('open');
+        if (runListActions) runListActions.style.display = 'none';
     }
 }
 
@@ -671,6 +703,7 @@ bindTbLaunch();
 // ============================================================
 if (runListEl) {
     loadRunBranches();
+    refreshCanStart();
     refreshRuns();
     setInterval(refreshRuns, 10000);
 }

@@ -117,17 +117,19 @@ def test_dashboard_loads_no_console_errors(live_server):
 
         assert page.title() != ""
         assert errors == [], f"JavaScript errors on dashboard: {errors}"
+        page.screenshot(path="/tmp/beekeeper-dashboard-desktop.png", full_page=True)
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         browser.close()
 
 
 @pytest.mark.browser
-def test_dashboard_shows_project_link(live_server):
+def test_projects_page_shows_project_link(live_server):
     from playwright.sync_api import sync_playwright, expect
 
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page()
-        page.goto(live_server)
+        page.goto(live_server + "/projects")
         expect(page.locator("text=demo")).to_be_visible()
         browser.close()
 
@@ -226,7 +228,7 @@ def test_dashboard_folder_groups_collapse_and_persist(live_server):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1280, "height": 800})
-        page.goto(live_server + "/")
+        page.goto(live_server + "/projects")
         label = page.locator(".folder-label", has_text="chess")
         assert label.is_visible()
         assert page.locator('.folder-label[data-folder-key="unfiled:"]').is_visible()
@@ -248,7 +250,7 @@ def test_literal_unfiled_folder_has_independent_collapse_state(live_server):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page()
-        page.goto(live_server + "/")
+        page.goto(live_server + "/projects")
         literal = page.locator('.folder-label[data-folder-key="folder:__unfiled__"]')
         unfiled = page.locator('.folder-label[data-folder-key="unfiled:"]')
         assert literal.is_visible() and unfiled.is_visible()
@@ -266,7 +268,18 @@ def test_queue_add_and_cancel(live_server):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page()
+        page.route(
+            "**/api/v1/projects/demo/training/can-start",
+            lambda route: route.fulfill(
+                content_type="application/json",
+                body=json.dumps({"success": True, "data": {
+                    "can_start": False, "code": "AT_CAPACITY",
+                    "message": "At capacity (1 parallel run)",
+                }}),
+            ),
+        )
         page.goto(f"{live_server}/projects/demo")
+        page.locator("#btn-confirm-queue").wait_for(state="visible")
         page.click("#btn-confirm-queue")
         row = page.locator("#queue-list .queue-row")
         row.first.wait_for(timeout=5000)
@@ -285,7 +298,18 @@ def test_queue_polling_pauses_hidden_and_cancel_handles_network_error(live_serve
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page()
+        page.route(
+            "**/api/v1/projects/demo/training/can-start",
+            lambda route: route.fulfill(
+                content_type="application/json",
+                body=json.dumps({"success": True, "data": {
+                    "can_start": False, "code": "ALREADY_RUNNING",
+                    "message": "Training is already running",
+                }}),
+            ),
+        )
         page.goto(f"{live_server}/projects/demo")
+        page.locator("#btn-confirm-queue").wait_for(state="visible")
         page.click("#btn-confirm-queue")
         row = page.locator("#queue-list .queue-row")
         row.first.wait_for(timeout=5000)
@@ -344,16 +368,53 @@ def test_pipeline_page_yaml_errors_and_run(live_server):
         assert not page.locator("#btn-pipeline-start").is_visible()
         assert page.locator("#btn-pipeline-cancel").is_visible()
         page.screenshot(path="/tmp/beekeeper-pipeline.png", full_page=True)
-        page.goto(live_server + "/")
+        page.goto(live_server + "/pipelines")
         assert page.locator('.pipeline-row[data-name="ui-pipe"]').is_visible()
         page.screenshot(path="/tmp/beekeeper-dashboard-pipelines.png", full_page=True)
         mobile = browser.new_page(viewport={"width": 390, "height": 844})
-        for path, shot in (("/pipelines/ui-pipe", "pipeline-390"), ("/", "dashboard-pipelines-390")):
+        for path, shot in (
+            ("/pipelines/ui-pipe", "pipeline-390"),
+            ("/", "dashboard-390"),
+            ("/projects", "projects-390"),
+            ("/pipelines", "pipelines-390"),
+        ):
             mobile.goto(live_server + path)
             mobile.wait_for_load_state("networkidle")
             mobile.screenshot(path=f"/tmp/beekeeper-{shot}.png", full_page=True)
             assert mobile.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), path
         assert errors == []
+        browser.close()
+
+
+@pytest.mark.browser
+def test_start_and_queue_buttons_follow_server_preflight(live_server):
+    from playwright.sync_api import sync_playwright
+
+    state = {"can_start": True, "code": None, "message": "Ready to start"}
+
+    def serve_preflight(route):
+        route.fulfill(
+            content_type="application/json",
+            body=json.dumps({"success": True, "data": state}),
+        )
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.route("**/api/v1/projects/demo/training/can-start", serve_preflight)
+        page.goto(f"{live_server}/projects/demo")
+        page.locator("#btn-confirm-start").wait_for(state="visible")
+        assert not page.locator("#btn-confirm-queue").is_visible()
+
+        state.update({
+            "can_start": False, "code": "AT_CAPACITY",
+            "message": "At capacity (2 parallel runs)",
+        })
+        page.reload()
+        page.locator("#btn-confirm-queue").wait_for(state="visible")
+        assert not page.locator("#btn-confirm-start").is_visible()
+        assert page.locator("#start-reason").inner_text() == "At capacity (2 parallel runs)"
+        page.screenshot(path="/tmp/beekeeper-queue-only.png", full_page=True)
         browser.close()
 
 

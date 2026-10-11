@@ -1108,6 +1108,17 @@ def test_refusal_at_capacity(app, fake_python):
     assert pm.start_training(app.config["PROJECTS_DIR"], "p")["code"] == "AT_CAPACITY"
 
 
+def test_can_start_uses_same_admission_check_without_creating_run(app, fake_python):
+    make_project_dir(app, "p", parallel_runs_enabled=True, max_parallel_runs=1)
+    assert pm.can_start_training(app.config["PROJECTS_DIR"], "p")["can_start"] is True
+    assert pm.get_db().get_training_runs("p") == []
+    pm._running[999] = {"project_name": "p", "process": None, "starting": True,
+                        "run_pk": 999, "run_id": 1, "branch": "main", "workspace_dir": "x"}
+    result = pm.can_start_training(app.config["PROJECTS_DIR"], "p")
+    assert result["can_start"] is False and result["code"] == "AT_CAPACITY"
+    assert pm.get_db().get_training_runs("p") == []
+
+
 def test_refusal_invalid_env(app, fake_python):
     make_project_dir(app, "p")
     r = pm.start_training(app.config["PROJECTS_DIR"], "p", extra_env={"A": 1})
@@ -1142,3 +1153,18 @@ def test_api_start_error_includes_code(client, app):
     r = client.post("/api/v1/projects/p/training/start", json={})
     assert r.status_code == 400
     assert r.get_json()["error"]["details"]["code"] == "SETUP_INCOMPLETE"
+
+
+def test_api_can_start_reports_ready_and_transient_refusal(client, app, fake_python):
+    make_project_dir(app, "p")
+    ready = client.get("/api/v1/projects/p/training/can-start").get_json()["data"]
+    assert ready == {"can_start": True, "code": None, "message": "Ready to start"}
+
+    pm._running[99] = {
+        "project_name": "p", "run_pk": 99, "run_id": 1, "branch": "main",
+        "process": None, "starting": True, "workspace_dir": "x",
+    }
+    busy = client.get("/api/v1/projects/p/training/can-start").get_json()["data"]
+    assert busy["can_start"] is False
+    assert busy["code"] == "ALREADY_RUNNING"
+    assert "already running" in busy["message"].lower()

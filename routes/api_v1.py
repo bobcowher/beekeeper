@@ -14,7 +14,7 @@ from flask import Blueprint, abort, current_app, jsonify, request, Response
 
 from models.project import Project, SETUP_ACTIVE_STATUSES, normalize_folder
 from services.folder_service import list_folders, rename_folder
-from services.process_manager import start_training, stop_training, get_training_status, get_runs_for_project, get_run_log_path
+from services.process_manager import can_start_training, start_training, stop_training, get_training_status, get_runs_for_project, get_run_log_path
 from services.stats_service import get_all_stats, get_cpu_stats, get_memory_stats, get_gpu_stats, get_gpu_platform_info
 from services.db_service import get_db
 from services.auth_service import api_key_required
@@ -799,6 +799,14 @@ def training_start(name):
         payload["error"]["details"] = {"code": result.get("code")}
         return jsonify(payload), status
     return api_response(data=result)
+
+
+@api_v1_bp.route("/projects/<name>/training/can-start", methods=["GET"])
+@api_key_required
+def training_can_start(name):
+    """Side-effect-free training start preflight for UI admission controls."""
+    load_project(name)
+    return api_response(data=can_start_training(current_app.config["PROJECTS_DIR"], name))
 
 
 @api_v1_bp.route("/projects/<name>/queue", methods=["GET"])
