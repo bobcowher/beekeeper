@@ -67,5 +67,33 @@ def test_kill_task(tmp_path):
         raise AssertionError("process still alive")
 
 
+def test_kill_task_kills_child_that_ignores_term_after_shell_exits(tmp_path):
+    child_pid_file = tmp_path / "child.pid"
+    command = (
+        "trap '' TERM; sleep 30 & child=$!; trap - TERM; "
+        'printf "%s" "$child" > "$CHILD_PID_FILE"; wait'
+    )
+    tasks.spawn_task(6, command, str(tmp_path),
+                     env_with(CHILD_PID_FILE=str(child_pid_file)), str(tmp_path / "l.log"), 60)
+    deadline = time.time() + 2
+    while not child_pid_file.exists() and time.time() < deadline:
+        time.sleep(0.02)
+    assert child_pid_file.exists()
+    child_pid = int(child_pid_file.read_text())
+
+    tasks.kill_task(6)
+
+    deadline = time.time() + 2
+    while time.time() < deadline:
+        try:
+            if open(f"/proc/{child_pid}/stat").read().split()[2] == "Z":
+                break
+        except FileNotFoundError:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("SIGTERM-ignoring task child still alive")
+
+
 def test_unknown_task_is_missing():
     assert tasks.poll_task(999) == ("missing", None)

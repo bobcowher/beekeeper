@@ -36,16 +36,25 @@ def spawn_task(step_pk, command, cwd, env, log_path, timeout_s) -> int:
 
 
 def _terminate(proc):
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        try:
-            os.killpg(proc.pid, sig)
-        except ProcessLookupError:
-            pass
-        try:
-            proc.wait(timeout=KILL_GRACE_S)
-            return
-        except subprocess.TimeoutExpired:
-            continue
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=KILL_GRACE_S)
+    except subprocess.TimeoutExpired:
+        pass
+
+    # The shell can exit on SIGTERM while a child in its process group ignores
+    # it. Always make the final group-wide SIGKILL attempt before returning.
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=KILL_GRACE_S)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 def _footer(info, code, outcome):
