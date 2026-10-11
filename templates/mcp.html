@@ -261,6 +261,25 @@ Get oriented:
         </tbody>
     </table>
 
+    <h3 style="margin-top: 1.25rem; margin-bottom: 0.5rem; color: var(--accent);">Pipelines</h3>
+    <table style="width:100%; border-collapse: collapse; font-size: 0.9rem;">
+        <thead>
+            <tr style="border-bottom: 1px solid var(--border);">
+                <th style="text-align:left; padding: 0.4rem 0.75rem 0.4rem 0;">Tool</th>
+                <th style="text-align:left; padding: 0.4rem 0.75rem;">Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr><td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>list_pipelines(folder=None)</code></td><td style="padding: 0.4rem 0.75rem;">Pipelines and their latest runs</td></tr>
+            <tr><td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>get_pipeline(name)</code></td><td style="padding: 0.4rem 0.75rem;">Definition and raw YAML</td></tr>
+            <tr><td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>validate_pipeline(definition_yaml)</code></td><td style="padding: 0.4rem 0.75rem;">Validate YAML without saving it</td></tr>
+            <tr><td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>create_pipeline(definition_yaml)</code></td><td style="padding: 0.4rem 0.75rem;">Create a pipeline from YAML</td></tr>
+            <tr><td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>list_pipeline_runs(name, limit=20)</code></td><td style="padding: 0.4rem 0.75rem;">Recent runs, newest first</td></tr>
+            <tr><td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>pipeline_status(name, run_id=None)</code></td><td style="padding: 0.4rem 0.75rem;">Latest or specified run and steps</td></tr>
+            <tr><td style="padding: 0.4rem 0.75rem 0.4rem 0;"><code>start_pipeline(name)</code></td><td style="padding: 0.4rem 0.75rem;">Start a pipeline run</td></tr>
+        </tbody>
+    </table>
+
     <h3 style="margin-top: 1.25rem; margin-bottom: 0.5rem; color: var(--accent);">System</h3>
     <table style="width:100%; border-collapse: collapse; font-size: 0.9rem;">
         <thead>

@@ -33,7 +33,7 @@ from services.pipeline_schema import NAME_RE as PIPELINE_NAME_RE, PipelineValida
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
 SERVER_VERSION = "1.1.0"
-MIN_MCP_VERSION = "0.4.0"
+MIN_MCP_VERSION = "0.5.0"
 PROJECT_FILE = "project.json"
 MCP_SERVER_FILE = "mcp_server.py"
 
@@ -1897,9 +1897,11 @@ Read both outputs before taking any action.
 | `list_pipelines(folder=None)` | Pipelines and their latest runs |
 | `get_pipeline(name)` | Parsed pipeline definition and raw YAML |
 | `create_pipeline(definition_yaml)` | Create a YAML pipeline |
+| `validate_pipeline(definition_yaml)` | Validate YAML without saving it |
 | `update_pipeline(name, definition_yaml)` | Replace a pipeline definition |
 | `delete_pipeline(name)` | Delete a pipeline and pipeline run history |
 | `start_pipeline(name)` | Start a pipeline run |
+| `list_pipeline_runs(name, limit=20)` | Recent pipeline runs, newest first |
 | `pipeline_status(name, run_id=None)` | Latest or specified pipeline run and steps |
 | `cancel_pipeline(name, run_id)` | Cancel a run and stop its current step |
 | `resume_pipeline(name, run_id)` | Resume the latest failed/cancelled run |
@@ -2051,9 +2053,11 @@ Remember the answer. This determines what counts as a good run.
 | `list_pipelines(folder=None)` | Pipelines and latest runs |
 | `get_pipeline(name)` | Pipeline definition and YAML |
 | `create_pipeline(definition_yaml)` | Create a pipeline from YAML |
+| `validate_pipeline(definition_yaml)` | Validate YAML without saving it |
 | `update_pipeline(name, definition_yaml)` | Replace pipeline YAML |
 | `delete_pipeline(name)` | Delete a pipeline and its pipeline run history |
 | `start_pipeline(name)` | Start a pipeline run |
+| `list_pipeline_runs(name, limit=20)` | Recent pipeline runs, newest first |
 | `pipeline_status(name, run_id=None)` | Pipeline and step status |
 | `cancel_pipeline(name, run_id)` | Cancel a pipeline run |
 | `resume_pipeline(name, run_id)` | Resume a stopped pipeline run |

@@ -111,6 +111,13 @@ def test_create_and_update_pipeline_send_yaml(yaml_calls):
     assert yaml_calls[-1] == ("_send_yaml", "PUT", "/pipelines/p", "x")
 
 
+def test_validate_pipeline_sends_yaml(yaml_calls):
+    server.validate_pipeline("name: p\nsteps: []\n")
+    assert yaml_calls[-1] == (
+        "_send_yaml", "POST", "/pipelines/validate", "name: p\nsteps: []\n"
+    )
+
+
 def test_pipeline_definition_tools(calls):
     server.get_pipeline("p")
     assert calls[-1] == ("_get", "/pipelines/p", None)
@@ -125,6 +132,8 @@ def test_pipeline_run_tools(calls):
     assert calls[-1] == ("_get", "/pipelines/p/runs?limit=1", None)
     server.pipeline_status("p", run_id=3)
     assert calls[-1] == ("_get", "/pipelines/p/runs/3", None)
+    server.list_pipeline_runs("p", limit=7)
+    assert calls[-1] == ("_get", "/pipelines/p/runs?limit=7", None)
     server.cancel_pipeline("p", 3)
     assert calls[-1] == ("_post", "/pipelines/p/runs/3/cancel", None)
     server.resume_pipeline("p", 3)
@@ -140,3 +149,22 @@ def test_list_pipelines_filters(calls):
     assert calls[-1] == ("_get", "/pipelines", None)
     server.list_pipelines(folder="")
     assert calls[-1] == ("_get", "/pipelines?folder=", None)
+
+
+def test_check_busy_uses_busy_endpoint_and_keeps_capacity(monkeypatch):
+    responses = {
+        "/busy": {"data": {
+            "busy": True,
+            "running_projects": [],
+            "running_tasks": ["factory#2:deploy"],
+            "setting_up_projects": [],
+        }},
+        "/capacity": {"data": {"running": 0, "available": 2}},
+    }
+    monkeypatch.setattr(server, "_get", lambda path: responses[path])
+
+    result = server.check_busy()
+
+    assert result["busy"] is True
+    assert result["running_tasks"] == ["factory#2:deploy"]
+    assert result["capacity"] == {"running": 0, "available": 2}

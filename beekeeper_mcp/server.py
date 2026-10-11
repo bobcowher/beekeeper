@@ -37,7 +37,7 @@ from fastmcp import FastMCP
 BEEKEEPER_HOST = os.environ.get("BEEKEEPER_HOST", "http://localhost:5000").rstrip("/")
 BEEKEEPER_API_KEY = os.environ.get("BEEKEEPER_API_KEY", "")
 
-MCP_VERSION = "0.4.0"
+MCP_VERSION = "0.5.0"
 
 mcp = FastMCP("Beekeeper")
 
@@ -421,6 +421,12 @@ def create_pipeline(definition_yaml: str) -> dict:
 
 
 @mcp.tool()
+def validate_pipeline(definition_yaml: str) -> dict:
+    """Validate pipeline YAML without saving it. Returns normalized YAML or validation errors."""
+    return _send_yaml("POST", "/pipelines/validate", definition_yaml)
+
+
+@mcp.tool()
 def update_pipeline(name: str, definition_yaml: str) -> dict:
     """Replace a pipeline's YAML. Running pipeline runs keep the definition they started with."""
     return _send_yaml("PUT", f"/pipelines/{name}", definition_yaml)
@@ -446,6 +452,12 @@ def pipeline_status(name: str, run_id: int | None = None) -> dict:
     if run_id is None:
         return _get(f"/pipelines/{name}/runs?limit=1")
     return _get(f"/pipelines/{name}/runs/{run_id}")
+
+
+@mcp.tool()
+def list_pipeline_runs(name: str, limit: int = 20) -> dict:
+    """List recent runs for a pipeline, newest first. limit is capped by the server at 200."""
+    return _get(f"/pipelines/{name}/runs?limit={limit}")
 
 
 @mcp.tool()
@@ -656,18 +668,13 @@ def get_stats() -> dict:
 @mcp.tool()
 def check_busy() -> dict:
     """
-    Check if any training is running. Returns busy=True/False and running_projects list.
+    Check if any training, project setup, or pipeline shell task is running.
+    Returns the busy endpoint fields plus current capacity information.
     Prefer get_capacity() for new workflows — it shows available headroom, not just busy/free.
     """
+    busy = _get("/busy").get("data", {})
     capacity = _get("/capacity")
-    data = capacity.get("data", {})
-    running_projects = [
-        p["name"] for p in data.get("projects", []) if p.get("running_runs", 0) > 0
-    ]
-    return {
-        "busy": data.get("running", 0) > 0,
-        "running_projects": running_projects,
-    }
+    return {**busy, "capacity": capacity.get("data", {})}
 
 
 @mcp.tool()

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0
+
+- MCP `check_busy` now includes active pipeline shell tasks and project setup work.
+- Added MCP tools to validate pipeline YAML and list recent pipeline runs.
+
 ## [Unreleased]
 
 ### New Features
