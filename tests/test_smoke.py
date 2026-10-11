@@ -321,7 +321,26 @@ def test_pipelines_page_lists_pipeline_rows(client, app):
         "name": "fac", "folder": "chess", "steps": [{"name": "a", "type": "task", "command": "true"}]})
     html = client.get("/pipelines").get_data(as_text=True)
     assert 'data-kind="pipeline"' in html and 'href="/pipelines/fac"' in html
-    assert 'aria-label="a: pending"' in html
+    assert "1 step" in html and "never run" in html
+    assert "step-pill" not in html   # no progress strip until it has run
+    assert 'id="pipeline-intro"' not in html
+
+
+def test_pipelines_page_explains_pipelines_until_first_exists(client):
+    html = client.get("/pipelines").get_data(as_text=True)
+    assert 'id="pipeline-intro"' in html
+    assert "Create your first pipeline" in html and 'href="/pipelines/new"' in html
+    assert 'id="project-list"' not in html
+
+
+def test_new_pipeline_starts_from_commented_valid_template(client, app):
+    from services import pipeline_store
+    resp = client.post("/pipelines/new", data={"name": "fresh", "folder": "My Folder"})
+    assert resp.status_code == 302 and resp.headers["Location"].endswith("/pipelines/fresh")
+    defn, text = pipeline_store.load_pipeline(app.config["PIPELINES_DIR"], "fresh")
+    assert defn["folder"] == "My Folder"
+    assert [s["name"] for s in defn["steps"]] == ["prepare"]
+    assert "# A train step queues a training run" in text   # comments kept as inline docs
 
 
 def test_dashboard_activity_merges_recent_runs_and_queue(client, app):
@@ -401,3 +420,16 @@ def test_pipeline_page_renders(client, app):
     assert 'label for="pipeline-yaml"' in html
     assert 'id="pipeline-page-error" role="alert"' in html
     assert client.get("/pipelines/ghost").status_code == 404
+
+
+def test_pipelines_page_sort_key_is_epoch_seconds(client, app):
+    # The list sort (dashboard.js) compares numbers; an ISO string parsed as a float is just the year.
+    import re
+    from services import pipeline_store
+    from services.db_service import get_db
+    defn = pipeline_store.save_pipeline(app.config["PIPELINES_DIR"], {
+        "name": "ran", "steps": [{"name": "a", "type": "task", "command": "true"}]})
+    get_db().create_pipeline_run("ran", defn)
+    html = client.get("/pipelines").get_data(as_text=True)
+    value = re.search(r'data-name="ran"[^>]*data-last-run="([^"]*)"', html).group(1)
+    assert float(value) > 1_000_000_000
