@@ -435,7 +435,7 @@ def rename_project_api(name):
 def update_project_api(name):
     """
     Update editable project settings. Only the fields you include are changed.
-    Training must be stopped before calling this.
+    Folder-only updates are allowed during training; other updates require training to stop.
 
     Editable fields: branch, train_file, tensorboard_log_dir, requirements_file,
     setup_script, env_vars (dict), tb_logs_max_runs (int), run_history_max_runs (int),
@@ -445,6 +445,12 @@ def update_project_api(name):
 
     project = load_project(name)
     data = request.get_json() or {}
+    if not data:
+        return api_response(
+            error_code="NO_FIELDS",
+            error_message="No fields to update",
+            status_code=400,
+        )
 
     status = get_training_status(name)
     cosmetic_only = set(data) <= {"folder"}

@@ -64,6 +64,9 @@ def test_patch_folder_allowed_while_running(client, app, monkeypatch):
     monkeypatch.setattr(api_v1, "get_training_status", lambda name: {"status": "running"})
     assert client.patch("/api/v1/projects/p1", json={"folder": "chess"}).status_code == 200
     assert client.patch("/api/v1/projects/p1", json={"folder": "x", "branch": "dev"}).status_code == 409
+    empty = client.patch("/api/v1/projects/p1", json={})
+    assert empty.status_code == 400
+    assert empty.get_json()["error"] == {"code": "NO_FIELDS", "message": "No fields to update"}
 
 
 def test_list_and_rename_folder(client, app):
