@@ -11,6 +11,7 @@ from models.project import normalize_folder
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 STEP_NAME_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
+PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 MAX_STEPS = 32
 DEFAULT_TASK_TIMEOUT = 3600
@@ -92,6 +93,9 @@ def _validate_step(step, path, err):
 
     if stype == "train":
         project = _str_field(step, "project", path, err, required=True)
+        if project is not None and not PROJECT_NAME_RE.fullmatch(project):
+            err(f"{path}.project", "must name a project using only letters, digits, '_' or '-'")
+            project = None
         branch = _str_field(step, "branch", path, err)
         env = _env_field(step.get("env_vars", {}), f"{path}.env_vars", err)
         if name is None or project is None or env is None:

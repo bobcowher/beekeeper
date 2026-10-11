@@ -93,6 +93,21 @@ def test_missing_project_refused(env, app):
     assert e.value.code == "PROJECT_NOT_FOUND"
 
 
+def test_dispatcher_rejects_unsafe_project_in_persisted_snapshot(env):
+    """A pre-upgrade snapshot must not turn a project reference into a path traversal."""
+    definition = {"name": "legacy", "steps": [
+        {"name": "train", "type": "train", "project": "../outside", "env_vars": {}},
+    ]}
+    pk, _ = get_db().create_pipeline_run("legacy", definition)
+
+    tick(env)
+
+    run = get_db().get_pipeline_run_by_pk(pk)
+    assert run["status"] == "failed"
+    assert "invalid project reference" in run["error"]
+    assert get_db().projects_with_queued_runs() == []
+
+
 def test_tasks_disabled_refused(env, monkeypatch):
     monkeypatch.setattr(eng, "get_config_bool", lambda key, default=False: False)
     with pytest.raises(eng.PipelineError) as e:

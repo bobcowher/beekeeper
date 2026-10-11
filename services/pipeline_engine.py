@@ -12,7 +12,7 @@ import time
 from services import pipeline_tasks, process_manager
 from services.config_service import get_config_bool
 from services.db_service import get_db
-from services.pipeline_schema import step_dir_var
+from services.pipeline_schema import PROJECT_NAME_RE, step_dir_var
 from services.pipeline_store import load_pipeline, pipeline_run_dir
 from services.run_refs import run_ref
 from services.run_storage_service import persistent_runs_root
@@ -48,6 +48,11 @@ def _tasks_enabled() -> bool:
 def _check_runnable(projects_dir, steps):
     if any(s["type"] == "task" for s in steps) and not _tasks_enabled():
         raise PipelineError("TASKS_DISABLED", "Inline task steps are disabled by the administrator", 403)
+    invalid = sorted({s["project"] for s in steps if s["type"] == "train"
+                      and not PROJECT_NAME_RE.fullmatch(s["project"])})
+    if invalid:
+        raise PipelineError("INVALID_PROJECT_REF",
+                            f"Pipeline contains invalid project reference(s): {', '.join(invalid)}")
     missing = sorted({s["project"] for s in steps if s["type"] == "train"
                       and not os.path.isfile(os.path.join(projects_dir, s["project"], "project.json"))})
     if missing:
@@ -258,6 +263,9 @@ def _launch(projects_dir, pipelines_dir, run, step, sr):
     env = handoff_env(pipelines_dir, run, db.list_step_runs(run["id"]), idx)
     name, n = run["pipeline_name"], run["run_number"]
     if step["type"] == "train":
+        if not PROJECT_NAME_RE.fullmatch(step["project"]):
+            _finish_step(run, sr, "failed", error=f"invalid project reference: {step['project']!r}")
+            return
         extra = dict(step.get("env_vars") or {})
         extra.update(env)
         # One transaction: a failed step write must not leave an orphan queue entry behind.

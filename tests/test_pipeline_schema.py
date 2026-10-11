@@ -82,6 +82,8 @@ def test_numeric_name_rejected():
     ({"name": "p", "folder": "a/b", "steps": [{"name": "a", "type": "task", "command": "x"}]}, "folder"),
     ({"name": "p", "steps": [{"name": "a", "type": "deploy"}]}, "steps[0].type"),
     ({"name": "p", "steps": [{"name": "a", "type": "train"}]}, "steps[0].project"),
+    ({"name": "p", "steps": [{"name": "a", "type": "train", "project": "../outside"}]},
+     "steps[0].project"),
     ({"name": "p", "steps": [{"name": "a", "type": "task", "command": "  "}]}, "steps[0].command"),
     ({"name": "p", "steps": [{"name": "a", "type": "task", "command": "x", "timeout_s": 0}]}, "steps[0].timeout_s"),
     ({"name": "p", "steps": [{"name": "a", "type": "task", "command": "x", "timeout_s": True}]}, "steps[0].timeout_s"),
