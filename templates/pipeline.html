@@ -1,55 +1,94 @@
 {% extends "base.html" %}
 {% block title %}{{ name }} · Pipeline{% endblock %}
 {% block content %}
-<div class="page-header">
+<div class="page-header pipeline-page-header" id="pipeline-header" data-name="{{ name }}">
     <a href="/pipelines" class="back-btn">&larr; Back</a>
+    <h1><span class="pipeline-icon" aria-hidden="true">&#9939;</span>{{ name }}</h1>
+    <span id="pipeline-run-status" class="status-badge" role="status" aria-live="polite"></span>
+    <div class="pipeline-actions">
+        <button class="btn btn-success btn-sm" id="btn-pipeline-start">&#9654; Run Pipeline</button>
+        <button class="btn btn-secondary btn-sm" id="btn-pipeline-resume" hidden>&#8635; Resume</button>
+        <button class="btn btn-danger btn-sm" id="btn-pipeline-cancel" hidden>&#9632; Cancel</button>
+    </div>
 </div>
-<section class="card" id="pipeline-header" data-name="{{ name }}">
+<p class="pipeline-description" id="pipeline-description" hidden></p>
+<p class="pipeline-error pipeline-page-error" id="pipeline-page-error" role="alert" hidden></p>
+
+<section class="card" id="run-card">
     <div class="card-header">
-        <h2><span class="pipeline-icon" aria-hidden="true">&#9939;</span> {{ name }}</h2>
-        <div class="dashboard-controls">
-            <button class="btn btn-success btn-sm" id="btn-pipeline-start">&#9654; Run Pipeline</button>
-            <button class="btn btn-danger btn-sm" id="btn-pipeline-cancel" hidden>&#9632; Cancel</button>
-            <button class="btn btn-secondary btn-sm" id="btn-pipeline-resume" hidden>&#8635; Resume</button>
-            <button class="btn btn-danger btn-sm" id="btn-pipeline-delete">Delete</button>
-        </div>
+        <h2 id="run-title">Steps</h2>
+        <button type="button" class="link-button" id="btn-show-latest" hidden>Show latest run</button>
     </div>
-    <p class="muted" id="pipeline-description"></p>
-    <p class="pipeline-error" id="pipeline-page-error" role="alert" hidden></p>
-    <div class="run-select-row">
-        <label for="pipeline-run-select">Run:</label>
-        <select id="pipeline-run-select"></select>
-        <span id="pipeline-run-status" class="status-badge" role="status" aria-live="polite"></span>
-        <span id="pipeline-run-error" class="pipeline-error" role="alert"></span>
-    </div>
+    <div class="run-summary" id="run-summary"></div>
+    <p class="pipeline-error" id="pipeline-run-error" role="alert"></p>
     <ol id="step-chain" class="step-chain"></ol>
-    <pre id="step-log" class="run-log-terminal" aria-label="Selected task step log" tabindex="0" hidden></pre>
+    <div class="step-panel" id="step-panel" hidden>
+        <div class="step-panel-header">
+            <span class="step-panel-title" id="step-panel-title"></span>
+            <span class="muted" id="step-panel-note"></span>
+        </div>
+        <pre id="step-log" class="run-log-terminal step-log" aria-label="Selected step log" tabindex="0" hidden></pre>
+        <div id="step-panel-body" class="step-panel-body"></div>
+    </div>
 </section>
 
 <section class="card">
-    <div class="card-header">
-        <h2>Definition</h2>
-        <span class="definition-format">YAML</span>
+    <h2>Run History</h2>
+    <p class="muted" id="pipeline-runs-empty" hidden>No runs yet. <strong>Run Pipeline</strong> starts the first one.</p>
+    <div class="table-scroll">
+    <table class="run-history-table" id="pipeline-runs">
+        <thead><tr><th>Run</th><th>Status</th><th>Started</th><th>Duration</th><th>Progress</th></tr></thead>
+        <tbody></tbody>
+    </table>
     </div>
-    <div id="tab-yaml">
+</section>
+
+<section class="card collapsible" id="definition-section">
+    <h2 class="collapsible-header" data-target="definition-body" id="definition-header">
+        Definition <span class="collapse-icon">▶</span>
+        <span class="definition-dirty" id="yaml-dirty" hidden>unsaved changes</span>
+    </h2>
+    <div class="collapsible-body" id="definition-body" style="display:none">
         <label for="pipeline-yaml">Pipeline YAML</label>
-        <textarea id="pipeline-yaml" class="code-editor" spellcheck="false" rows="20"></textarea>
+        <textarea id="pipeline-yaml" class="code-editor" spellcheck="false" rows="10"></textarea>
         <div class="editor-actions">
             <button class="btn btn-secondary btn-sm" id="btn-yaml-validate">Validate</button>
             <button class="btn btn-primary btn-sm" id="btn-yaml-save">Save</button>
             <span id="yaml-status" class="muted" role="status" aria-live="polite"></span>
         </div>
         <ul id="yaml-errors" class="validation-errors" aria-live="polite"></ul>
+        <details class="field-reference">
+            <summary>Field reference</summary>
+            <table class="field-reference-table">
+                <tbody>
+                    <tr><th colspan="2">Pipeline</th></tr>
+                    <tr><td><code>name</code></td><td>Must match the pipeline's name.</td></tr>
+                    <tr><td><code>description</code></td><td>Optional. Shown under the title and on the Pipelines page.</td></tr>
+                    <tr><td><code>folder</code></td><td>Optional. Groups the pipeline with projects in the same folder.</td></tr>
+                    <tr><td><code>steps</code></td><td>Run in order. Each needs a unique <code>name</code> (lowercase, digits, <code>-</code>, <code>_</code>) and a <code>type</code>.</td></tr>
+                    <tr><th colspan="2"><code>type: train</code></th></tr>
+                    <tr><td><code>project</code></td><td>Project to train. The run goes through that project's queue.</td></tr>
+                    <tr><td><code>branch</code></td><td>Optional. Defaults to the project's branch.</td></tr>
+                    <tr><td><code>env_vars</code></td><td>Optional map of string values, added to the run's environment. Values are not shell-expanded.</td></tr>
+                    <tr><th colspan="2"><code>type: task</code></th></tr>
+                    <tr><td><code>command</code></td><td>Run with <code>bash -c</code> in the pipeline run folder.</td></tr>
+                    <tr><td><code>timeout_s</code></td><td>Optional. Seconds before the task is killed. Default 3600.</td></tr>
+                    <tr><th colspan="2">Environment every step gets</th></tr>
+                    <tr><td><code>BEEKEEPER_PIPELINE_RUN_DIR</code></td><td>This run's shared folder.</td></tr>
+                    <tr><td><code>BEEKEEPER_PIPELINE_RUN_ID</code></td><td>The run number.</td></tr>
+                    <tr><td><code>BEEKEEPER_PREV_STEP_DIR</code></td><td>Output folder of the previous step.</td></tr>
+                    <tr><td><code>BEEKEEPER_STEP_&lt;NAME&gt;_DIR</code></td><td>Output folder of an earlier step; name uppercased, <code>-</code> becomes <code>_</code>.</td></tr>
+                </tbody>
+            </table>
+        </details>
     </div>
 </section>
 
-<section class="card">
-    <h2>Run History</h2>
-    <div class="table-scroll">
-    <table class="run-history-table" id="pipeline-runs">
-        <thead><tr><th>Run</th><th>Status</th><th>Started</th><th>Duration</th><th>Progress</th></tr></thead>
-        <tbody></tbody>
-    </table>
+<section class="card danger-zone collapsible">
+    <h2 class="collapsible-header" data-target="danger-body">Danger Zone <span class="collapse-icon">▶</span></h2>
+    <div class="collapsible-body" id="danger-body" style="display:none">
+        <p class="muted">Deletes the definition and its run history. Training runs started by the pipeline are kept.</p>
+        <button class="btn btn-danger" id="btn-pipeline-delete">Delete Pipeline</button>
     </div>
 </section>
 {% endblock %}

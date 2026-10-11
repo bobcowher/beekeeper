@@ -2,6 +2,7 @@
 {% block title %}Beekeeper - Pipelines{% endblock %}
 {% block content %}
 <div class="page-header"><h1>Pipelines</h1></div>
+{% if pipelines %}
 <section class="card">
     <div class="card-header">
         <h2>Pipelines</h2>
@@ -13,29 +14,32 @@
             <a href="{{ url_for('pipelines.new') }}" class="btn btn-primary">+ New Pipeline</a>
         </div>
     </div>
-    {% if pipelines %}
     <div class="project-list" id="project-list">
         {% for pl in pipelines %}
         <div class="project-row pipeline-row" data-kind="pipeline"
              data-name="{{ pl.defn.name }}" data-folder="{{ pl.defn.folder }}"
              data-pinned="false" data-last-run="{{ pl.last_run_at }}" data-created-at="0">
             <a href="/pipelines/{{ pl.defn.name }}" class="project-item">
-                <span class="project-name"><span class="pipeline-icon" aria-hidden="true">&#9939;</span> {{ pl.defn.name }}</span>
+                <span class="pipeline-row-main">
+                    <span class="project-name"><span class="pipeline-icon" aria-hidden="true">&#9939;</span> {{ pl.defn.name }}</span>
+                    {% if pl.defn.description %}<span class="pipeline-row-desc">{{ pl.defn.description }}</span>{% endif %}
+                </span>
                 <span class="project-meta">
                     {% if pl.defn.error %}
                     <span class="project-status status-badge status-error">invalid</span>
                     {% else %}
-                    <span class="step-strip" role="group"
-                          aria-label="{{ (pl.last.run_ref ~ ' step progress') if pl.last else 'Pipeline has never run' }}"
-                          title="{{ pl.last.run_ref if pl.last else 'never run' }}">
-                        {% for s in (pl.last.steps if pl.last else pl.defn.steps) %}
-                        {% set step_status = s.status if pl.last else 'pending' %}
-                        <span class="step-pill step-{{ step_status }}" role="img"
-                              aria-label="{{ s.name }}: {{ step_status }}" title="{{ s.name }}"></span>
+                    <span class="pipeline-row-steps">{{ pl.defn.steps|length }} step{{ '' if pl.defn.steps|length == 1 else 's' }}</span>
+                    {% if pl.last %}
+                    <span class="step-strip" role="group" aria-label="{{ pl.last.run_ref }} step progress" title="{{ pl.last.run_ref }}">
+                        {% for s in pl.last.steps %}
+                        <span class="step-pill step-{{ s.status }}" role="img"
+                              aria-label="{{ s.name }}: {{ s.status }}" title="{{ s.name }}: {{ s.status }}"></span>
                         {% endfor %}
                     </span>
-                    {% if pl.last %}
-                    <span class="project-status status-badge status-{{ pl.last.status }}">{{ pl.last.run_ref }} {{ pl.last.status }}</span>
+                    <span class="project-status status-badge status-{{ pl.last.status }}">#{{ pl.last.run_id }} {{ pl.last.status }}</span>
+                    <span class="pipeline-row-when">{{ pl.last_run_ago }}</span>
+                    {% else %}
+                    <span class="pipeline-row-when">never run</span>
                     {% endif %}
                     {% endif %}
                 </span>
@@ -43,7 +47,68 @@
         </div>
         {% endfor %}
     </div>
-    {% else %}<p class="muted">No pipelines yet.</p>{% endif %}
 </section>
+{% else %}
+<section class="card pipeline-intro" id="pipeline-intro">
+    <h2>Chain your projects into one repeatable run</h2>
+    <p class="pipeline-intro-lead">
+        A pipeline runs a list of steps in order: training runs on your projects, and shell tasks
+        for the work between them, like fetching data, converting checkpoints or copying model files.
+        Start it once and Beekeeper carries it through.
+    </p>
+    <ol class="step-chain pipeline-intro-chain" aria-label="Example pipeline">
+        <li class="step-node"><div class="step-name">fetch-data <span class="step-type">task</span></div><div class="step-detail"><code>./download.sh</code></div></li>
+        <li class="step-node"><div class="step-name">pretrain <span class="step-type">train</span></div><div class="step-detail">chess-base</div></li>
+        <li class="step-node"><div class="step-name">fine-tune <span class="step-type">train</span></div><div class="step-detail">chess-ft</div></li>
+        <li class="step-node"><div class="step-name">export <span class="step-type">task</span></div><div class="step-detail"><code>cp model.pt /models/</code></div></li>
+    </ol>
+    <div class="pipeline-intro-grid">
+        <div>
+            <h3>Train steps</h3>
+            <p>Queue a training run on one of your projects and wait for it to finish. They go through the
+            project's normal queue, so parallel-run limits and GPU checks still apply.</p>
+        </div>
+        <div>
+            <h3>Task steps</h3>
+            <p>Run a shell command. Each pipeline run gets its own folder,
+            <code>$BEEKEEPER_PIPELINE_RUN_DIR</code>, that tasks start in.</p>
+        </div>
+        <div>
+            <h3>Handing off outputs</h3>
+            <p>Every step can find the output folders of the steps before it:
+            <code>$BEEKEEPER_PREV_STEP_DIR</code> or <code>$BEEKEEPER_STEP_&lt;NAME&gt;_DIR</code>.</p>
+        </div>
+        <div>
+            <h3>When a step fails</h3>
+            <p>The pipeline stops there. Fix the problem and <strong>Resume</strong>; it picks up at the
+            failed step and reuses earlier steps' outputs.</p>
+        </div>
+    </div>
+    <details class="pipeline-intro-example">
+        <summary>What the definition looks like</summary>
+<pre class="code-block">name: chess-factory
+steps:
+  - name: fetch-data
+    type: task
+    command: ./download.sh
+  - name: pretrain
+    type: train
+    project: chess-base
+  - name: fine-tune
+    type: train
+    project: chess-ft
+    env_vars:
+      EPOCHS: "3"
+    # train.py reads $BEEKEEPER_STEP_PRETRAIN_DIR from its environment
+  - name: export
+    type: task
+    command: cp "$BEEKEEPER_PREV_STEP_DIR/model.pt" /models/</pre>
+    </details>
+    <div class="pipeline-intro-actions">
+        <a href="{{ url_for('pipelines.new') }}" class="btn btn-primary">Create your first pipeline</a>
+        <span class="muted">Agents can manage pipelines too, through the <a href="/api/v1/docs">API</a> and <a href="/api/v1/mcp">MCP tools</a>.</span>
+    </div>
+</section>
+{% endif %}
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>{% endblock %}

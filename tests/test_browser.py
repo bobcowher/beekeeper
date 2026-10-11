@@ -342,6 +342,22 @@ def test_queue_polling_pauses_hidden_and_cancel_handles_network_error(live_serve
 
 
 @pytest.mark.browser
+def test_pipelines_intro_shows_until_first_pipeline(live_server):
+    # Runs before any test in this module creates a pipeline (the server is module-scoped).
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        for width, tag in ((1280, "desktop"), (390, "390")):
+            page = browser.new_page(viewport={"width": width, "height": 900})
+            page.goto(live_server + "/pipelines")
+            assert page.locator("#pipeline-intro").is_visible()
+            page.screenshot(path=f"/tmp/beekeeper-pipelines-intro-{tag}.png", full_page=True)
+            assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        browser.close()
+
+
+@pytest.mark.browser
 def test_pipeline_page_yaml_errors_and_run(live_server):
     from playwright.sync_api import sync_playwright
 
@@ -489,7 +505,7 @@ def test_pipeline_step_log_survives_periodic_refresh(live_server):
         )
         assert log.text_content() == log_text
         assert log.evaluate("el => el.scrollTop") == scroll_top
-        assert page.locator('[data-step-log="produce"]').get_attribute("aria-expanded") == "true"
+        assert page.locator('[data-step-log="produce"]').get_attribute("aria-pressed") == "true"
         browser.close()
 
 
@@ -764,4 +780,104 @@ def test_pipeline_dynamic_content_is_text_and_controls_are_accessible(live_serve
         assert page.locator("#step-log").text_content() == log_payload
         assert page.locator("#step-log script").count() == 0
         assert page.evaluate("window.__pipelineLogXss") is None
+        browser.close()
+
+
+def _create_pipeline(page, live_server, yaml):
+    response = page.request.fetch(
+        live_server + "/api/v1/pipelines", method="POST",
+        headers={"Content-Type": "application/yaml"}, data=yaml,
+    )
+    assert response.ok
+
+
+@pytest.mark.browser
+def test_pipeline_never_run_shows_steps_and_open_editor(live_server):
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        _create_pipeline(page, live_server,
+                         "name: fresh-pipe\nsteps:\n  - {name: fetch, type: task, command: './download.sh'}\n"
+                         "  - {name: train, type: train, project: demo, branch: dev}\n")
+        page.goto(live_server + "/pipelines/fresh-pipe")
+        page.locator("#step-chain .step-node").nth(1).wait_for()
+        assert page.locator("#pipeline-run-status").inner_text().lower() == "never run"
+        assert page.locator("#pipeline-runs-empty").is_visible()
+        assert page.locator("#pipeline-yaml").is_visible()            # still being written: editor open
+        assert "./download.sh" in page.locator("#step-panel").inner_text()
+        page.click('#step-chain .step-node:nth-child(2) .step-card')
+        assert "demo on branch dev" in page.locator("#step-panel-body").inner_text()
+        assert not page.locator("#btn-pipeline-delete").is_visible()  # tucked into the Danger Zone
+        page.screenshot(path="/tmp/beekeeper-pipeline-never-run.png", full_page=True)
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_run_view_focuses_failed_step_and_switches_runs(live_server):
+    from playwright.sync_api import sync_playwright
+
+    def step(name, status, has_log=True):
+        return {"index": 0, "name": name, "type": "task", "status": status, "attempt": 1,
+                "started_at": "2026-10-10T12:00:00", "ended_at": "2026-10-10T12:00:05",
+                "has_log": has_log, "error": "exit code 1" if status == "failed" else None}
+
+    runs = [
+        {"run_id": 2, "run_ref": "fail-pipe#2", "status": "failed", "current_step": 1,
+         "error": "step 'second': exit code 1", "started_at": "2026-10-10T12:00:00",
+         "ended_at": "2026-10-10T12:00:10", "steps": [step("first", "succeeded"), step("second", "failed")]},
+        {"run_id": 1, "run_ref": "fail-pipe#1", "status": "succeeded", "current_step": 1,
+         "error": None, "started_at": "2026-10-09T12:00:00",
+         "ended_at": "2026-10-09T12:00:10", "steps": [step("first", "succeeded"), step("second", "succeeded")]},
+    ]
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        _create_pipeline(page, live_server,
+                         "name: fail-pipe\nsteps:\n  - {name: first, type: task, command: 'true'}\n"
+                         "  - {name: second, type: task, command: 'false'}\n")
+        page.route("**/api/v1/pipelines/fail-pipe/runs?limit=50",
+                   lambda route: route.fulfill(json={"success": True, "data": {"runs": runs}}))
+        page.route("**/api/v1/pipelines/fail-pipe/runs/*/steps/*/log?tail=500",
+                   lambda route: route.fulfill(json={"success": True, "data": {
+                       "log": route.request.url.split("/runs/")[1].split("/log")[0]}}))
+
+        page.goto(live_server + "/pipelines/fail-pipe")
+        log = page.locator("#step-log")
+        page.wait_for_function("document.getElementById('step-log').textContent === '2/steps/second'")
+        assert page.locator("#step-chain .step-node.selected").inner_text().startswith("second")
+        assert page.locator("#run-title").text_content() == "Run #2"
+        assert page.locator("#btn-pipeline-resume").is_visible()
+        assert not page.locator("#pipeline-yaml").is_visible()      # has runs: editor collapsed
+        page.screenshot(path="/tmp/beekeeper-pipeline-failed.png", full_page=True)
+
+        page.click('#pipeline-runs tr[data-run="1"]')
+        page.wait_for_function("document.getElementById('step-log').textContent === '1/steps/second'")
+        assert page.locator("#run-title").text_content() == "Run #1 (older run)"
+        assert page.locator('#pipeline-runs tr[data-run="1"]').get_attribute("class") == "selected"
+        assert not page.locator("#btn-pipeline-resume").is_visible()
+
+        page.click('[data-step-log="first"]')
+        page.wait_for_function("document.getElementById('step-log').textContent === '1/steps/first'")
+        page.click("#btn-show-latest")
+        page.wait_for_function("document.getElementById('step-log').textContent === '2/steps/second'")
+        assert log.is_visible()
+
+        mobile = browser.new_page(viewport={"width": 390, "height": 844})
+        mobile.route("**/api/v1/pipelines/fail-pipe/runs?limit=50",
+                     lambda route: route.fulfill(json={"success": True, "data": {"runs": runs}}))
+        mobile.goto(live_server + "/pipelines/fail-pipe")
+        mobile.locator("#step-chain .step-node.selected").wait_for()
+        # Logs aren't mocked here, so the fetch 404s: the error belongs in the panel, not the page header.
+        mobile.wait_for_function("document.getElementById('step-log').textContent.startsWith('Could not load log')")
+        assert not mobile.locator("#pipeline-page-error").is_visible()
+        assert mobile.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        mobile.screenshot(path="/tmp/beekeeper-pipeline-failed-390.png", full_page=True)
+        assert errors == []
         browser.close()
