@@ -229,7 +229,7 @@ def test_dashboard_folder_groups_collapse_and_persist(live_server):
         page.goto(live_server + "/")
         label = page.locator(".folder-label", has_text="chess")
         assert label.is_visible()
-        assert page.locator(".folder-label", has_text="Unfiled").is_visible()
+        assert page.locator('.folder-label[data-folder-key="unfiled:"]').is_visible()
         row = page.locator('.project-row[data-name="chessbot"]')
         assert row.is_visible()
         page.screenshot(path="/tmp/beekeeper-folders-open.png", full_page=True)
