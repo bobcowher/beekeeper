@@ -1,5 +1,6 @@
 venv/
 projects/
+pipelines/
 __pycache__/
 *.pyc
 deploy.sh
