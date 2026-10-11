@@ -814,6 +814,17 @@ class DatabaseService:
                 (project_name,)).fetchall()
             return [self._queue_row(r) for r in rows]
 
+    def queue_position(self, queue_id: int) -> int | None:
+        """Return the entry's current FIFO position, or None if it already left the queue."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT (SELECT COUNT(*) FROM run_queue queued "
+                "WHERE queued.project_name = entry.project_name "
+                "AND queued.status = 'queued' AND queued.id <= entry.id) AS position "
+                "FROM run_queue entry WHERE entry.id = ? AND entry.status = 'queued'",
+                (queue_id,)).fetchone()
+            return row["position"] if row else None
+
     def projects_with_queued_runs(self) -> list[str]:
         with self._get_connection() as conn:
             rows = conn.execute(

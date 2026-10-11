@@ -783,7 +783,7 @@ def training_start(name):
                             error_message="env_vars must map strings to strings", status_code=400)
     if body.get("queue"):
         queue_id = get_db().enqueue_run(name, branch=branch, env_vars=env_vars or None, source="manual")
-        position = [e["id"] for e in get_db().list_queue(name)].index(queue_id) + 1
+        position = get_db().queue_position(queue_id)
         return api_response(data={"queue_id": queue_id, "position": position, "status": "queued"},
                             status_code=202)
     result = start_training(projects_dir, name, branch=branch, extra_env=env_vars or None)

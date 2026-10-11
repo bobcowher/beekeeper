@@ -98,6 +98,22 @@ def test_api_queue_roundtrip(client, app):
     assert client.delete(f"/api/v1/projects/p/queue/{data['queue_id']}").status_code == 409
 
 
+def test_api_enqueue_succeeds_if_dispatcher_claims_before_position(client, app, monkeypatch):
+    make_project_dir(app, "p")
+    db = get_db()
+    enqueue = db.enqueue_run
+
+    def enqueue_and_claim(*args, **kwargs):
+        queue_id = enqueue(*args, **kwargs)
+        assert db.mark_queue_started(queue_id, run_pk=42)
+        return queue_id
+
+    monkeypatch.setattr(db, "enqueue_run", enqueue_and_claim)
+    r = client.post("/api/v1/projects/p/training/start", json={"queue": True})
+    assert r.status_code == 202
+    assert r.get_json()["data"]["position"] is None
+
+
 def test_api_queue_rejects_bad_env(client, app):
     make_project_dir(app, "p")
     r = client.post("/api/v1/projects/p/training/start", json={"queue": True, "env_vars": {"A": 1}})
