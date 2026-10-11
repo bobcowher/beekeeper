@@ -147,10 +147,10 @@ def test_rate_limit_form_leaves_security_toggles_alone(client, app, monkeypatch)
     old_tasks = get_config_bool("pipelines.inline_tasks.enabled", True)
     old_rate = get_config_int("api.rate_limit_per_minute", 100)
     try:
-        set_config("auth.enabled", "false")
+        set_config("auth.enabled", "true")
         set_config("pipelines.inline_tasks.enabled", "true")
         client.post("/admin/settings", data={"api_rate_limit": "50"})
-        assert get_config_bool("auth.enabled", True) is False
+        assert get_config_bool("auth.enabled", False) is True
         assert get_config_bool("pipelines.inline_tasks.enabled", False) is True
     finally:
         set_config("api.rate_limit_per_minute", str(old_rate))
@@ -159,11 +159,16 @@ def test_rate_limit_form_leaves_security_toggles_alone(client, app, monkeypatch)
 
 
 def test_step_log_path_confined(client, app):
+    outside_path = app.config["PIPELINES_DIR"] + "/../outside.log"
+    marker = "outside pipeline log must stay private"
+    with open(outside_path, "w") as f:
+        f.write(marker)
     post_yaml(client, "/api/v1/pipelines", "name: t\nsteps:\n  - {name: s, type: task, command: 'true'}\n")
     client.post("/api/v1/pipelines/t/runs")
     db = get_db()
     run = db.get_pipeline_run("t", 1)
     sr = next(s for s in db.list_step_runs(run["id"]) if s["step_name"] == "s")
-    db.update_step_run(sr["id"], log_path="../../x")
+    db.update_step_run(sr["id"], log_path="../outside.log")
     r = client.get("/api/v1/pipelines/t/runs/1/steps/s/log")
     assert r.status_code == 404
+    assert marker not in r.get_data(as_text=True)
