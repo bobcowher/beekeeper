@@ -907,7 +907,8 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
     if extra_env:
         os.write(log_fd, f"[beekeeper] Run env overrides: {', '.join(sorted(extra_env))}\n".encode())
     for key in reserved_keys:
-        warning = f"Project env var {key} is reserved by Beekeeper and was overridden for this run."
+        source = "Run env override" if key in (extra_env or {}) else "Project env var"
+        warning = f"{source} {key} is reserved by Beekeeper and was overridden for this run."
         prelaunch_warnings.append(warning)
         os.write(log_fd, f"[beekeeper] WARNING: {warning}\n".encode())
     proc_env.update(project_env)
@@ -922,8 +923,9 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
         minimum_mb = project.get("gpu_memory_minimum", 0)
         free_mb = gpu_assignment["free_mb"]
         for key in sorted(_GPU_ENV_KEYS & set(project_env)):
+            source = "Run env override" if key in (extra_env or {}) else "Project env var"
             os.write(log_fd, (
-                f"[beekeeper] WARNING: Project env var {key} is reserved by GPU management and was overridden.\n"
+                f"[beekeeper] WARNING: {source} {key} is reserved by GPU management and was overridden.\n"
             ).encode())
         # gpu_assignment["index"] is an NVML (PCI bus order) index; CUDA's default
         # FASTEST_FIRST order would resolve it to a different card.

@@ -515,11 +515,15 @@ def test_parallel_workspace_output_conflict_is_replaced(tmp_path):
     process_manager._running.clear()
 
 
-def test_reserved_run_env_var_is_overridden_and_warned(tmp_path):
-    """Beekeeper run env vars override project env vars and emit a run-log warning."""
+@pytest.mark.parametrize("project_env,extra_env,source", [
+    ({"BEEKEEPER_RUN_DIR": "/tmp/wrong"}, None, "Project env var"),
+    ({}, {"BEEKEEPER_RUN_DIR": "/tmp/wrong"}, "Run env override"),
+])
+def test_reserved_run_env_var_is_overridden_and_warned(tmp_path, project_env, extra_env, source):
+    """Beekeeper run env vars override configured values and identify their source."""
     from services import process_manager
     process_manager._running.clear()
-    projects_dir = _make_project(tmp_path, env_vars={"BEEKEEPER_RUN_DIR": "/tmp/wrong"})
+    projects_dir = _make_project(tmp_path, env_vars=project_env)
     expected_dir = os.path.join(projects_dir, "myproject", "persistent", "runs", "run_46")
 
     mock_db = MagicMock(create_training_run=MagicMock(return_value=(46, 46)),
@@ -540,12 +544,12 @@ def test_reserved_run_env_var_is_overridden_and_warned(tmp_path):
          patch("services.process_manager.subprocess.Popen", side_effect=fake_popen), \
          patch("services.process_manager._monitor_process"), \
          patch("services.process_manager.get_db", return_value=mock_db):
-        result = process_manager.start_training(projects_dir, "myproject")
+        result = process_manager.start_training(projects_dir, "myproject", extra_env=extra_env)
 
     assert "error" not in result
     with open(os.path.join(projects_dir, "myproject", "train-46.log")) as f:
         log_content = f.read()
-    assert "Project env var BEEKEEPER_RUN_DIR is reserved by Beekeeper" in log_content
+    assert f"{source} BEEKEEPER_RUN_DIR is reserved by Beekeeper" in log_content
     process_manager._running.clear()
 
 
