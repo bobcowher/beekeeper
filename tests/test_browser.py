@@ -382,6 +382,14 @@ def test_pipeline_page_yaml_errors_and_run(live_server):
             mobile.wait_for_load_state("networkidle")
             mobile.screenshot(path=f"/tmp/beekeeper-{shot}.png", full_page=True)
             assert mobile.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), path
+        mobile.goto(live_server + "/")
+        mobile.locator("#sidebar-toggle").click()
+        mobile.wait_for_timeout(300)
+        assert "open" in (mobile.locator("#sidebar").get_attribute("class") or "")
+        assert mobile.locator("#sidebar").bounding_box()["x"] == 0
+        assert mobile.locator('.sidebar-nav a[href="/projects"]').is_visible()
+        assert mobile.locator('.sidebar-nav a[href="/pipelines"]').is_visible()
+        mobile.screenshot(path="/tmp/beekeeper-sidebar-390.png", full_page=True)
         assert errors == []
         browser.close()
 

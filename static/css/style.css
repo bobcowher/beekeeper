@@ -1136,6 +1136,10 @@ label {
         transform: translateX(0);
     }
 
+    .sidebar-header {
+        padding-left: 64px;
+    }
+
     .content {
         padding: 16px;
         padding-top: 64px;
