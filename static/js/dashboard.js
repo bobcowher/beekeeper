@@ -95,7 +95,7 @@
         if (unfiled.length) groups.push(["", unfiled]);
 
         groups.forEach(([folder, members]) => {
-            const key = folder || "__unfiled__";
+            const key = folder ? `folder:${folder}` : "unfiled:";
             const isCollapsed = collapsed.has(key);
             list.appendChild(makeFolderLabel(folder || "Unfiled", key, members.length, isCollapsed));
             members.forEach(r => {

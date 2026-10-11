@@ -75,6 +75,12 @@ def live_server(tmp_path_factory):
         "folder": "chess",
     }))
 
+    proj3 = projects_dir / "literal-folder"
+    proj3.mkdir()
+    literal_data = json.loads((proj2 / "project.json").read_text())
+    literal_data.update({"name": "literal-folder", "folder": "__unfiled__"})
+    (proj3 / "project.json").write_text(json.dumps(literal_data))
+
     (tmp / "pipelines").mkdir()
     from app import create_app
     flask_app = create_app({
@@ -232,6 +238,23 @@ def test_dashboard_folder_groups_collapse_and_persist(live_server):
         page.reload()
         assert not page.locator('.project-row[data-name="chessbot"]').is_visible()
         page.screenshot(path="/tmp/beekeeper-folders.png", full_page=True)
+        browser.close()
+
+
+@pytest.mark.browser
+def test_literal_unfiled_folder_has_independent_collapse_state(live_server):
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(live_server + "/")
+        literal = page.locator('.folder-label[data-folder-key="folder:__unfiled__"]')
+        unfiled = page.locator('.folder-label[data-folder-key="unfiled:"]')
+        assert literal.is_visible() and unfiled.is_visible()
+        literal.click()
+        assert not page.locator('.project-row[data-name="literal-folder"]').is_visible()
+        assert page.locator('.project-row[data-name="demo"]').is_visible()
         browser.close()
 
 

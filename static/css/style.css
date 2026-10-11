@@ -289,6 +289,11 @@ body {
 .project-row.folder-collapsed { display: none; }
 .project-section-label.folder-label { cursor: pointer; user-select: none; }
 .project-section-label.folder-label:hover { color: var(--accent); }
+.project-section-label.folder-label:focus-visible {
+    color: var(--accent-hover);
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
 .folder-count { font-weight: normal; }
 
 .project-section-label {
