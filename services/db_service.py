@@ -835,10 +835,10 @@ class DatabaseService:
                                   wait_reason=None, started_at=datetime.now().isoformat())
 
     def set_queue_wait_reason(self, queue_id: int, reason: str | None):
-        self._update_queue(queue_id, wait_reason=reason)
+        self._update_queue(queue_id, where_queued=True, wait_reason=reason)
 
     def mark_queue_failed(self, queue_id: int, error: str):
-        self._update_queue(queue_id, status="failed", error=error)
+        self._update_queue(queue_id, where_queued=True, status="failed", error=error)
 
     def cancel_queue_entry(self, queue_id: int, error: str | None = None) -> bool:
         return self._update_queue(queue_id, where_queued=True, status="cancelled", error=error)

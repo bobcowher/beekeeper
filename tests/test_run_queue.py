@@ -46,6 +46,17 @@ def test_wait_reason_and_failure(db):
     assert db.list_queue("p") == []
 
 
+def test_wait_reason_and_failure_do_not_overwrite_cancel(db):
+    a = db.enqueue_run("p")
+    assert db.cancel_queue_entry(a, error="cancelled by user")
+    db.set_queue_wait_reason(a, "At capacity")
+    db.mark_queue_failed(a, "Project not found")
+    entry = db.get_queue_entry(a)
+    assert entry["status"] == "cancelled"
+    assert entry["error"] == "cancelled by user"
+    assert entry["wait_reason"] is None
+
+
 def test_rename_and_cancel_project_queue(db):
     a = db.enqueue_run("old")
     db.rename_queue_project("old", "new")
