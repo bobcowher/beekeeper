@@ -278,6 +278,9 @@ def test_pipeline_page_yaml_errors_and_run(live_server):
         page.wait_for_function("document.getElementById('yaml-status').textContent === 'Saved'")
         page.click("#btn-pipeline-start")
         page.locator("#step-chain .step-pending, #step-chain .step-queued, #step-chain .step-failed, #step-chain .step-running").first.wait_for()
+        page.wait_for_function("document.getElementById('pipeline-run-status').textContent === 'running'")
+        assert not page.locator("#btn-pipeline-start").is_visible()
+        assert page.locator("#btn-pipeline-cancel").is_visible()
         page.screenshot(path="/tmp/beekeeper-pipeline.png", full_page=True)
         page.goto(live_server + "/")
         assert page.locator('.pipeline-row[data-name="ui-pipe"]').is_visible()
@@ -484,4 +487,150 @@ def test_pipeline_chain_arrow_uses_accent_colour(live_server):
             }
         """)
         assert colours["arrow"] == colours["accent"]
+        browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_network_error_is_reported_without_pageerror(live_server):
+    from playwright.sync_api import sync_playwright
+
+    yaml = "name: error-pipe\nsteps:\n  - {name: one, type: task, command: 'true'}\n"
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        response = page.request.fetch(
+            live_server + "/api/v1/pipelines",
+            method="POST",
+            headers={"Content-Type": "application/yaml"},
+            data=yaml,
+        )
+        assert response.ok
+        page.goto(live_server + "/pipelines/error-pipe")
+        page.locator("#pipeline-yaml").wait_for()
+
+        errors = []
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        page.route("**/api/v1/pipelines/validate", lambda route: route.abort())
+        page.click("#btn-yaml-validate")
+
+        alert = page.locator("#pipeline-page-error")
+        alert.wait_for(state="visible")
+        assert "Could not validate pipeline" in alert.inner_text()
+        assert not page.locator("#btn-yaml-validate").is_disabled()
+        page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+        page.wait_for_timeout(500)
+        assert alert.is_visible(), "background refresh must not erase an action error"
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_polling_pauses_while_page_is_hidden(live_server):
+    from playwright.sync_api import sync_playwright
+
+    yaml = "name: poll-pipe\nsteps:\n  - {name: one, type: task, command: 'true'}\n"
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        response = page.request.fetch(
+            live_server + "/api/v1/pipelines",
+            method="POST",
+            headers={"Content-Type": "application/yaml"},
+            data=yaml,
+        )
+        assert response.ok
+
+        requests = {"runs": 0}
+
+        def count_runs(route):
+            requests["runs"] += 1
+            route.continue_()
+
+        page.route("**/api/v1/pipelines/poll-pipe/runs?limit=50", count_runs)
+        page.goto(live_server + "/pipelines/poll-pipe")
+        page.locator("#step-chain .step-node").wait_for()
+        initial = requests["runs"]
+
+        page.evaluate("""
+            () => {
+                Object.defineProperty(document, 'hidden', {configurable: true, get: () => true});
+                document.dispatchEvent(new Event('visibilitychange'));
+            }
+        """)
+        page.wait_for_timeout(5500)
+        assert requests["runs"] == initial
+
+        page.evaluate("""
+            () => {
+                Object.defineProperty(document, 'hidden', {configurable: true, get: () => false});
+                document.dispatchEvent(new Event('visibilitychange'));
+            }
+        """)
+        page.wait_for_timeout(1000)
+        assert requests["runs"] > initial
+        browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_dynamic_content_is_text_and_controls_are_accessible(live_server):
+    from playwright.sync_api import sync_playwright
+
+    yaml = "name: xss-pipe\nsteps:\n  - {name: safe, type: task, command: 'true'}\n"
+    payload = '</div><img src=x onerror="window.__pipelineXss=1">'
+    log_payload = '<script>window.__pipelineLogXss=1</script>'
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        response = page.request.fetch(
+            live_server + "/api/v1/pipelines",
+            method="POST",
+            headers={"Content-Type": "application/yaml"},
+            data=yaml,
+        )
+        assert response.ok
+
+        definition = {
+            "name": "xss-pipe", "description": payload,
+            "steps": [{"name": payload, "type": "task", "command": "true"}],
+        }
+        run = {
+            "run_id": 1, "run_ref": "xss-pipe#1", "status": "running", "current_step": 0,
+            "error": payload, "started_at": "2026-10-10T12:00:00", "ended_at": None,
+            "steps": [{
+                "name": payload, "type": "task", "status": "running", "attempt": 1,
+                "started_at": "2026-10-10T12:00:00", "ended_at": None, "has_log": True,
+            }],
+        }
+        page.route(
+            live_server + "/api/v1/pipelines/xss-pipe",
+            lambda route: route.fulfill(json={
+                "success": True, "data": {"pipeline": definition, "yaml": yaml},
+            }),
+        )
+        page.route(
+            "**/api/v1/pipelines/xss-pipe/runs?limit=50",
+            lambda route: route.fulfill(json={"success": True, "data": {"runs": [run]}}),
+        )
+        page.route(
+            "**/api/v1/pipelines/xss-pipe/runs/1/steps/**/log?tail=500",
+            lambda route: route.fulfill(json={"success": True, "data": {"log": log_payload}}),
+        )
+
+        page.goto(live_server + "/pipelines/xss-pipe")
+        row = page.locator('#pipeline-runs tr[data-run="1"]')
+        row.wait_for()
+        assert page.locator('label[for="pipeline-yaml"]').text_content().strip() == "Pipeline YAML"
+        run_button = row.locator(".run-history-link")
+        assert run_button.get_attribute("aria-label") == "Show pipeline run #1"
+        run_button.focus()
+        run_button.press("Enter")
+        assert page.locator("#step-chain img").count() == 0
+        assert payload in page.locator("#step-chain .step-name").inner_text()
+        assert page.evaluate("window.__pipelineXss") is None
+
+        page.locator("[data-step-log]").click()
+        page.locator("#step-log").wait_for(state="visible")
+        assert page.locator("#step-log").text_content() == log_payload
+        assert page.locator("#step-log script").count() == 0
+        assert page.evaluate("window.__pipelineLogXss") is None
         browser.close()

@@ -16,7 +16,7 @@
 
 <section class="card">
     <div class="card-header">
-        <h2>Projects</h2>
+        <h2>Projects and Pipelines</h2>
         <div class="dashboard-controls">
             <div class="sort-toggle">
                 <button class="sort-btn" data-sort="recent">Last Run</button>
@@ -73,7 +73,9 @@
                     {% if pl.defn.error %}
                     <span class="project-status status-badge status-error">invalid</span>
                     {% else %}
-                    <span class="step-strip" title="{{ pl.last.run_ref if pl.last else 'never run' }}">
+                    <span class="step-strip" role="img"
+                          aria-label="{{ (pl.last.run_ref ~ ' step progress') if pl.last else 'Pipeline has never run' }}"
+                          title="{{ pl.last.run_ref if pl.last else 'never run' }}">
                         {% for s in (pl.last.steps if pl.last else pl.defn.steps) %}
                         <span class="step-pill step-{{ s.status if pl.last else 'pending' }}" title="{{ s.name }}"></span>
                         {% endfor %}

@@ -1826,6 +1826,7 @@ label {
 .queue-wait { color: var(--accent-dim); font-size: 0.8rem; }
 
 /* Pipelines */
+[hidden] { display: none !important; }
 .pipeline-icon { opacity: 0.7; margin-right: 0.25rem; }
 .step-strip { display: inline-flex; gap: 3px; margin-right: 0.5rem; }
 .step-pill { width: 14px; height: 8px; border-radius: 2px; background: rgba(133, 133, 133, 0.45); }
@@ -1848,6 +1849,11 @@ label {
 .validation-errors { color: var(--danger); font-size: 0.85rem; list-style: none; padding: 0; margin-top: 0.5rem; }
 .table-scroll { overflow-x: auto; }
 #pipeline-runs tbody tr { cursor: pointer; }
+.link-button { appearance: none; border: 0; padding: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+.link-button:hover, .link-button:focus { color: var(--text-primary); }
+.run-history-link { appearance: none; border: 0; padding: 0; background: none; color: var(--text-primary); font: inherit; cursor: pointer; }
+.run-history-link:hover, .run-history-link:focus { color: var(--accent); text-decoration: underline; }
+.definition-format { color: var(--bg-primary); background: var(--accent); border-radius: 3px; padding: 0.4rem 1rem; font-size: 0.875rem; }
 .status-succeeded { background: rgba(78, 201, 78, 0.15); color: var(--success); }
 .status-failed { background: rgba(201, 64, 64, 0.15); color: var(--danger); }
 .status-queued { background: rgba(232, 185, 49, 0.15); color: var(--accent); }

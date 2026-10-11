@@ -5,15 +5,57 @@
     const NAME = header.dataset.name;
     const API = `/api/v1/pipelines/${encodeURIComponent(NAME)}`;
     const $ = id => document.getElementById(id);
-    const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
     let runs = [];
     let selected = null;   // run_id shown in the chain; null = latest
     let expandedLog = null;
+    let definition = { steps: [] };
+    let yamlLoaded = false;
+    let refreshInFlight = null;
+    let refreshAgain = false;
+    let pollTimer = null;
+    let polling = true;
+
+    function errorMessage(data, fallback) {
+        return data && data.error && data.error.message ? data.error.message : fallback;
+    }
+
+    function clearPageError(source = null) {
+        const el = $('pipeline-page-error');
+        if (source && el.dataset.source !== source) return;
+        el.textContent = '';
+        el.hidden = true;
+        delete el.dataset.source;
+    }
+
+    function showPageError(message, source = 'action') {
+        if (!message) {
+            clearPageError();
+            return;
+        }
+        const el = $('pipeline-page-error');
+        el.textContent = message;
+        el.dataset.source = source;
+        el.hidden = false;
+    }
 
     async function api(url, opts = {}) {
-        const r = await fetch(url, opts);
-        return r.json();
+        let response;
+        try {
+            response = await fetch(url, opts);
+        } catch (error) {
+            throw new Error(`Network request failed: ${error.message}`);
+        }
+        let data;
+        try {
+            data = await response.json();
+        } catch (error) {
+            throw new Error(`Server returned an invalid response (HTTP ${response.status})`);
+        }
+        if (!response.ok && data.success !== false) {
+            throw new Error(`Request failed (HTTP ${response.status})`);
+        }
+        return data;
     }
 
     function duration(start, end) {
@@ -23,158 +65,337 @@
         return h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`;
     }
 
-    function renderChain(run, definition) {
+    function statusClass(status) {
+        return String(status || 'pending').replace(/[^a-z0-9_-]/gi, '') || 'pending';
+    }
+
+    function textElement(tag, className, text) {
+        const el = document.createElement(tag);
+        if (className) el.className = className;
+        el.textContent = text;
+        return el;
+    }
+
+    async function showStepLog(run, stepName, button) {
+        const pre = $('step-log');
+        button.disabled = true;
+        try {
+            const data = await api(
+                `${API}/runs/${run.run_id}/steps/${encodeURIComponent(stepName)}/log?tail=500`
+            );
+            if (!data.success) throw new Error(errorMessage(data, 'Could not load step log'));
+            expandedLog = {
+                runId: run.run_id,
+                stepName,
+                content: data.data.log,
+                scrollTop: 0,
+            };
+            pre.hidden = false;
+            pre.textContent = expandedLog.content;
+            $('step-chain').querySelectorAll('[data-step-log]').forEach(link => {
+                link.setAttribute('aria-expanded', 'false');
+            });
+            button.setAttribute('aria-expanded', 'true');
+            showPageError();
+        } catch (error) {
+            showPageError(`Could not load step log: ${error.message}`);
+        } finally {
+            button.disabled = false;
+        }
+    }
+
+    function renderChain(run, pipelineDefinition) {
         const chain = $('step-chain');
         const pre = $('step-log');
-        if (expandedLog && pre.style.display !== 'none') {
+        if (expandedLog && !pre.hidden) {
             expandedLog.scrollTop = pre.scrollTop;
             expandedLog.content = pre.textContent;
         }
-        chain.innerHTML = '';
-        const steps = run ? run.steps : definition.steps.map((s, i) => ({ ...s, index: i, status: 'pending' }));
-        steps.forEach(s => {
+        chain.replaceChildren();
+        const steps = run ? run.steps : pipelineDefinition.steps.map((step, index) => ({
+            ...step, index, status: 'pending',
+        }));
+        steps.forEach(step => {
             const li = document.createElement('li');
-            li.className = `step-node step-${s.status}`;
-            let link = '';
-            if (s.type === 'train' && s.run_id) {
-                link = `<a href="/projects/${encodeURIComponent(s.project)}/history/${s.run_id}/log">${esc(s.run_ref)}</a>`;
-            } else if (s.type === 'train') {
-                link = `<span class="muted">${esc(s.project)}</span>`;
-            } else if (s.has_log) {
-                const isExpanded = expandedLog && run && expandedLog.runId === run.run_id && expandedLog.stepName === s.name;
-                link = `<a href="#" data-step-log="${esc(s.name)}" aria-expanded="${isExpanded ? 'true' : 'false'}">log</a>`;
+            li.className = `step-node step-${statusClass(step.status)}`;
+
+            const name = textElement('div', 'step-name', step.name);
+            name.append(' ', textElement('span', 'muted', step.type));
+            li.appendChild(name);
+
+            const statusLine = document.createElement('div');
+            statusLine.appendChild(textElement(
+                'span', `status-badge status-${statusClass(step.status)}`, step.status
+            ));
+            if (Number(step.attempt) > 1) {
+                statusLine.append(' ', textElement('span', 'muted', `attempt ${step.attempt}`));
             }
-            li.innerHTML = `
-                <div class="step-name">${esc(s.name)} <span class="muted">${esc(s.type)}</span></div>
-                <div><span class="status-badge status-${esc(s.status)}">${esc(s.status)}</span>
-                     ${s.attempt > 1 ? `<span class="muted">attempt ${s.attempt}</span>` : ''}</div>
-                <div class="muted">${duration(s.started_at, s.ended_at)}</div>
-                <div>${link}</div>
-                ${s.wait_reason ? `<div class="queue-wait">waiting: ${esc(s.wait_reason)}</div>` : ''}
-                ${s.error ? `<div class="pipeline-error">${esc(s.error)}</div>` : ''}`;
+            li.appendChild(statusLine);
+            li.appendChild(textElement('div', 'muted', duration(step.started_at, step.ended_at)));
+
+            const linkLine = document.createElement('div');
+            if (step.type === 'train' && step.run_id) {
+                const link = document.createElement('a');
+                link.href = `/projects/${encodeURIComponent(step.project)}/history/${step.run_id}/log`;
+                link.textContent = step.run_ref;
+                linkLine.appendChild(link);
+            } else if (step.type === 'train') {
+                linkLine.appendChild(textElement('span', 'muted', step.project));
+            } else if (step.has_log) {
+                const isExpanded = expandedLog && run && expandedLog.runId === run.run_id &&
+                    expandedLog.stepName === step.name;
+                const button = textElement('button', 'link-button', 'log');
+                button.type = 'button';
+                button.dataset.stepLog = step.name;
+                button.setAttribute('aria-controls', 'step-log');
+                button.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+                button.addEventListener('click', () => showStepLog(run, step.name, button));
+                linkLine.appendChild(button);
+            }
+            li.appendChild(linkLine);
+            if (step.wait_reason) {
+                li.appendChild(textElement('div', 'queue-wait', `waiting: ${step.wait_reason}`));
+            }
+            if (step.error) li.appendChild(textElement('div', 'pipeline-error', step.error));
             chain.appendChild(li);
         });
         const logStillSelected = expandedLog && run && expandedLog.runId === run.run_id &&
-            steps.some(s => s.name === expandedLog.stepName && s.has_log);
+            steps.some(step => step.name === expandedLog.stepName && step.has_log);
         if (logStillSelected) {
-            pre.style.display = '';
+            pre.hidden = false;
             pre.textContent = expandedLog.content;
             pre.scrollTop = expandedLog.scrollTop;
         } else {
-            pre.style.display = 'none';
+            pre.hidden = true;
         }
-        chain.querySelectorAll('[data-step-log]').forEach(a => a.addEventListener('click', async e => {
-            e.preventDefault();
-            const data = await api(`${API}/runs/${run.run_id}/steps/${a.dataset.stepLog}/log?tail=500`);
-            expandedLog = {
-                runId: run.run_id,
-                stepName: a.dataset.stepLog,
-                content: data.success ? data.data.log : data.error.message,
-                scrollTop: 0,
-            };
-            pre.style.display = '';
-            pre.textContent = expandedLog.content;
-            chain.querySelectorAll('[data-step-log]').forEach(link => link.setAttribute('aria-expanded', 'false'));
-            a.setAttribute('aria-expanded', 'true');
-        }));
     }
 
     function renderControls(run) {
         const latest = runs[0];
-        $('btn-pipeline-start').style.display = latest && latest.status === 'running' ? 'none' : '';
-        $('btn-pipeline-cancel').style.display = run && run.status === 'running' ? '' : 'none';
-        $('btn-pipeline-resume').style.display =
-            run && latest && run.run_id === latest.run_id && ['failed', 'cancelled'].includes(run.status) ? '' : 'none';
+        $('btn-pipeline-start').hidden = Boolean(latest && latest.status === 'running');
+        $('btn-pipeline-cancel').hidden = !(run && run.status === 'running');
+        $('btn-pipeline-resume').hidden = !(
+            run && latest && run.run_id === latest.run_id && ['failed', 'cancelled'].includes(run.status)
+        );
         const badge = $('pipeline-run-status');
         badge.textContent = run ? run.status : 'never run';
-        badge.className = `status-badge status-${run ? run.status : 'pending'}`;
+        badge.className = `status-badge status-${statusClass(run ? run.status : 'pending')}`;
         $('pipeline-run-error').textContent = run && run.error ? run.error : '';
+    }
+
+    function selectRun(runId) {
+        selected = runId;
+        refresh();
     }
 
     function renderHistory() {
         const body = $('pipeline-runs').querySelector('tbody');
-        body.innerHTML = runs.map(r => {
-            const stepName = (r.steps[r.current_step] || {}).name || '';
+        body.replaceChildren();
+        runs.forEach(run => {
+            const stepName = (run.steps[run.current_step] || {}).name || '';
             let progress = '';
-            if (r.status === 'running' && stepName) progress = `Running: ${stepName}`;
-            if (['failed', 'cancelled'].includes(r.status) && stepName) progress = `Stopped at ${stepName}`;
-            return `<tr data-run="${r.run_id}"><td>#${r.run_id}</td>
-                <td><span class="status-badge status-${esc(r.status)}">${esc(r.status)}</span></td>
-                <td>${esc(new Date(r.started_at).toLocaleString())}</td>
-                <td>${duration(r.started_at, r.ended_at)}</td><td>${esc(progress)}</td></tr>`;
-        }).join('');
-        body.querySelectorAll('tr').forEach(tr => tr.addEventListener('click', () => {
-            selected = Number(tr.dataset.run);
-            refresh();
-        }));
-        const sel = $('pipeline-run-select');
-        sel.innerHTML = runs.map(r => `<option value="${r.run_id}">#${r.run_id} — ${esc(r.status)}</option>`).join('');
-        if (selected) sel.value = String(selected);
+            if (run.status === 'running' && stepName) progress = `Running: ${stepName}`;
+            if (['failed', 'cancelled'].includes(run.status) && stepName) progress = `Stopped at ${stepName}`;
+
+            const row = document.createElement('tr');
+            row.dataset.run = run.run_id;
+            const runCell = document.createElement('td');
+            const runButton = textElement('button', 'run-history-link', `#${run.run_id}`);
+            runButton.type = 'button';
+            runButton.setAttribute('aria-label', `Show pipeline run #${run.run_id}`);
+            runCell.appendChild(runButton);
+            const statusCell = document.createElement('td');
+            statusCell.appendChild(textElement(
+                'span', `status-badge status-${statusClass(run.status)}`, run.status
+            ));
+            [
+                runCell,
+                statusCell,
+                textElement('td', '', new Date(run.started_at).toLocaleString()),
+                textElement('td', '', duration(run.started_at, run.ended_at)),
+                textElement('td', '', progress),
+            ].forEach(cell => row.appendChild(cell));
+            row.addEventListener('click', () => selectRun(Number(row.dataset.run)));
+            body.appendChild(row);
+        });
+
+        const select = $('pipeline-run-select');
+        select.replaceChildren();
+        runs.forEach(run => {
+            const option = document.createElement('option');
+            option.value = run.run_id;
+            option.textContent = `#${run.run_id} — ${run.status}`;
+            select.appendChild(option);
+        });
+        select.disabled = runs.length === 0;
+        if (selected) select.value = String(selected);
     }
 
-    let definition = { steps: [] };
-
-    async function refresh() {
+    async function refreshOnce() {
         const [def, list] = await Promise.all([api(API), api(`${API}/runs?limit=50`)]);
-        if (def.success) {
-            definition = def.data.pipeline;
-            $('pipeline-description').textContent = definition.description || '';
+        if (!def.success) throw new Error(errorMessage(def, 'Could not load pipeline definition'));
+        if (!list.success) throw new Error(errorMessage(list, 'Could not load pipeline runs'));
+        definition = def.data.pipeline;
+        $('pipeline-description').textContent = definition.description || '';
+        if (!yamlLoaded) {
+            $('pipeline-yaml').value = def.data.yaml;
+            yamlLoaded = true;
         }
-        runs = list.success ? list.data.runs : [];
-        const run = selected ? runs.find(r => r.run_id === selected) : runs[0];
+        runs = list.data.runs;
+        if (selected && !runs.some(run => run.run_id === selected)) selected = null;
+        const run = selected ? runs.find(item => item.run_id === selected) : runs[0];
         renderChain(run, definition);
         renderControls(run);
         renderHistory();
+        clearPageError('refresh');
     }
 
-    async function loadYaml() {
-        const def = await api(API);
-        if (def.success) $('pipeline-yaml').value = def.data.yaml;
+    function refresh() {
+        if (refreshInFlight) {
+            refreshAgain = true;
+            return refreshInFlight;
+        }
+        refreshInFlight = refreshOnce()
+            .catch(error => showPageError(`Could not refresh pipeline: ${error.message}`, 'refresh'))
+            .finally(() => {
+                refreshInFlight = null;
+                if (refreshAgain && polling) {
+                    refreshAgain = false;
+                    refresh();
+                }
+            });
+        return refreshInFlight;
     }
 
     function showErrors(errors) {
-        $('yaml-errors').innerHTML = errors.map(e => `<li><code>${esc(e.path || '(root)')}</code> ${esc(e.message)}</li>`).join('');
+        const list = $('yaml-errors');
+        list.replaceChildren();
+        errors.forEach(error => {
+            const item = document.createElement('li');
+            item.appendChild(textElement('code', '', error.path || '(root)'));
+            item.append(` ${error.message}`);
+            list.appendChild(item);
+        });
     }
 
-    $('btn-yaml-validate').addEventListener('click', async () => {
-        const data = await api('/api/v1/pipelines/validate', {
-            method: 'POST', headers: { 'Content-Type': 'application/yaml' }, body: $('pipeline-yaml').value,
-        });
-        showErrors(data.data.errors);
-        $('yaml-status').textContent = data.data.valid ? 'Valid' : '';
+    $('btn-yaml-validate').addEventListener('click', async event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            const data = await api('/api/v1/pipelines/validate', {
+                method: 'POST', headers: { 'Content-Type': 'application/yaml' }, body: $('pipeline-yaml').value,
+            });
+            if (!data.success) throw new Error(errorMessage(data, 'Validation failed'));
+            showErrors(data.data.errors);
+            $('yaml-status').textContent = data.data.valid ? 'Valid' : '';
+            showPageError();
+        } catch (error) {
+            showPageError(`Could not validate pipeline: ${error.message}`);
+        } finally {
+            button.disabled = false;
+        }
     });
 
-    $('btn-yaml-save').addEventListener('click', async () => {
-        const data = await api(API, {
-            method: 'PUT', headers: { 'Content-Type': 'application/yaml' }, body: $('pipeline-yaml').value,
-        });
-        if (data.success) { showErrors([]); $('yaml-status').textContent = 'Saved'; refresh(); }
-        else { showErrors(data.error.details?.errors || [{ path: '', message: data.error.message }]); $('yaml-status').textContent = ''; }
+    $('btn-yaml-save').addEventListener('click', async event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            const data = await api(API, {
+                method: 'PUT', headers: { 'Content-Type': 'application/yaml' }, body: $('pipeline-yaml').value,
+            });
+            if (!data.success) {
+                showErrors(data.error.details?.errors || [{ path: '', message: errorMessage(data, 'Save failed') }]);
+                $('yaml-status').textContent = '';
+                showPageError();
+                return;
+            }
+            showErrors([]);
+            $('yaml-status').textContent = 'Saved';
+            showPageError();
+            await refresh();
+        } catch (error) {
+            showPageError(`Could not save pipeline: ${error.message}`);
+        } finally {
+            button.disabled = false;
+        }
     });
 
-    async function action(url, label) {
-        const data = await api(url, { method: 'POST' });
-        if (!data.success) alert(`Could not ${label}: ${data.error.message}`);
-        selected = null;
-        refresh();
+    async function action(url, label, button) {
+        button.disabled = true;
+        try {
+            const data = await api(url, { method: 'POST' });
+            if (!data.success) throw new Error(errorMessage(data, `Could not ${label}`));
+            selected = null;
+            showPageError();
+            await refresh();
+        } catch (error) {
+            showPageError(`Could not ${label}: ${error.message}`);
+        } finally {
+            button.disabled = false;
+        }
     }
-    $('btn-pipeline-start').addEventListener('click', () => action(`${API}/runs`, 'start pipeline'));
-    $('btn-pipeline-cancel').addEventListener('click', () => {
-        const run = selected ? runs.find(r => r.run_id === selected) : runs[0];
-        if (run && confirm(`Cancel ${run.run_ref}?`)) action(`${API}/runs/${run.run_id}/cancel`, 'cancel');
+
+    $('btn-pipeline-start').addEventListener('click', event => {
+        action(`${API}/runs`, 'start pipeline', event.currentTarget);
     });
-    $('btn-pipeline-resume').addEventListener('click', () => {
+    $('btn-pipeline-cancel').addEventListener('click', event => {
+        const run = selected ? runs.find(item => item.run_id === selected) : runs[0];
+        if (run && confirm(`Cancel ${run.run_ref}?`)) {
+            action(`${API}/runs/${run.run_id}/cancel`, 'cancel pipeline', event.currentTarget);
+        }
+    });
+    $('btn-pipeline-resume').addEventListener('click', event => {
         const run = runs[0];
-        if (run) action(`${API}/runs/${run.run_id}/resume`, 'resume');
+        if (run) action(`${API}/runs/${run.run_id}/resume`, 'resume pipeline', event.currentTarget);
     });
-    $('btn-pipeline-delete').addEventListener('click', async () => {
+    $('btn-pipeline-delete').addEventListener('click', async event => {
         if (!confirm(`Delete pipeline ${NAME} and its run history? Training runs are kept.`)) return;
-        const data = await api(API, { method: 'DELETE' });
-        if (data.success) location.href = '/'; else alert(data.error.message);
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            const data = await api(API, { method: 'DELETE' });
+            if (!data.success) throw new Error(errorMessage(data, 'Delete failed'));
+            location.href = '/';
+        } catch (error) {
+            showPageError(`Could not delete pipeline: ${error.message}`);
+            button.disabled = false;
+        }
     });
-    $('pipeline-run-select').addEventListener('change', e => { selected = Number(e.target.value); refresh(); });
+    $('pipeline-run-select').addEventListener('change', event => {
+        selectRun(Number(event.target.value));
+    });
 
-    loadYaml();
-    refresh();
-    setInterval(refresh, 5000);
+    function clearPoll() {
+        if (pollTimer !== null) window.clearTimeout(pollTimer);
+        pollTimer = null;
+    }
+
+    function schedulePoll() {
+        clearPoll();
+        if (!polling || document.hidden) return;
+        pollTimer = window.setTimeout(async () => {
+            await refresh();
+            schedulePoll();
+        }, 5000);
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            clearPoll();
+        } else {
+            refresh().finally(schedulePoll);
+        }
+    });
+    window.addEventListener('pagehide', () => {
+        polling = false;
+        clearPoll();
+    });
+    window.addEventListener('pageshow', event => {
+        if (event.persisted) {
+            polling = true;
+            refresh().finally(schedulePoll);
+        }
+    });
+
+    refresh().finally(schedulePoll);
 })();

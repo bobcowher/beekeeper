@@ -330,4 +330,6 @@ def test_pipeline_page_renders(client, app):
     html = client.get("/pipelines/fresh").get_data(as_text=True)
     for dom_id in ("step-chain", "pipeline-yaml", "btn-pipeline-start", "pipeline-runs"):
         assert f'id="{dom_id}"' in html
+    assert 'label for="pipeline-yaml"' in html
+    assert 'id="pipeline-page-error" role="alert"' in html
     assert client.get("/pipelines/ghost").status_code == 404
