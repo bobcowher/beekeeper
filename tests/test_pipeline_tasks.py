@@ -97,3 +97,11 @@ def test_kill_task_kills_child_that_ignores_term_after_shell_exits(tmp_path):
 
 def test_unknown_task_is_missing():
     assert tasks.poll_task(999) == ("missing", None)
+
+
+def test_task_exit_wakes_dispatcher(tmp_path):
+    from services import dispatcher
+    dispatcher._wake.clear()
+    tasks.spawn_task(90, "true", str(tmp_path), env_with(), str(tmp_path / "l.log"), 60)
+    assert dispatcher._wake.wait(timeout=5)
+    assert wait_done(90) == ("exited", 0)

@@ -23,6 +23,12 @@ TRANSIENT_CODES = {"ALREADY_RUNNING", "AT_CAPACITY", "INSUFFICIENT_VRAM"}
 
 _thread = None
 _last_purge = 0.0
+_wake = threading.Event()
+
+
+def wake() -> None:
+    """Run the next tick now instead of waiting out DISPATCH_INTERVAL."""
+    _wake.set()
 
 
 def _setup_active(projects_dir, name) -> bool:
@@ -116,7 +122,8 @@ def start_dispatcher(app) -> None:
                 tick(projects_dir, pipelines_dir)
             except Exception:
                 log.exception("Dispatcher tick failed")
-            time.sleep(DISPATCH_INTERVAL)
+            _wake.wait(DISPATCH_INTERVAL)
+            _wake.clear()
 
     _thread = threading.Thread(target=loop, name="beekeeper-dispatcher", daemon=True)
     _thread.start()

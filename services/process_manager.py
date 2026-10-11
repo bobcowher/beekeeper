@@ -542,6 +542,8 @@ def _finalize_run_record(run_pk: int, exit_code: int, started_at: float, log_pat
         exit_code=exit_code,
         log_file_path=log_path
     )
+    from services import dispatcher  # lazy: dispatcher imports this module
+    dispatcher.wake()   # a freed slot can start a queued run; a pipeline step can settle
 
 
 def _prune_old_runs(projects_dir: str, project_name: str, keep_last: int = 20):

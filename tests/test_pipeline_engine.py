@@ -65,14 +65,12 @@ def test_happy_path_hands_off_dirs(env):
     pre_dir = step(1, 0)["run_dir"]
     assert pre_dir.endswith(os.path.join("pre", "persistent", "runs", f"run_{n}"))
     finish(pk); env["live"].discard(pk)
-    tick(env)                                         # succeeded -> step 1 pending
-    tick(env)                                         # step 1 -> queued
+    tick(env)                                         # succeeded -> step 1 queued, same tick
     entry, pk2, n2 = start_queued_run("ft")
     assert entry["env_vars"]["LR"] == "1"
     assert entry["env_vars"]["BEEKEEPER_STEP_PRETRAIN_DIR"] == pre_dir
     assert entry["env_vars"]["BEEKEEPER_PREV_STEP_DIR"] == pre_dir
-    tick(env); finish(pk2); tick(env)                 # step 1 done -> step 2 pending
-    tick(env)                                         # task spawned
+    tick(env); finish(pk2); tick(env)                 # step 1 done -> step 2 task spawned
     deadline = time.time() + 10
     while get_db().get_pipeline_run("fac", 1)["status"] == "running" and time.time() < deadline:
         tick(env); time.sleep(0.05)
@@ -462,3 +460,29 @@ def test_cancel_pending_task_kills_untracked_spawn(env, monkeypatch):
     eng.cancel_pipeline_run(env["pd"], env["pl"], "tsk", 1)
     assert eng.pipeline_tasks.running_task_pks() == []
     assert get_db().get_pipeline_run("tsk", 1)["status"] == "cancelled"
+
+
+def test_finished_step_launches_next_in_same_tick(env):
+    store.save_pipeline(env["pl"], {"name": "quick", "steps": [
+        {"name": "a", "type": "task", "command": "sleep 0.3"},
+        {"name": "b", "type": "task", "command": "sleep 5"},
+    ]})
+    eng.start_pipeline_run(env["pd"], env["pl"], "quick")
+    tick(env)                                         # a created and spawned on one tick
+    run = get_db().get_pipeline_run("quick", 1)
+    assert get_db().current_step_run(run["id"], 0)["status"] == "running"
+    a_pk = get_db().current_step_run(run["id"], 0)["id"]
+    eng.pipeline_tasks._tasks[a_pk]["proc"].wait(timeout=5)
+    tick(env)                                         # a settles and b spawns, no second tick
+    run = get_db().get_pipeline_run("quick", 1)
+    assert run["current_step"] == 1
+    assert get_db().current_step_run(run["id"], 1)["status"] == "running"
+    eng.cancel_pipeline_run(env["pd"], env["pl"], "quick", 1)
+
+
+def test_start_wakes_dispatcher(env, monkeypatch):
+    from services import dispatcher
+    calls = []
+    monkeypatch.setattr(dispatcher, "wake", lambda: calls.append(1))
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    assert calls

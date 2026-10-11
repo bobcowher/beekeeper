@@ -59,6 +59,11 @@ def _check_runnable(projects_dir, steps):
         raise PipelineError("PROJECT_NOT_FOUND", f"Pipeline references missing project(s): {', '.join(missing)}")
 
 
+def _wake_dispatcher():
+    from services import dispatcher  # lazy: dispatcher imports this module
+    dispatcher.wake()
+
+
 def _get_run(name, run_number) -> dict:
     run = get_db().get_pipeline_run(name, run_number)
     if run is None:
@@ -81,6 +86,7 @@ def start_pipeline_run(projects_dir, pipelines_dir, name) -> dict:
         _, n = created
         os.makedirs(pipeline_run_dir(pipelines_dir, name, n), exist_ok=True)
     log.info("Pipeline %s started", pipeline_ref(name, n))
+    _wake_dispatcher()
     return {"run_id": n, "run_ref": pipeline_ref(name, n), "status": "running"}
 
 
@@ -144,16 +150,33 @@ def resume_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:
         db.create_step_run(run["id"], idx, steps[idx]["name"], steps[idx]["type"])
         db.update_pipeline_run(run["id"], status="running", error=None, ended_at=None)
     log.info("Pipeline %s resumed at step %s", pipeline_ref(name, run_number), steps[idx]["name"])
+    _wake_dispatcher()
     return {"run_id": run_number, "run_ref": pipeline_ref(name, run_number), "status": "running"}
+
+
+MAX_ADVANCES_PER_TICK = 50   # bounds the loop below if a step never stops changing
+
+
+def _progress_key(run):
+    sr = get_db().current_step_run(run["id"], run["current_step"])
+    return run["status"], run["current_step"], sr and (sr["id"], sr["status"])
 
 
 def tick(projects_dir, pipelines_dir) -> None:
     for run in get_db().running_pipeline_runs():
         try:
             with _engine_lock:
-                fresh = get_db().get_pipeline_run_by_pk(run["id"])
-                if fresh and fresh["status"] == "running":
+                # Keep advancing while state changes, so finishing one step launches
+                # the next on this tick rather than DISPATCH_INTERVAL later.
+                for _ in range(MAX_ADVANCES_PER_TICK):
+                    fresh = get_db().get_pipeline_run_by_pk(run["id"])
+                    if not fresh or fresh["status"] != "running":
+                        break
+                    before = _progress_key(fresh)
                     _advance(projects_dir, pipelines_dir, fresh)
+                    after = get_db().get_pipeline_run_by_pk(run["id"])
+                    if not after or _progress_key(after) == before:
+                        break
         except Exception:
             log.exception("Pipeline %s failed to advance", pipeline_ref(run["pipeline_name"], run["run_number"]))
 
@@ -284,6 +307,7 @@ def _launch(projects_dir, pipelines_dir, run, step, sr):
         # One transaction: a failed step write must not leave an orphan queue entry behind.
         db.enqueue_step_run(sr["id"], step["project"], step.get("branch"), extra,
                             f"pipeline:{pipeline_ref(name, n)}")
+        _wake_dispatcher()   # the queue drain ran earlier in this tick; take the entry on the next one now
         return
     run_dir = env["BEEKEEPER_PIPELINE_RUN_DIR"]
     suffix = f"_attempt{sr['attempt']}" if sr["attempt"] > 1 else ""

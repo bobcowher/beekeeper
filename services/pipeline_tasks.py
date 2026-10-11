@@ -32,7 +32,16 @@ def spawn_task(step_pk, command, cwd, env, log_path, timeout_s) -> int:
     with _lock:
         _tasks[step_pk] = {"proc": proc, "started": time.time(),
                            "timeout_s": timeout_s, "log_path": log_path}
+    threading.Thread(target=_wake_on_exit, args=(proc,), daemon=True).start()
     return proc.pid
+
+
+def _wake_on_exit(proc):
+    # Popen.wait and poll_task's proc.poll() share Popen's waitpid lock, so this
+    # reaps safely; poll() then reads the stored returncode.
+    proc.wait()
+    from services import dispatcher  # lazy: keeps this module import-light
+    dispatcher.wake()
 
 
 def _terminate(proc):
