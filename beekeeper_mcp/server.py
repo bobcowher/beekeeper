@@ -354,6 +354,14 @@ def start_training(project_name: str, branch: str | None = None,
     try:
         return _post(f"/projects/{project_name}/training/start", body, timeout=180)
     except requests.exceptions.ReadTimeout:
+        if queue:
+            return {
+                "success": True,
+                "message": (
+                    "The request timed out and may have been queued. "
+                    f"Call list_queue({project_name!r}) to check before retrying."
+                ),
+            }
         return {
             "success": True,
             "message": "Pre-launch sequence is running. Check training_status in 30s.",

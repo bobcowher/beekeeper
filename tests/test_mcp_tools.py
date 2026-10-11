@@ -87,6 +87,16 @@ def test_start_training_plain_body_unchanged(calls):
     assert calls[-1] == ("_post", "/projects/p/training/start", {})
 
 
+def test_start_training_queue_timeout_reports_uncertain_queue_state(monkeypatch):
+    def timeout(*args, **kwargs):
+        raise server.requests.exceptions.ReadTimeout()
+
+    monkeypatch.setattr(server, "_post", timeout)
+    result = server.start_training("p", queue=True)
+    assert "may have been queued" in result["message"]
+    assert "list_queue('p')" in result["message"]
+
+
 def test_list_and_cancel_queue(calls):
     server.list_queue("p")
     assert calls[-1] == ("_get", "/projects/p/queue", None)
