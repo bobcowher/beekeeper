@@ -310,6 +310,7 @@ def test_dashboard_lists_pipeline_rows(client, app):
         "name": "fac", "folder": "chess", "steps": [{"name": "a", "type": "task", "command": "true"}]})
     html = client.get("/").get_data(as_text=True)
     assert 'data-kind="pipeline"' in html and 'href="/pipelines/fac"' in html
+    assert 'aria-label="a: pending"' in html
 
 
 def test_new_pipeline_creates_template_and_redirects(client, app):
@@ -321,8 +322,9 @@ def test_new_pipeline_creates_template_and_redirects(client, app):
 
 
 def test_new_pipeline_rejects_bad_name(client):
-    r = client.post("/pipelines/new", data={"name": "Bad Name"})
-    assert r.status_code == 302 and r.headers["Location"].endswith("/pipelines/new")
+    r = client.post("/pipelines/new", data={"name": "Bad Name"}, follow_redirects=True)
+    assert r.status_code == 200
+    assert '<p class="flash flash-error" role="alert">' in r.get_data(as_text=True)
 
 
 def test_pipeline_page_renders(client, app):

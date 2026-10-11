@@ -9,7 +9,7 @@
 {% if messages %}
 <div class="card flash-card">
     {% for category, message in messages %}
-    <p class="flash flash-{{ category }}">{{ message }}</p>
+    <p class="flash flash-{{ category }}"{% if category == 'error' %} role="alert"{% endif %}>{{ message }}</p>
     {% endfor %}
 </div>
 {% endif %}
