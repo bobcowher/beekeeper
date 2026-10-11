@@ -1,5 +1,6 @@
 import datetime
 import os
+import threading
 import time
 
 import pytest
@@ -83,6 +84,47 @@ def test_second_start_refused_while_running(env):
     with pytest.raises(eng.PipelineError) as e:
         eng.start_pipeline_run(env["pd"], env["pl"], "fac")
     assert e.value.code == "PIPELINE_ACTIVE"
+
+
+def test_delete_serializes_with_simultaneous_start(env, monkeypatch):
+    entered_delete = threading.Event()
+    release_delete = threading.Event()
+    start_done = threading.Event()
+    start_errors = []
+    real_delete = eng.delete_pipeline_files
+
+    def blocking_delete(pipelines_dir, name):
+        entered_delete.set()
+        assert release_delete.wait(2)
+        real_delete(pipelines_dir, name)
+
+    def delete():
+        eng.delete_pipeline(env["pl"], "fac")
+
+    def start():
+        try:
+            eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+        except Exception as exc:
+            start_errors.append(exc)
+        finally:
+            start_done.set()
+
+    monkeypatch.setattr(eng, "delete_pipeline_files", blocking_delete)
+    delete_thread = threading.Thread(target=delete)
+    delete_thread.start()
+    assert entered_delete.wait(2)
+    start_thread = threading.Thread(target=start)
+    start_thread.start()
+    assert not start_done.wait(0.1)
+
+    release_delete.set()
+    delete_thread.join(2)
+    start_thread.join(2)
+
+    assert len(start_errors) == 1
+    assert isinstance(start_errors[0], eng.PipelineError)
+    assert start_errors[0].code == "NOT_FOUND"
+    assert get_db().latest_pipeline_run("fac") is None
 
 
 def test_missing_project_refused(env, app):

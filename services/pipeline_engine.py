@@ -13,7 +13,7 @@ from services import pipeline_tasks, process_manager
 from services.config_service import get_config_bool
 from services.db_service import get_db
 from services.pipeline_schema import PROJECT_NAME_RE, step_dir_var
-from services.pipeline_store import load_pipeline, pipeline_run_dir
+from services.pipeline_store import delete_pipeline_files, load_pipeline, pipeline_exists, pipeline_run_dir
 from services.run_refs import run_ref
 from services.run_storage_service import persistent_runs_root
 
@@ -69,19 +69,32 @@ def _get_run(name, run_number) -> dict:
 # --- Public operations -----------------------------------------------------------
 
 def start_pipeline_run(projects_dir, pipelines_dir, name) -> dict:
-    try:
-        defn, _ = load_pipeline(pipelines_dir, name)
-    except FileNotFoundError:
-        raise PipelineError("NOT_FOUND", f"Pipeline '{name}' not found", 404)
-    _check_runnable(projects_dir, defn["steps"])
     with _engine_lock:
+        try:
+            defn, _ = load_pipeline(pipelines_dir, name)
+        except FileNotFoundError:
+            raise PipelineError("NOT_FOUND", f"Pipeline '{name}' not found", 404)
+        _check_runnable(projects_dir, defn["steps"])
         created = get_db().create_pipeline_run(name, defn)
-    if created is None:
-        raise PipelineError("PIPELINE_ACTIVE", f"Pipeline '{name}' already has a running run", 409)
-    _, n = created
-    os.makedirs(pipeline_run_dir(pipelines_dir, name, n), exist_ok=True)
+        if created is None:
+            raise PipelineError("PIPELINE_ACTIVE", f"Pipeline '{name}' already has a running run", 409)
+        _, n = created
+        os.makedirs(pipeline_run_dir(pipelines_dir, name, n), exist_ok=True)
     log.info("Pipeline %s started", pipeline_ref(name, n))
     return {"run_id": n, "run_ref": pipeline_ref(name, n), "status": "running"}
+
+
+def delete_pipeline(pipelines_dir, name) -> None:
+    """Delete a stopped pipeline without racing a simultaneous run start."""
+    with _engine_lock:
+        if not pipeline_exists(pipelines_dir, name):
+            raise PipelineError("NOT_FOUND", f"Pipeline '{name}' not found", 404)
+        latest = get_db().latest_pipeline_run(name)
+        if latest and latest["status"] == "running":
+            raise PipelineError("PIPELINE_ACTIVE",
+                                f"Cancel {latest['pipeline_name']}#{latest['run_number']} first", 409)
+        delete_pipeline_files(pipelines_dir, name)
+        get_db().delete_pipeline_records(name)
 
 
 def cancel_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:

@@ -684,13 +684,10 @@ def pipelines_update(name):
 @api_key_required
 def pipelines_delete(name):
     _require_pipeline(name)
-    latest = get_db().latest_pipeline_run(name)
-    if latest and latest["status"] == "running":
-        return api_response(error_code="PIPELINE_ACTIVE",
-                            error_message=f"Cancel {latest['pipeline_name']}#{latest['run_number']} first",
-                            status_code=409)
-    pipeline_store.delete_pipeline_files(_pipelines_dir(), name)
-    get_db().delete_pipeline_records(name)
+    try:
+        pipeline_engine.delete_pipeline(_pipelines_dir(), name)
+    except pipeline_engine.PipelineError as e:
+        return _pipeline_error(e)
     return api_response(data={"deleted": True})
 
 
