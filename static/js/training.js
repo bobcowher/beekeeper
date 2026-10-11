@@ -61,6 +61,10 @@ const confirmQueueBtn = document.getElementById('btn-confirm-queue');
 const queueSection = document.getElementById('queue-section');
 const queueListEl = document.getElementById('queue-list');
 const TRANSIENT_REFUSALS = new Set(['ALREADY_RUNNING', 'AT_CAPACITY', 'INSUFFICIENT_VRAM']);
+let queueRefreshInFlight = null;
+let queueRefreshAgain = false;
+let queuePollTimer = null;
+let queuePolling = true;
 
 if (confirmQueueBtn) {
     confirmQueueBtn.addEventListener('click', () => {
@@ -93,40 +97,88 @@ function formatAge(iso) {
     return formatElapsed(secs) + ' ago';
 }
 
-async function refreshQueue() {
-    if (!queueListEl || !PROJECT_NAME) return;
-    try {
-        const r = await apiFetch(`/api/v1/projects/${PROJECT_NAME}/queue`);
-        const data = await r.json();
-        const entries = data?.data?.queue || [];
-        queueSection.style.display = entries.length ? '' : 'none';
-        queueListEl.innerHTML = '';
-        entries.forEach(e => {
-            const li = document.createElement('li');
-            li.className = 'queue-row';
-            li.innerHTML = `
-                <span class="run-branch">${escHtml(e.branch || DEFAULT_BRANCH)}</span>
-                <span class="muted queue-source">${escHtml(e.source)}</span>
-                <span class="muted">${escHtml(formatAge(e.created_at))}</span>
-                ${e.wait_reason ? `<span class="queue-wait">waiting: ${escHtml(e.wait_reason)}</span>` : ''}
-                <button class="btn btn-secondary btn-sm" data-queue-id="${e.queue_id}">Cancel</button>`;
-            li.querySelector('button').addEventListener('click', () => cancelQueued(e.queue_id));
-            queueListEl.appendChild(li);
-        });
-    } catch (err) {
-        console.warn('Could not load queue:', err);
+async function refreshQueueOnce() {
+    const r = await apiFetch(`/api/v1/projects/${PROJECT_NAME}/queue`);
+    const data = await r.json();
+    const entries = data?.data?.queue || [];
+    queueSection.style.display = entries.length ? '' : 'none';
+    queueListEl.innerHTML = '';
+    entries.forEach(e => {
+        const li = document.createElement('li');
+        li.className = 'queue-row';
+        li.innerHTML = `
+            <span class="run-branch">${escHtml(e.branch || DEFAULT_BRANCH)}</span>
+            <span class="muted queue-source">${escHtml(e.source)}</span>
+            <span class="muted">${escHtml(formatAge(e.created_at))}</span>
+            ${e.wait_reason ? `<span class="queue-wait">waiting: ${escHtml(e.wait_reason)}</span>` : ''}
+            <button class="btn btn-secondary btn-sm" data-queue-id="${e.queue_id}">Cancel</button>`;
+        li.querySelector('button').addEventListener('click', () => cancelQueued(e.queue_id));
+        queueListEl.appendChild(li);
+    });
+}
+
+function refreshQueue() {
+    if (!queueListEl || !PROJECT_NAME) return Promise.resolve();
+    if (queueRefreshInFlight) {
+        queueRefreshAgain = true;
+        return queueRefreshInFlight;
     }
+    queueRefreshInFlight = refreshQueueOnce()
+        .catch(err => console.warn('Could not load queue:', err))
+        .finally(() => {
+            queueRefreshInFlight = null;
+            if (queueRefreshAgain && queuePolling && !document.hidden) {
+                queueRefreshAgain = false;
+                refreshQueue();
+            }
+        });
+    return queueRefreshInFlight;
 }
 
 async function cancelQueued(queueId) {
-    const r = await apiFetch(`/api/v1/projects/${PROJECT_NAME}/queue/${queueId}`, { method: 'DELETE' });
-    const data = await r.json();
-    if (!data.success) alert(`Could not cancel: ${data.error?.message || 'unknown error'}`);
-    refreshQueue();
+    try {
+        const r = await apiFetch(`/api/v1/projects/${PROJECT_NAME}/queue/${queueId}`, { method: 'DELETE' });
+        const data = await r.json();
+        if (!data.success) alert(`Could not cancel: ${data.error?.message || 'unknown error'}`);
+        await refreshQueue();
+    } catch (err) {
+        alert(`Could not cancel queued run: Network request failed: ${err.message}`);
+    }
 }
 
-refreshQueue();
-setInterval(refreshQueue, 5000);
+function clearQueuePoll() {
+    if (queuePollTimer !== null) window.clearTimeout(queuePollTimer);
+    queuePollTimer = null;
+}
+
+function scheduleQueuePoll() {
+    clearQueuePoll();
+    if (!queuePolling || document.hidden || !queueListEl || !PROJECT_NAME) return;
+    queuePollTimer = window.setTimeout(async () => {
+        await refreshQueue();
+        scheduleQueuePoll();
+    }, 5000);
+}
+
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        clearQueuePoll();
+    } else {
+        refreshQueue().finally(scheduleQueuePoll);
+    }
+});
+window.addEventListener('pagehide', () => {
+    queuePolling = false;
+    clearQueuePoll();
+});
+window.addEventListener('pageshow', event => {
+    if (event.persisted) {
+        queuePolling = true;
+        refreshQueue().finally(scheduleQueuePoll);
+    }
+});
+
+refreshQueue().finally(scheduleQueuePoll);
 
 async function loadRunBranches() {
     if (!runBranchSelect || !PROJECT_NAME) return;

@@ -256,6 +256,45 @@ def test_queue_add_and_cancel(live_server):
 
 
 @pytest.mark.browser
+def test_queue_polling_pauses_hidden_and_cancel_handles_network_error(live_server):
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(f"{live_server}/projects/demo")
+        page.click("#btn-confirm-queue")
+        row = page.locator("#queue-list .queue-row")
+        row.first.wait_for(timeout=5000)
+
+        requests = {"queue": 0}
+
+        def count_queue(route):
+            requests["queue"] += 1
+            route.continue_()
+
+        page.route("**/api/v1/projects/demo/queue", count_queue)
+        page.evaluate("""
+            () => {
+                Object.defineProperty(document, 'hidden', {configurable: true, get: () => true});
+                document.dispatchEvent(new Event('visibilitychange'));
+            }
+        """)
+        initial = requests["queue"]
+        page.wait_for_timeout(5500)
+        assert requests["queue"] == initial
+
+        messages = []
+        page.on("dialog", lambda dialog: (messages.append(dialog.message), dialog.accept()))
+        page.route("**/api/v1/projects/demo/queue/*", lambda route: route.abort())
+        row.first.locator("button").click()
+        page.wait_for_timeout(250)
+        assert messages and "Network request failed" in messages[0]
+        assert row.count() == 1
+        browser.close()
+
+
+@pytest.mark.browser
 def test_pipeline_page_yaml_errors_and_run(live_server):
     from playwright.sync_api import sync_playwright
 
