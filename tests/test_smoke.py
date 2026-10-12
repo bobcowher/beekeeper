@@ -336,7 +336,7 @@ def test_pipelines_page_explains_pipelines_until_first_exists(client):
 def test_new_pipeline_starts_from_commented_valid_template(client, app):
     from services import pipeline_store
     resp = client.post("/pipelines/new", data={"name": "fresh", "folder": "My Folder"})
-    assert resp.status_code == 302 and resp.headers["Location"].endswith("/pipelines/fresh")
+    assert resp.status_code == 302 and resp.headers["Location"].endswith("/pipelines/fresh/edit")
     defn, text = pipeline_store.load_pipeline(app.config["PIPELINES_DIR"], "fresh")
     assert defn["folder"] == "My Folder"
     assert [s["name"] for s in defn["steps"]] == ["prepare"]
@@ -400,7 +400,7 @@ def test_dashboard_activity_reports_live_training_and_pipeline_step(client, app)
 
 def test_new_pipeline_creates_template_and_redirects(client, app):
     r = client.post("/pipelines/new", data={"name": "fresh", "folder": "x"})
-    assert r.status_code == 302 and r.headers["Location"].endswith("/pipelines/fresh")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/pipelines/fresh/edit")
     from services import pipeline_store
     defn, _ = pipeline_store.load_pipeline(app.config["PIPELINES_DIR"], "fresh")
     assert defn["folder"] == "x" and defn["steps"][0]["type"] == "task"
@@ -415,11 +415,29 @@ def test_new_pipeline_rejects_bad_name(client):
 def test_pipeline_page_renders(client, app):
     client.post("/pipelines/new", data={"name": "fresh"})
     html = client.get("/pipelines/fresh").get_data(as_text=True)
-    for dom_id in ("step-chain", "pipeline-yaml", "btn-pipeline-start", "pipeline-runs"):
+    for dom_id in ("step-chain", "btn-pipeline-start", "btn-pipeline-edit", "pipeline-runs"):
         assert f'id="{dom_id}"' in html
-    assert 'label for="pipeline-yaml"' in html
     assert 'id="pipeline-page-error" role="alert"' in html
+    assert 'id="pipeline-yaml"' not in html        # editing lives on its own page
     assert client.get("/pipelines/ghost").status_code == 404
+
+
+def test_pipeline_edit_page_renders_raw_yaml(client, app):
+    client.post("/pipelines/new", data={"name": "fresh"})
+    html = client.get("/pipelines/fresh/edit").get_data(as_text=True)
+    assert 'label for="pipeline-yaml"' in html
+    assert "# A task step runs a shell command." in html   # comments survive
+    assert client.get("/pipelines/ghost/edit").status_code == 404
+
+
+def test_pipeline_edit_page_opens_invalid_file(client, app):
+    import os
+    client.post("/pipelines/new", data={"name": "fresh"})
+    path = os.path.join(app.config["PIPELINES_DIR"], "fresh", "pipeline.yaml")
+    with open(path, "w") as f:
+        f.write("name: fresh\nsteps: nope\n")
+    html = client.get("/pipelines/fresh/edit").get_data(as_text=True)
+    assert "steps: nope" in html
 
 
 def test_pipelines_page_sort_key_is_epoch_seconds(client, app):

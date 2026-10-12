@@ -369,15 +369,16 @@ def test_pipeline_page_yaml_errors_and_run(live_server):
         page.goto(live_server + "/pipelines/new")
         page.fill("#name", "ui-pipe")
         page.click("button[type=submit]")
-        page.wait_for_url("**/pipelines/ui-pipe")
-        page.locator("#step-chain .step-node").first.wait_for()
+        page.wait_for_url("**/pipelines/ui-pipe/edit")
         page.fill("#pipeline-yaml", "name: ui-pipe\nsteps:\n  - {name: a, type: train, project: demo, branch: no}\n")
         page.click("#btn-yaml-save")
         page.locator("#yaml-errors li").first.wait_for()
         assert "quote" in page.locator("#yaml-errors").inner_text()
         page.fill("#pipeline-yaml", "name: ui-pipe\nsteps:\n  - {name: a, type: train, project: demo}\n  - {name: b, type: task, command: 'true'}\n")
         page.click("#btn-yaml-save")
-        page.wait_for_function("document.getElementById('yaml-status').textContent === 'Saved'")
+        page.wait_for_url("**/pipelines/ui-pipe")
+        page.locator("#step-chain .step-node").first.wait_for()
+        assert not page.locator("#step-panel").is_visible()   # closed until a step is picked
         page.click("#btn-pipeline-start")
         page.locator("#step-chain .step-pending, #step-chain .step-queued, #step-chain .step-failed, #step-chain .step-running").first.wait_for()
         page.wait_for_function("document.getElementById('pipeline-run-status').textContent === 'running'")
@@ -495,7 +496,7 @@ def test_pipeline_step_log_survives_periodic_refresh(live_server):
         page.goto(live_server + "/pipelines/log-pipe")
         page.click('[data-step-log="produce"]')
         log = page.locator("#step-log")
-        log.wait_for(state="visible")
+        page.wait_for_function("document.getElementById('step-log').textContent.startsWith('line 0')")
         scroll_top = log.evaluate("el => { el.scrollTop = 200; return el.scrollTop; }")
         assert scroll_top > 0
 
@@ -551,7 +552,7 @@ def test_pipeline_history_labels_running_and_stopped_steps(live_server):
         assert page.locator('#pipeline-runs tr[data-run="4"] td').last.inner_text() == "Running: first"
         assert page.locator('#pipeline-runs tr[data-run="3"] td').last.inner_text() == "Stopped at second"
         assert page.locator('#pipeline-runs tr[data-run="2"] td').last.inner_text() == "Stopped at first"
-        assert page.locator('#pipeline-runs tr[data-run="1"] td').last.inner_text() == ""
+        assert page.locator('#pipeline-runs tr[data-run="1"] td').last.inner_text() == "2/2 steps"
         browser.close()
 
 
@@ -583,7 +584,7 @@ def test_pipeline_save_does_not_overlap_deploy_badge(live_server):
 
         for width, height, label in ((390, 844, "390"), (1280, 900, "desktop")):
             page = browser.new_page(viewport={"width": width, "height": height})
-            page.goto(live_server + "/pipelines/layout-pipe")
+            page.goto(live_server + "/pipelines/layout-pipe/edit")
             page.locator("#btn-yaml-save").wait_for()
             if width == 390:
                 page.evaluate("""
@@ -652,7 +653,7 @@ def test_pipeline_network_error_is_reported_without_pageerror(live_server):
             data=yaml,
         )
         assert response.ok
-        page.goto(live_server + "/pipelines/error-pipe")
+        page.goto(live_server + "/pipelines/error-pipe/edit")
         page.locator("#pipeline-yaml").wait_for()
 
         errors = []
@@ -766,7 +767,7 @@ def test_pipeline_dynamic_content_is_text_and_controls_are_accessible(live_serve
         page.goto(live_server + "/pipelines/xss-pipe")
         row = page.locator('#pipeline-runs tr[data-run="1"]')
         row.wait_for()
-        assert page.locator('label[for="pipeline-yaml"]').text_content().strip() == "Pipeline YAML"
+        assert page.locator("#info-description").text_content() == payload
         run_button = row.locator(".run-history-link")
         assert run_button.get_attribute("aria-label") == "Show pipeline run #1"
         run_button.focus()
@@ -776,7 +777,7 @@ def test_pipeline_dynamic_content_is_text_and_controls_are_accessible(live_serve
         assert page.evaluate("window.__pipelineXss") is None
 
         page.locator("[data-step-log]").click()
-        page.locator("#step-log").wait_for(state="visible")
+        page.wait_for_function("document.getElementById('step-log').textContent !== 'Loading log…'")
         assert page.locator("#step-log").text_content() == log_payload
         assert page.locator("#step-log script").count() == 0
         assert page.evaluate("window.__pipelineLogXss") is None
@@ -792,7 +793,7 @@ def _create_pipeline(page, live_server, yaml):
 
 
 @pytest.mark.browser
-def test_pipeline_never_run_shows_steps_and_open_editor(live_server):
+def test_pipeline_never_run_shows_steps_and_panel_on_click(live_server):
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
@@ -807,10 +808,17 @@ def test_pipeline_never_run_shows_steps_and_open_editor(live_server):
         page.locator("#step-chain .step-node").nth(1).wait_for()
         assert page.locator("#pipeline-run-status").inner_text().lower() == "never run"
         assert page.locator("#pipeline-runs-empty").is_visible()
-        assert page.locator("#pipeline-yaml").is_visible()            # still being written: editor open
+        assert page.locator("#info-steps").inner_text() == "2 (1 train, 1 task)"
+        assert not page.locator("#step-panel").is_visible()          # closed until a step is picked
+        page.click('#step-chain .step-node:nth-child(1) .step-card')
         assert "./download.sh" in page.locator("#step-panel").inner_text()
         page.click('#step-chain .step-node:nth-child(2) .step-card')
         assert "demo on branch dev" in page.locator("#step-panel-body").inner_text()
+        page.click('#step-chain .step-node:nth-child(2) .step-card')  # clicking it again closes it
+        assert not page.locator("#step-panel").is_visible()
+        page.click("#btn-pipeline-edit")
+        page.wait_for_url("**/pipelines/fresh-pipe/edit")
+        assert "./download.sh" in page.locator("#pipeline-yaml").input_value()
         assert not page.locator("#btn-pipeline-delete").is_visible()  # tucked into the Danger Zone
         page.screenshot(path="/tmp/beekeeper-pipeline-never-run.png", full_page=True)
         assert errors == []
@@ -818,7 +826,7 @@ def test_pipeline_never_run_shows_steps_and_open_editor(live_server):
 
 
 @pytest.mark.browser
-def test_pipeline_run_view_focuses_failed_step_and_switches_runs(live_server):
+def test_pipeline_run_view_opens_steps_on_click_and_switches_runs(live_server):
     from playwright.sync_api import sync_playwright
 
     def step(name, status, has_log=True):
@@ -850,30 +858,33 @@ def test_pipeline_run_view_focuses_failed_step_and_switches_runs(live_server):
 
         page.goto(live_server + "/pipelines/fail-pipe")
         log = page.locator("#step-log")
+        page.wait_for_function("document.getElementById('run-title').textContent === 'Run #2'")
+        assert page.locator("#btn-pipeline-resume").is_visible()
+        assert "exit code 1" in page.locator('#step-chain .step-node.step-failed').inner_text()
+        assert not page.locator("#step-panel").is_visible()          # no log until a step is picked
+        page.click('[data-step-log="second"]')
         page.wait_for_function("document.getElementById('step-log').textContent === '2/steps/second'")
         assert page.locator("#step-chain .step-node.selected").inner_text().startswith("second")
-        assert page.locator("#run-title").text_content() == "Run #2"
-        assert page.locator("#btn-pipeline-resume").is_visible()
-        assert not page.locator("#pipeline-yaml").is_visible()      # has runs: editor collapsed
         page.screenshot(path="/tmp/beekeeper-pipeline-failed.png", full_page=True)
 
         page.click('#pipeline-runs tr[data-run="1"]')
-        page.wait_for_function("document.getElementById('step-log').textContent === '1/steps/second'")
-        assert page.locator("#run-title").text_content() == "Run #1 (older run)"
+        page.wait_for_function("document.getElementById('run-title').textContent === 'Run #1 (older run)'")
         assert page.locator('#pipeline-runs tr[data-run="1"]').get_attribute("class") == "selected"
         assert not page.locator("#btn-pipeline-resume").is_visible()
+        assert not page.locator("#step-panel").is_visible()          # selection belonged to run #2
 
         page.click('[data-step-log="first"]')
         page.wait_for_function("document.getElementById('step-log').textContent === '1/steps/first'")
+        page.click("#btn-step-close")
+        assert not log.is_visible()
         page.click("#btn-show-latest")
-        page.wait_for_function("document.getElementById('step-log').textContent === '2/steps/second'")
-        assert log.is_visible()
+        page.wait_for_function("document.getElementById('run-title').textContent === 'Run #2'")
 
         mobile = browser.new_page(viewport={"width": 390, "height": 844})
         mobile.route("**/api/v1/pipelines/fail-pipe/runs?limit=50",
                      lambda route: route.fulfill(json={"success": True, "data": {"runs": runs}}))
         mobile.goto(live_server + "/pipelines/fail-pipe")
-        mobile.locator("#step-chain .step-node.selected").wait_for()
+        mobile.click('[data-step-log="second"]')
         # Logs aren't mocked here, so the fetch 404s: the error belongs in the panel, not the page header.
         mobile.wait_for_function("document.getElementById('step-log').textContent.startsWith('Could not load log')")
         assert not mobile.locator("#pipeline-page-error").is_visible()

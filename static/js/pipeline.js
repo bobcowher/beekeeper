@@ -1,4 +1,4 @@
-// static/js/pipeline.js — Pipeline page: run view with step chain and log, history, YAML editor.
+// static/js/pipeline.js — Pipeline page: info, run view with step chain and log, history.
 (function () {
     const header = document.getElementById('pipeline-header');
     if (!header) return;
@@ -8,12 +8,10 @@
 
     let runs = [];
     let selectedRun = null;  // run_id being viewed; null = latest
-    // Step whose detail is shown. manual = the user picked it, so auto-selection leaves it alone.
-    let selectedStep = null; // {runId, name, manual}
+    // Step whose detail is shown; only ever set by a click, so the panel starts closed.
+    let selectedStep = null; // {runId, name}
     let shownLog = null;     // {runId, name, status, text} last log fetched into #step-log
     let definition = { steps: [] };
-    let savedYaml = null;
-    let firstLoad = true;
     let refreshInFlight = null;
     let refreshAgain = false;
     let pollTimer = null;
@@ -93,34 +91,20 @@
 
     // ── Step selection ──────────────────────────────────────────────────────
 
-    // The step worth looking at: what's running, else what failed, else the last step that did anything.
-    function defaultStep(run) {
-        const steps = run.steps;
-        const pick = steps.find(s => ['running', 'queued'].includes(s.status)) ||
-            steps.find(s => s.status === 'failed') ||
-            [...steps].reverse().find(s => s.started_at) ||
-            steps[0];
-        return pick ? pick.name : null;
-    }
-
+    // Drop a selection that no longer points at a step of the run being viewed.
     function resolveSelectedStep(run) {
-        if (!run) {
-            const valid = selectedStep && selectedStep.runId === null &&
-                definition.steps.some(s => s.name === selectedStep.name);
-            if (!valid) {
-                selectedStep = definition.steps.length
-                    ? { runId: null, name: definition.steps[0].name, manual: false } : null;
-            }
-            return;
+        if (!selectedStep) return;
+        const runId = run ? run.run_id : null;
+        const steps = run ? run.steps : definition.steps;
+        if (selectedStep.runId !== runId || !steps.some(s => s.name === selectedStep.name)) {
+            selectedStep = null;
         }
-        const valid = selectedStep && selectedStep.runId === run.run_id &&
-            run.steps.some(s => s.name === selectedStep.name);
-        if (valid && selectedStep.manual) return;
-        selectedStep = { runId: run.run_id, name: defaultStep(run), manual: false };
     }
 
+    // Clicking the open step again closes it.
     function chooseStep(runId, name) {
-        selectedStep = { runId, name, manual: true };
+        const same = selectedStep && selectedStep.runId === runId && selectedStep.name === name;
+        selectedStep = same ? null : { runId, name };
         render();
     }
 
@@ -185,6 +169,7 @@
         const body = $('step-panel-body');
         const pre = $('step-log');
         body.replaceChildren();
+        $('step-hint').hidden = Boolean(selectedStep) || !definition.steps.length;
         if (!selectedStep) {
             panel.hidden = true;
             return;
@@ -278,23 +263,38 @@
             run && latest && run.run_id === latest.run_id && ['failed', 'cancelled'].includes(run.status)
         );
         const status = $('pipeline-run-status');
-        status.textContent = run ? run.status : 'never run';
-        status.className = `status-badge status-${statusClass(run ? run.status : 'notrun')}`;
+        status.textContent = latest ? latest.status : 'never run';
+        status.className = `status-badge status-${statusClass(latest ? latest.status : 'notrun')}`;
+    }
 
-        const description = $('pipeline-description');
-        description.textContent = definition.description || '';
-        description.hidden = !definition.description;
+    function setInfo(id, text) {
+        const el = $(id);
+        el.replaceChildren();
+        if (text) el.textContent = text;
+        else el.appendChild(textElement('span', 'muted', 'none'));
+    }
+
+    function renderInfo() {
+        const steps = definition.steps || [];
+        const trains = steps.filter(s => s.type === 'train').length;
+        setInfo('info-description', definition.description);
+        setInfo('info-folder', definition.folder);
+        const kinds = [[trains, 'train'], [steps.length - trains, 'task']].filter(([n]) => n)
+            .map(([n, kind]) => `${n} ${kind}`).join(', ');
+        setInfo('info-steps', steps.length ? `${steps.length} (${kinds})` : '');
+        setInfo('info-projects', [...new Set(steps.filter(s => s.project).map(s => s.project))].join(', '));
+        setInfo('info-runs', String(runs.length));
     }
 
     function renderSummary(run) {
         const isLatest = !run || run.run_id === runs[0].run_id;
-        $('run-title').textContent = run ? `Run #${run.run_id}${isLatest ? '' : ' (older run)'}` : 'Steps';
+        $('run-title').textContent = run ? `Run #${run.run_id}${isLatest ? '' : ' (older run)'}` : 'Run';
         $('btn-show-latest').hidden = !run || isLatest;
         const summary = $('run-summary');
         summary.replaceChildren();
         if (!run) {
             summary.appendChild(textElement('span', 'muted',
-                'Never run. Run Pipeline executes these steps in order; select a step to see what it does.'));
+                'Never run. Steps run in order, left to right.'));
             $('pipeline-run-error').textContent = '';
             return;
         }
@@ -318,6 +318,7 @@
             let progress = '';
             if (item.status === 'running' && stepName) progress = `Running: ${stepName}`;
             if (['failed', 'cancelled'].includes(item.status) && stepName) progress = `Stopped at ${stepName}`;
+            if (item.status === 'succeeded') progress = `${item.steps.length}/${item.steps.length} steps`;
 
             const row = document.createElement('tr');
             row.dataset.run = item.run_id;
@@ -345,6 +346,7 @@
         const run = viewedRun();
         resolveSelectedStep(run);
         renderHeader(run);
+        renderInfo();
         renderSummary(run);
         renderChain(run);
         renderPanel(run);
@@ -359,91 +361,6 @@
         $('run-card').scrollIntoView({ block: 'nearest' });
     }
 
-    // ── Definition editor ───────────────────────────────────────────────────
-
-    function setDefinitionOpen(open) {
-        $('definition-body').style.display = open ? 'block' : 'none';
-        $('definition-header').querySelector('.collapse-icon').textContent = open ? '▼' : '▶';
-    }
-
-    function fitEditor() {
-        const editor = $('pipeline-yaml');
-        editor.rows = Math.min(40, Math.max(8, editor.value.split('\n').length + 1));
-    }
-
-    function markDirty() {
-        $('yaml-dirty').hidden = $('pipeline-yaml').value === savedYaml;
-    }
-
-    $('pipeline-yaml').addEventListener('input', () => {
-        fitEditor();
-        markDirty();
-        $('yaml-status').textContent = '';
-    });
-
-    window.addEventListener('beforeunload', event => {
-        if (savedYaml !== null && $('pipeline-yaml').value !== savedYaml) {
-            event.preventDefault();
-            event.returnValue = '';
-        }
-    });
-
-    function showErrors(errors) {
-        const list = $('yaml-errors');
-        list.replaceChildren();
-        errors.forEach(error => {
-            const item = document.createElement('li');
-            item.appendChild(textElement('code', '', error.path || '(root)'));
-            item.append(` ${error.message}`);
-            list.appendChild(item);
-        });
-    }
-
-    $('btn-yaml-validate').addEventListener('click', async event => {
-        const button = event.currentTarget;
-        button.disabled = true;
-        try {
-            const data = await api('/api/v1/pipelines/validate', {
-                method: 'POST', headers: { 'Content-Type': 'application/yaml' }, body: $('pipeline-yaml').value,
-            });
-            if (!data.success) throw new Error(errorMessage(data, 'Validation failed'));
-            showErrors(data.data.errors);
-            $('yaml-status').textContent = data.data.valid ? 'Valid' : '';
-            showPageError();
-        } catch (error) {
-            showPageError(`Could not validate pipeline: ${error.message}`);
-        } finally {
-            button.disabled = false;
-        }
-    });
-
-    $('btn-yaml-save').addEventListener('click', async event => {
-        const button = event.currentTarget;
-        button.disabled = true;
-        try {
-            const text = $('pipeline-yaml').value;
-            const data = await api(API, {
-                method: 'PUT', headers: { 'Content-Type': 'application/yaml' }, body: text,
-            });
-            if (!data.success) {
-                showErrors(data.error.details?.errors || [{ path: '', message: errorMessage(data, 'Save failed') }]);
-                $('yaml-status').textContent = '';
-                showPageError();
-                return;
-            }
-            savedYaml = text;
-            markDirty();
-            showErrors([]);
-            $('yaml-status').textContent = 'Saved';
-            showPageError();
-            await refresh();
-        } catch (error) {
-            showPageError(`Could not save pipeline: ${error.message}`);
-        } finally {
-            button.disabled = false;
-        }
-    });
-
     // ── Data ────────────────────────────────────────────────────────────────
 
     async function refreshOnce() {
@@ -451,18 +368,8 @@
         if (!def.success) throw new Error(errorMessage(def, 'Could not load pipeline definition'));
         if (!list.success) throw new Error(errorMessage(list, 'Could not load pipeline runs'));
         definition = def.data.pipeline;
-        if (savedYaml === null) {
-            savedYaml = def.data.yaml;
-            $('pipeline-yaml').value = savedYaml;
-            fitEditor();
-        }
         runs = list.data.runs;
         if (selectedRun && !runs.some(run => run.run_id === selectedRun)) selectedRun = null;
-        if (firstLoad) {
-            // Still being written: show the editor. Once it has run, the run view is what matters.
-            setDefinitionOpen(runs.length === 0);
-            firstLoad = false;
-        }
         clearPageError('refresh');
         await render();
     }
@@ -514,6 +421,10 @@
         if (run) action(`${API}/runs/${run.run_id}/resume`, 'resume pipeline', event.currentTarget);
     });
     $('btn-show-latest').addEventListener('click', () => selectRun(runs[0].run_id));
+    $('btn-step-close').addEventListener('click', () => {
+        selectedStep = null;
+        render();
+    });
     $('btn-pipeline-delete').addEventListener('click', async event => {
         if (!confirm(`Delete pipeline ${NAME} and its run history? Training runs are kept.`)) return;
         const button = event.currentTarget;
@@ -521,7 +432,6 @@
         try {
             const data = await api(API, { method: 'DELETE' });
             if (!data.success) throw new Error(errorMessage(data, 'Delete failed'));
-            savedYaml = null;   // nothing left to lose; skip the unsaved-changes prompt
             location.href = '/pipelines';
         } catch (error) {
             showPageError(`Could not delete pipeline: ${error.message}`);

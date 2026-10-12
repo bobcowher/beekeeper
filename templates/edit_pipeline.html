@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Beekeeper - Edit {{ name }}{% endblock %}
+{% block content %}
+<div class="page-header" id="pipeline-edit-header" data-name="{{ name }}">
+    <a href="{{ url_for('pipelines.detail', name=name) }}" class="back-btn">&larr; Back</a>
+    <h1>Edit {{ name }}</h1>
+</div>
+
+<p class="pipeline-error pipeline-page-error" id="pipeline-page-error" role="alert" hidden></p>
+
+<section class="card">
+    <h2>Pipeline Definition <span class="definition-dirty" id="yaml-dirty" hidden>unsaved changes</span></h2>
+    <div class="form-group">
+        <label for="pipeline-yaml">Pipeline YAML</label>
+        <textarea id="pipeline-yaml" class="code-editor" spellcheck="false" rows="12">{{ yaml }}</textarea>
+    </div>
+    <ul id="yaml-errors" class="validation-errors" aria-live="polite"></ul>
+    <div class="editor-actions">
+        <button class="btn btn-primary" id="btn-yaml-save">Save Changes</button>
+        <button class="btn btn-secondary" id="btn-yaml-validate">Validate</button>
+        <a href="{{ url_for('pipelines.detail', name=name) }}" class="btn btn-secondary">Cancel</a>
+        <span id="yaml-status" class="muted" role="status" aria-live="polite"></span>
+    </div>
+</section>
+
+<section class="card">
+    <h2>Field Reference</h2>
+    <table class="field-reference-table">
+        <tbody>
+            <tr><th colspan="2">Pipeline</th></tr>
+            <tr><td><code>name</code></td><td>Must match the pipeline's name.</td></tr>
+            <tr><td><code>description</code></td><td>Optional. Shown on the pipeline page and the Pipelines list.</td></tr>
+            <tr><td><code>folder</code></td><td>Optional. Groups the pipeline with projects in the same folder.</td></tr>
+            <tr><td><code>steps</code></td><td>Run in order. Each needs a unique <code>name</code> (lowercase, digits, <code>-</code>, <code>_</code>) and a <code>type</code>.</td></tr>
+            <tr><th colspan="2"><code>type: train</code></th></tr>
+            <tr><td><code>project</code></td><td>Project to train. The run goes through that project's queue.</td></tr>
+            <tr><td><code>branch</code></td><td>Optional. Defaults to the project's branch.</td></tr>
+            <tr><td><code>env_vars</code></td><td>Optional map of string values, added to the run's environment. Values are not shell-expanded.</td></tr>
+            <tr><th colspan="2"><code>type: task</code></th></tr>
+            <tr><td><code>command</code></td><td>Run with <code>bash -c</code> in the pipeline run folder.</td></tr>
+            <tr><td><code>timeout_s</code></td><td>Optional. Seconds before the task is killed. Default 3600.</td></tr>
+            <tr><th colspan="2">Environment every step gets</th></tr>
+            <tr><td><code>BEEKEEPER_PIPELINE_RUN_DIR</code></td><td>This run's shared folder.</td></tr>
+            <tr><td><code>BEEKEEPER_PIPELINE_RUN_ID</code></td><td>The run number.</td></tr>
+            <tr><td><code>BEEKEEPER_PREV_STEP_DIR</code></td><td>Output folder of the previous step.</td></tr>
+            <tr><td><code>BEEKEEPER_STEP_&lt;NAME&gt;_DIR</code></td><td>Output folder of an earlier step; name uppercased, <code>-</code> becomes <code>_</code>.</td></tr>
+        </tbody>
+    </table>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/pipeline_edit.js') }}"></script>
+{% endblock %}

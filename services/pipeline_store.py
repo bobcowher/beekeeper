@@ -41,9 +41,14 @@ def _atomic_write(path, text):
         raise
 
 
-def load_pipeline(pipelines_dir, name) -> tuple[dict, str]:
+def read_pipeline_text(pipelines_dir, name) -> str:
+    """The file as written, comments included, whether or not it is valid."""
     with open(_path(pipelines_dir, name)) as f:
-        text = f.read()
+        return f.read()
+
+
+def load_pipeline(pipelines_dir, name) -> tuple[dict, str]:
+    text = read_pipeline_text(pipelines_dir, name)
     return validate(parse_text(text), expected_name=name), text
 
 

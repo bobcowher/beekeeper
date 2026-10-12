@@ -81,7 +81,7 @@ def create():
     # json.dumps gives a double-quoted string, which is valid YAML for any folder name.
     folder_line = f"folder: {json.dumps(folder)}\n" if folder else ""
     pipeline_store.save_pipeline_text(pipelines_dir, name, _STARTER_YAML.format(name=name, folder_line=folder_line))
-    return redirect(url_for("pipelines.detail", name=name))
+    return redirect(url_for("pipelines.edit", name=name))
 
 
 @pipelines_bp.route("/<name>", methods=["GET"])
@@ -89,3 +89,12 @@ def detail(name):
     if not pipeline_store.pipeline_exists(current_app.config["PIPELINES_DIR"], name):
         abort(404)
     return render_template("pipeline.html", name=name)
+
+
+@pipelines_bp.route("/<name>/edit", methods=["GET"])
+def edit(name):
+    pipelines_dir = current_app.config["PIPELINES_DIR"]
+    if not pipeline_store.pipeline_exists(pipelines_dir, name):
+        abort(404)
+    return render_template("edit_pipeline.html", name=name,
+                           yaml=pipeline_store.read_pipeline_text(pipelines_dir, name))
