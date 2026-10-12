@@ -376,6 +376,32 @@ def test_dashboard_activity_merges_recent_runs_and_queue(client, app):
     assert [item["status"] for item in data["recent"]] == ["failed", "completed"]
 
 
+def test_dashboard_recent_activity_shows_each_project_and_pipeline_once(client, app):
+    import datetime
+    from services.db_service import get_db
+
+    db = get_db()
+    for hour in (9, 10, 11):
+        pk, _ = db.create_training_run("myproject", {
+            "started_at": datetime.datetime(2026, 10, 11, hour, 0), "status": "running", "branch": "main"})
+        db.update_training_run(pk, status="crashed" if hour == 11 else "completed",
+                               ended_at=datetime.datetime(2026, 10, 11, hour, 5), duration_seconds=300)
+    pk, _ = db.create_training_run("other", {
+        "started_at": datetime.datetime(2026, 10, 11, 8, 0), "status": "running", "branch": "main"})
+    db.update_training_run(pk, status="completed", ended_at=datetime.datetime(2026, 10, 11, 8, 5),
+                           duration_seconds=300)
+    defn = {"name": "fac", "folder": "", "description": "",
+            "steps": [{"name": "a", "type": "task", "command": "true", "timeout_s": 10}]}
+    for _ in range(3):
+        run_pk, _ = db.create_pipeline_run("fac", defn)
+        db.update_pipeline_run(run_pk, status="succeeded", ended_at=datetime.datetime.now().isoformat())
+
+    recent = client.get("/dashboard/activity").get_json()["recent"]
+
+    assert [item["run_ref"] for item in recent] == ["fac#3", "myproject-3", "other-1"]
+    assert recent[1]["status"] == "crashed"
+
+
 def test_dashboard_activity_reports_live_training_and_pipeline_step(client, app):
     from services import pipeline_store, process_manager
     from services.db_service import get_db

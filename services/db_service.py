@@ -598,11 +598,13 @@ class DatabaseService:
             return [dict(row) for row in rows]
 
     def recent_finished_training_runs(self, limit: int = 20) -> list[dict]:
-        """Fetch recent terminal training runs across all projects."""
+        """Each project's latest terminal training run, most recent first."""
         with self._get_connection() as conn:
             rows = conn.execute(
-                "SELECT * FROM training_runs WHERE status NOT IN ('running', 'starting') "
-                "ORDER BY started_at DESC LIMIT ?", (limit,)
+                "SELECT * FROM (SELECT *, ROW_NUMBER() OVER ("
+                "  PARTITION BY project_name ORDER BY started_at DESC, id DESC) AS rn "
+                "  FROM training_runs WHERE status NOT IN ('running', 'starting')) "
+                "WHERE rn = 1 ORDER BY started_at DESC LIMIT ?", (limit,)
             ).fetchall()
             return [dict(row) for row in rows]
 
@@ -968,11 +970,13 @@ class DatabaseService:
             return [self._pipeline_row(r) for r in rows]
 
     def recent_finished_pipeline_runs(self, limit: int = 20) -> list[dict]:
-        """Fetch recent terminal pipeline runs across all pipelines."""
+        """Each pipeline's latest terminal run, most recent first."""
         with self._get_connection() as conn:
             rows = conn.execute(
-                "SELECT * FROM pipeline_runs WHERE status != 'running' "
-                "ORDER BY started_at DESC LIMIT ?", (limit,)
+                "SELECT * FROM (SELECT *, ROW_NUMBER() OVER ("
+                "  PARTITION BY pipeline_name ORDER BY started_at DESC, id DESC) AS rn "
+                "  FROM pipeline_runs WHERE status != 'running') "
+                "WHERE rn = 1 ORDER BY started_at DESC LIMIT ?", (limit,)
             ).fetchall()
             return [self._pipeline_row(r) for r in rows]
 

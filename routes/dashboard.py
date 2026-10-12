@@ -50,8 +50,13 @@ def _activity_data():
         "position": entry["position"], "url": f"/projects/{entry['project_name']}",
     } for entry in db.list_all_queued_runs()]
 
+    # One entry per project or pipeline: its latest finished run, unless it's running now
+    # (then the Running list already shows it).
+    active = {(item["kind"], item["name"]) for item in running}
     recent = []
     for run in db.recent_finished_training_runs(limit=20):
+        if ("training", run["project_name"]) in active:
+            continue
         recent.append({
             "kind": "training", "name": run["project_name"],
             "run_id": run["run_number"],
@@ -61,6 +66,8 @@ def _activity_data():
             "url": f"/projects/{run['project_name']}/history/{run['run_number']}/log",
         })
     for run in db.recent_finished_pipeline_runs(limit=20):
+        if ("pipeline", run["pipeline_name"]) in active:
+            continue
         status = "completed" if run["status"] == "succeeded" else run["status"]
         recent.append({
             "kind": "pipeline", "name": run["pipeline_name"],

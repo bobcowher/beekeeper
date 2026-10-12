@@ -16,6 +16,7 @@
     --danger: #c94040;
     --success: #4ec94e;
     --running: #4a9eff;
+    --pipeline: #569cd6;
     --font-mono: 'Consolas', 'Courier New', monospace;
     --font-sans: 'Segoe UI', system-ui, sans-serif;
 }
@@ -376,6 +377,12 @@ body {
 .activity-identity { display: flex; flex-direction: column; min-width: 0; }
 .activity-kind { color: var(--text-secondary); font-size: 11px; text-transform: uppercase; }
 .activity-name { color: var(--accent); font-family: var(--font-mono); overflow-wrap: anywhere; }
+/* Training jobs keep the accent orange; pipelines are blue, so the two read apart at a glance. */
+.activity-training { border-left: 3px solid var(--accent); }
+.activity-pipeline { border-left: 3px solid var(--pipeline); }
+.activity-pipeline .activity-name, .activity-pipeline .activity-kind { color: var(--pipeline); }
+.activity-pipeline:hover { border-color: var(--pipeline); }
+.activity-training .activity-kind { color: var(--accent-dim); }
 .activity-detail { overflow-wrap: anywhere; }
 
 .project-branch {
@@ -2020,3 +2027,4 @@ input.invalid, select.invalid, textarea.invalid { border-color: var(--danger); }
     .step-editor-summary { flex-basis: 100%; order: 3; }
     .step-editor-chevron { display: none; }
 }
+.pipeline-row .project-name, .pipeline-row .pipeline-icon { color: var(--pipeline); }

@@ -32,7 +32,7 @@
 
     function activityRow(item, detail, status) {
         const link = document.createElement('a');
-        link.className = 'activity-row';
+        link.className = `activity-row activity-${item.kind === 'pipeline' ? 'pipeline' : 'training'}`;
         link.href = item.url;
         const identity = document.createElement('span');
         identity.className = 'activity-identity';
