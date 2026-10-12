@@ -927,7 +927,7 @@ def test_pipeline_editor_builds_steps_graphically(live_server):
         assert page.locator(".step-editor-name").first.input_value() == "prepare"
 
         page.fill("#g-description", "Built in the graphical editor")
-        page.locator(".step-insert-btn").last.click()
+        page.click("#btn-add-step")
         second = page.locator(".step-editor").nth(1)
         second.locator(".segmented-btn", has_text="Train").click()
         second = page.locator(".step-editor").nth(1)
@@ -961,6 +961,17 @@ def test_pipeline_editor_round_trips_between_tabs(live_server):
         page.on("pageerror", lambda err: errors.append(str(err)))
         _create_pipeline(page, live_server, yaml)
         page.goto(live_server + "/pipelines/trip-pipe/edit")
+        page.locator(".step-editor").nth(1).wait_for()
+        # Several steps start collapsed to a one-line summary; clicking one opens its form.
+        assert page.locator(".step-editor-summary").nth(1).inner_text() == "echo two"
+        assert not page.locator(".step-editor-body").nth(1).is_visible()
+        page.locator(".step-editor-toggle").nth(1).click()
+        assert page.locator(".step-editor-body").nth(1).is_visible()
+        page.locator(".step-editor textarea").nth(1).fill("echo three")
+        assert page.locator(".step-editor-summary").nth(1).inner_text() == "echo three"
+        page.click("#tab-yaml")
+        page.fill("#pipeline-yaml", yaml)        # back to the file as written
+        page.click("#tab-graphical")
         page.locator(".step-editor").nth(1).wait_for()
 
         # Looking without editing leaves the YAML text, comments included, untouched.

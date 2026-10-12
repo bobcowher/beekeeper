@@ -27,6 +27,7 @@
     let commentNoticeShown = false;
     let projects = [];
     let nextKey = 0;
+    const expanded = new Set();   // keys of steps whose form is open
     const branchCache = {};
 
     // ── Helpers ─────────────────────────────────────────────────────────────
@@ -311,7 +312,7 @@
     }
 
     function typeToggle(step) {
-        const group = el('div', { className: 'segmented', role: 'group', 'aria-label': 'Step type' });
+        const group = el('div', { className: 'segmented', role: 'group', 'aria-labelledby': `step-${step.key}-type-label` });
         ['train', 'task'].forEach(type => {
             group.append(el('button', {
                 type: 'button', className: 'segmented-btn', 'aria-pressed': String(step.type === type),
@@ -323,15 +324,59 @@
                 },
             }, type === 'train' ? 'Train' : 'Task'));
         });
-        return group;
+        return el('div', { className: 'form-group' },
+            el('label', { id: `step-${step.key}-type-label` }, 'Type ',
+                el('span', {
+                    className: 'tooltip-icon', text: '?',
+                    title: 'Train queues a training run on one of your projects. Task runs a shell command on this server.',
+                })),
+            group);
+    }
+
+    // What a collapsed step shows: its project or the first line of its command.
+    function stepSummary(step) {
+        if (step.type === 'train') {
+            if (!step.project) return { text: 'no project chosen', missing: true };
+            const vars = step.env.filter(([k]) => k.trim()).length;
+            return {
+                text: step.project + (step.branch.trim() ? ` @ ${step.branch.trim()}` : '') +
+                    (vars ? ` · ${vars} variable${vars === 1 ? '' : 's'}` : ''),
+            };
+        }
+        const lines = step.command.split('\n').filter(line => line.trim());
+        if (!lines.length) return { text: 'no command', missing: true };
+        return { text: lines[0] + (lines.length > 1 ? `  (+${lines.length - 1} more)` : ''), code: true };
+    }
+
+    function refreshHeader(card) {
+        if (!card) return;
+        const step = model.steps.find(item => String(item.key) === card.dataset.key);
+        if (!step) return;
+        card.querySelector('.step-editor-title').textContent = step.name || 'unnamed step';
+        const summary = stepSummary(step);
+        const node = card.querySelector('.step-editor-summary');
+        node.textContent = summary.text;
+        node.classList.toggle('missing', Boolean(summary.missing));
+        node.classList.toggle('code', Boolean(summary.code));
+    }
+
+    function setExpanded(step, open) {
+        if (open) expanded.add(step.key);
+        else expanded.delete(step.key);
+        const card = list.querySelector(`[data-key="${step.key}"]`);
+        if (!card) return;
+        card.classList.toggle('open', open);
+        card.querySelector('.step-editor-toggle').setAttribute('aria-expanded', String(open));
+        card.querySelector('.step-editor-body').hidden = !open;
     }
 
     function stepCard(step, index) {
         const count = model.steps.length;
+        const open = expanded.has(step.key);
+        const bodyId = `step-${step.key}-body`;
         const name = bindText(el('input', {
             type: 'text', className: 'step-editor-name', id: `step-${step.key}-name`,
-            'aria-label': `Step ${index + 1} name`, placeholder: 'step-name',
-            'data-path': `steps[${index}].name`,
+            placeholder: 'step-name', 'data-path': `steps[${index}].name`,
         }), step, 'name');
         const move = (delta) => () => {
             model.steps.splice(index, 1);
@@ -340,45 +385,55 @@
             renderSteps();
             list.querySelector(`[data-key="${step.key}"] .step-move-${delta < 0 ? 'up' : 'down'}`)?.focus();
         };
-        const tools = el('div', { className: 'step-editor-tools' },
-            el('button', {
-                type: 'button', className: 'btn btn-secondary btn-sm step-move-up', disabled: index === 0,
-                'aria-label': `Move step ${index + 1} up`, title: 'Move up', onclick: move(-1),
-            }, '↑'),
-            el('button', {
-                type: 'button', className: 'btn btn-secondary btn-sm step-move-down', disabled: index === count - 1,
-                'aria-label': `Move step ${index + 1} down`, title: 'Move down', onclick: move(1),
-            }, '↓'),
-            el('button', {
-                type: 'button', className: 'btn btn-danger btn-sm step-delete',
-                'aria-label': `Delete step ${index + 1}`, title: 'Delete step',
-                onclick: () => {
-                    model.steps.splice(index, 1);
-                    markModelChanged();
-                    renderSteps();
-                },
-            }, '×'));
-        return el('li', { className: `step-editor step-editor-${step.type}`, 'data-key': step.key, 'data-path': `steps[${index}]` },
+        const tool = (className, label, title, symbol, onclick, disabled) => el('button', {
+            type: 'button', className: `icon-btn ${className}`, 'aria-label': label, title, disabled, onclick,
+        }, symbol);
+        const card = el('li', {
+            className: `step-editor${open ? ' open' : ''}`, 'data-key': step.key, 'data-path': `steps[${index}]`,
+        },
+            el('span', { className: 'step-editor-num', 'aria-hidden': 'true', text: String(index + 1) }),
             el('div', { className: 'step-editor-head' },
-                el('span', { className: 'step-editor-num', text: String(index + 1) }),
-                name, typeToggle(step), tools),
-            el('div', { className: 'step-editor-body' },
+                el('button', {
+                    type: 'button', className: 'step-editor-toggle', 'aria-expanded': String(open),
+                    'aria-controls': bodyId, onclick: () => setExpanded(step, !expanded.has(step.key)),
+                },
+                    el('span', { className: 'step-editor-title' }),
+                    el('span', { className: `step-type step-type-${step.type}`, text: step.type }),
+                    el('span', { className: 'step-editor-summary' }),
+                    el('span', { className: 'step-editor-chevron', 'aria-hidden': 'true', text: '›' })),
+                el('div', { className: 'step-editor-tools' },
+                    tool('step-move-up', `Move step ${index + 1} up`, 'Move up', '↑', move(-1), index === 0),
+                    tool('step-move-down', `Move step ${index + 1} down`, 'Move down', '↓', move(1), index === count - 1),
+                    tool('step-delete', `Delete step ${index + 1}`, 'Delete step', '×', () => {
+                        model.steps.splice(index, 1);
+                        expanded.delete(step.key);
+                        markModelChanged();
+                        renderSteps();
+                    }))),
+            el('div', { className: 'step-editor-body', id: bodyId, hidden: !open },
+                el('div', { className: 'form-row' },
+                    field('Step name', name, 'Lowercase letters, digits, - and _. Later steps find this step’s output folder as $BEEKEEPER_STEP_<NAME>_DIR.'),
+                    typeToggle(step)),
                 step.type === 'train' ? trainBody(step, index) : taskBody(step, index)));
+        refreshHeader(card);
+        return card;
     }
 
     function insertButton(at) {
         return el('li', { className: 'step-insert' }, el('button', {
-            type: 'button', className: 'step-insert-btn',
-            'aria-label': at === model.steps.length ? 'Add step at the end' : `Add step before step ${at + 1}`,
-            onclick: () => {
-                const step = blankStep('task');
-                step.name = uniqueStepName('step');
-                model.steps.splice(at, 0, step);
-                markModelChanged();
-                renderSteps();
-                $(`step-${step.key}-name`).select();
-            },
-        }, '+ Add step'));
+            type: 'button', className: 'step-insert-btn', title: 'Add a step here',
+            'aria-label': `Add step before step ${at + 1}`, onclick: () => addStep(at),
+        }, '+'));
+    }
+
+    function addStep(at) {
+        const step = blankStep('task');
+        step.name = uniqueStepName('step');
+        model.steps.splice(at, 0, step);
+        expanded.add(step.key);
+        markModelChanged();
+        renderSteps();
+        $(`step-${step.key}-name`).select();
     }
 
     function renderSteps() {
@@ -387,12 +442,19 @@
             if (index > 0) list.append(insertButton(index));
             list.append(stepCard(step, index));
         });
-        list.append(insertButton(model.steps.length));
     }
+
+    ['input', 'change', 'click'].forEach(type => {
+        list.addEventListener(type, event => refreshHeader(event.target.closest('.step-editor')));
+    });
+    $('btn-add-step').addEventListener('click', () => addStep(model.steps.length));
 
     function renderGraphical() {
         $('g-description').value = model.description;
         $('g-folder').value = model.folder;
+        // A single step (a new pipeline) is opened, so there's something to edit right away.
+        expanded.clear();
+        if (model.steps.length === 1) expanded.add(model.steps[0].key);
         renderSteps();
     }
 
@@ -430,6 +492,7 @@
         $('yaml-errors').replaceChildren();
         document.querySelectorAll('.field-error').forEach(node => node.remove());
         document.querySelectorAll('.invalid').forEach(node => node.classList.remove('invalid'));
+        document.querySelectorAll('.has-error').forEach(node => node.classList.remove('has-error'));
     }
 
     // In the graphical view an error sits under the field it names (steps[2].project → that
@@ -444,6 +507,12 @@
                 return;
             }
             target.classList.add('invalid');
+            const card = target.closest('.step-editor');
+            if (card) {
+                card.classList.add('has-error');
+                const step = model.steps.find(item => String(item.key) === card.dataset.key);
+                if (step) setExpanded(step, true);   // the field is inside the collapsed form
+            }
             const message = el('div', { className: 'field-error', role: 'alert', text: error.message });
             if (target.tagName === 'LI') target.querySelector('.step-editor-head').after(message);
             else target.after(message);

@@ -1969,35 +1969,54 @@ label {
 /* Pipeline editor */
 .editor-notice { background: rgba(232, 185, 49, 0.08); border-left: 3px solid var(--accent); padding: 0.5rem 0.75rem; font-size: 0.85rem; margin: 0 0 1rem; }
 .editor-steps-title { margin-top: 0.5rem; }
-.step-editor-list { list-style: none; padding: 0; margin: 0; }
-.step-editor { background: var(--bg-secondary); border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: 4px; }
-.step-editor-train { border-left-color: var(--accent); }
-.step-editor.invalid { border-color: var(--danger); }
-.step-editor-head { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-.step-editor-num { font-family: var(--font-mono); color: var(--text-secondary); font-size: 0.8rem; min-width: 1.2rem; }
-.step-editor-name { flex: 1 1 12rem; max-width: 22rem; font-family: var(--font-mono); font-weight: 600; color: var(--text-bright); }
-.step-editor-tools { display: flex; gap: 0.3rem; margin-left: auto; }
-.step-editor-tools .btn { min-width: 2rem; }
-.step-editor-body { padding: 0.75rem; }
-.step-editor-body .form-group:last-child { margin-bottom: 0; }
+.step-editor-list { list-style: none; padding: 0 0 0 2.75rem; margin: 0; position: relative; }
+.step-editor-list::before { content: ""; position: absolute; left: 0.94rem; top: 1.2rem; bottom: 1.2rem; border-left: 2px solid var(--border); }
+.step-editor { position: relative; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 4px; margin-bottom: 0.5rem; }
+.step-editor.open { border-color: #5a5a5a; }
+.step-editor.has-error { border-color: var(--danger); }
+.step-editor-num { position: absolute; left: -2.75rem; top: 0.55rem; width: 1.9rem; height: 1.9rem; border-radius: 50%; background: var(--bg-primary); border: 2px solid var(--border); color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.8rem; display: flex; align-items: center; justify-content: center; }
+.step-editor.open .step-editor-num { border-color: var(--accent); color: var(--accent); }
+.step-editor-head { display: flex; align-items: center; gap: 0.5rem; padding-right: 0.5rem; }
+.step-editor-toggle { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 0.6rem; background: none; border: 0; color: inherit; font: inherit; text-align: left; padding: 0.7rem 0.75rem; cursor: pointer; border-radius: 4px; }
+.step-editor-toggle:hover .step-editor-title { color: var(--accent); }
+.step-editor-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.step-editor-title { font-family: var(--font-mono); font-weight: 600; color: var(--text-bright); white-space: nowrap; }
+.step-type-train { color: var(--accent); border-color: rgba(232, 185, 49, 0.5); }
+.step-editor-summary { color: var(--text-secondary); font-size: 0.85rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.step-editor-summary.code { font-family: var(--font-mono); font-size: 0.8rem; }
+.step-editor-summary.missing { color: var(--danger); font-style: italic; }
+.step-editor-chevron { color: var(--text-secondary); font-size: 1.1rem; line-height: 1; transition: transform 0.15s; }
+.step-editor.open .step-editor-chevron { transform: rotate(90deg); }
+.step-editor-tools { display: flex; gap: 0.1rem; }
+.icon-btn { background: none; border: 1px solid transparent; border-radius: 3px; color: var(--text-secondary); width: 1.9rem; height: 1.9rem; font-size: 0.95rem; cursor: pointer; }
+.icon-btn:hover:not(:disabled) { color: var(--text-bright); border-color: var(--border); background: var(--bg-input); }
+.icon-btn.step-delete:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+.icon-btn:disabled { opacity: 0.25; cursor: default; }
+.icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.step-editor-body { padding: 0.9rem 0.75rem 0.75rem; border-top: 1px solid var(--border); background: var(--bg-primary); border-radius: 0 0 4px 4px; }
+.step-editor-body > .form-group:last-child, .step-editor-body > .step-timeout .form-group { margin-bottom: 0; }
+.step-editor-name { font-family: var(--font-mono); }
 .step-timeout { max-width: 12rem; }
 .step-env .btn { margin-top: 0.25rem; }
 .segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
-.segmented-btn { background: none; border: 0; color: var(--text-secondary); font: inherit; font-size: 0.8rem; padding: 0.25rem 0.75rem; cursor: pointer; }
+.segmented-btn { background: var(--bg-input); border: 0; color: var(--text-secondary); font: inherit; font-size: 0.85rem; padding: 0.4rem 1rem; cursor: pointer; }
 .segmented-btn + .segmented-btn { border-left: 1px solid var(--border); }
-.segmented-btn[aria-pressed="true"] { background: var(--accent); color: var(--bg-primary); font-weight: 600; }
+.segmented-btn[aria-pressed="true"] { background: var(--text-primary); color: var(--bg-primary); font-weight: 600; }
 .segmented-btn:focus-visible, .step-insert-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.step-insert { display: flex; justify-content: center; padding: 0.4rem 0; position: relative; }
-.step-insert::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; border-left: 1px dashed var(--border); }
-.step-insert-btn { position: relative; background: var(--bg-primary); border: 1px dashed var(--border); border-radius: 3px; color: var(--text-secondary); font: inherit; font-size: 0.8rem; padding: 0.2rem 0.8rem; cursor: pointer; }
-.step-insert-btn:hover { color: var(--accent); border-color: var(--accent); }
-.step-insert:last-child::before { bottom: 50%; }
-.step-insert:first-child::before { display: none; }
+.step-insert { position: relative; height: 0.9rem; margin: -0.25rem 0 0.25rem; }
+.step-insert-btn { position: absolute; left: -2.35rem; top: 50%; transform: translateY(-50%); width: 1.1rem; height: 1.1rem; padding: 0; line-height: 1; border-radius: 50%; border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-secondary); font-size: 0.8rem; cursor: pointer; opacity: 0.6; }
+.step-insert-btn:hover, .step-insert-btn:focus-visible { opacity: 1; color: var(--accent); border-color: var(--accent); }
+.step-add-end { margin: 0.25rem 0 1.25rem 2.75rem; }
 .field-error { color: var(--danger); font-size: 0.8rem; margin-top: 0.25rem; }
 .step-editor > .field-error { padding: 0.4rem 0.75rem 0; margin: 0; }
 input.invalid, select.invalid, textarea.invalid { border-color: var(--danger); }
 @media (max-width: 600px) {
-    .step-editor-name { max-width: none; }
-    .step-editor-tools { margin-left: 0; }
+    .step-editor-list { padding-left: 2.25rem; }
+    .step-editor-list::before { left: 0.7rem; }
+    .step-editor-num { left: -2.25rem; width: 1.5rem; height: 1.5rem; font-size: 0.7rem; top: 0.65rem; }
+    .step-insert-btn { left: -1.95rem; }
+    .step-add-end { margin-left: 2.25rem; }
+    .step-editor-toggle { flex-wrap: wrap; row-gap: 0.2rem; }
+    .step-editor-summary { flex-basis: 100%; order: 3; }
+    .step-editor-chevron { display: none; }
 }
-.step-editor-tools .btn:disabled { opacity: 0.35; cursor: default; }
