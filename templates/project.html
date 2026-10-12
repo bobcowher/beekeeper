@@ -85,12 +85,6 @@
     <div class="card-header">
         <h2>Training</h2>
     </div>
-    <div id="run-list" class="run-list"
-         data-name="{{ project.name }}"
-         data-parallel="{{ 'true' if project.get('parallel_runs_enabled') else 'false' }}"
-         data-default-branch="{{ project.get('branch', 'main') }}">
-        <!-- Populated by training.js -->
-    </div>
     <div class="run-list-actions" id="run-list-actions" style="display:none">
         <button class="btn btn-success btn-sm" id="btn-start-run">+ Start Run…</button>
     </div>
@@ -104,6 +98,10 @@
         <span class="muted start-reason" id="start-reason" role="status" aria-live="polite"></span>
         <button class="btn btn-secondary btn-sm" id="btn-cancel-start" style="display:none">Cancel</button>
     </div>
+    <div id="run-list" class="run-list"
+         data-name="{{ project.name }}"
+         data-parallel="{{ 'true' if project.get('parallel_runs_enabled') else 'false' }}"
+         data-default-branch="{{ project.get('branch', 'main') }}"></div>{# rows added by training.js; kept empty so :empty applies #}
     <div id="queue-section" class="queue-section" style="display:none">
         <h3 class="queue-title">Queued</h3>
         <ol id="queue-list" class="queue-list"></ol>

@@ -1742,6 +1742,8 @@ label {
     gap: 0.5rem;
 }
 
+.run-list:not(:empty) { margin-top: 0.75rem; }
+
 .run-row {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
