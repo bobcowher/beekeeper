@@ -34,6 +34,9 @@
 - Startup migration also re-points workspace TensorBoard/output symlinks to the renamed
   folders, and never blocks startup (failures are logged and retried on next start).
 - MCP server 0.4.0; the API now requires MCP >= 0.4.0.
+- Default API rate limit raised from 100 to 600 requests per minute per IP, since the
+  web UI's own polling counts against it. Existing installs keep their saved value; change
+  it under Admin -> API rate limit.
 
 ### Fixed
 - Deleting a project now removes its run history, so a recreated project with the same

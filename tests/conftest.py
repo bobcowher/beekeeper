@@ -15,7 +15,7 @@ def app(tmp_path):
         "PIPELINES_DIR": str(tmp_path / "pipelines"),
         "DB_PATH": str(tmp_path / "beekeeper-test.db"),
     })
-    # The limiter is process-global (100 req/min per IP); keep tests independent of suite size
+    # The limiter is process-global (600 req/min per IP by default); keep tests independent of suite size
     from services.rate_limiter import get_rate_limiter
     get_rate_limiter()._requests.clear()
     return application

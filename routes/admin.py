@@ -23,7 +23,7 @@ def index():
         'auth_enabled': is_auth_enabled(),
         'session_lifetime_days': get_config_int('session.lifetime_days', 7),
         'password_min_length': get_config_int(_PWD_MIN_LEN_KEY, 8),
-        'api_rate_limit': get_config_int('api.rate_limit_per_minute', 100),
+        'api_rate_limit': get_config_int('api.rate_limit_per_minute', 600),
         'inline_tasks_enabled': get_config_bool('pipelines.inline_tasks.enabled', True),
     }
 

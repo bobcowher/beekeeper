@@ -168,7 +168,7 @@ def test_rate_limit_form_leaves_security_toggles_alone(client, app, monkeypatch)
     monkeypatch.setattr(admin_routes, "save_config", lambda: None)
     old_auth = get_config_bool("auth.enabled", False)
     old_tasks = get_config_bool("pipelines.inline_tasks.enabled", True)
-    old_rate = get_config_int("api.rate_limit_per_minute", 100)
+    old_rate = get_config_int("api.rate_limit_per_minute", 600)
     try:
         set_config("auth.enabled", "true")
         set_config("pipelines.inline_tasks.enabled", "true")

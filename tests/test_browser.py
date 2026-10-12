@@ -22,7 +22,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _fresh_rate_limit():
-    # The live server shares the process-global limiter (100 req/min per IP) across the whole
+    # The live server shares the process-global limiter (600 req/min per IP by default) across the whole
     # module; reset it per test, as the app fixture does, so results don't depend on suite size.
     from services.rate_limiter import get_rate_limiter
     get_rate_limiter()._requests.clear()
