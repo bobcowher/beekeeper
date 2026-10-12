@@ -51,6 +51,29 @@ def test_validate_endpoint(client):
     assert ok["valid"] and "project: p" in ok["normalized_yaml"]
     bad = post_yaml(client, "/api/v1/pipelines/validate", "name: [").get_json()["data"]
     assert not bad["valid"] and bad["errors"]
+    assert bad["parsed"] is None and bad["definition"] is None
+
+
+def test_validate_returns_parsed_mapping_even_when_invalid(client):
+    # The editor loads `parsed` into its graphical view, so it must survive validation errors.
+    data = post_yaml(client, "/api/v1/pipelines/validate",
+                     "name: fac\nsteps:\n  - {name: a, type: task}\n").get_json()["data"]
+    assert not data["valid"]
+    assert data["parsed"] == {"name": "fac", "steps": [{"name": "a", "type": "task"}]}
+    assert data["definition"] is None and data["yaml"] is None    # yaml is only for JSON bodies
+    ok = post_yaml(client, "/api/v1/pipelines/validate", YAML).get_json()["data"]
+    assert ok["definition"]["steps"][0]["project"] == "p"
+
+
+def test_validate_json_returns_yaml_for_valid_and_draft_definitions(client):
+    valid = {"name": "j", "description": "d", "steps": [{"name": "a", "type": "task", "command": "echo hi\nls"}]}
+    data = client.post("/api/v1/pipelines/validate", json=valid).get_json()["data"]
+    assert data["valid"] and data["yaml"] == data["normalized_yaml"]
+    assert "command: |-\n" in data["yaml"]          # multi-line commands stay readable
+    draft = {"name": "j", "steps": [{"name": "a", "type": "train", "project": ""}]}
+    data = client.post("/api/v1/pipelines/validate", json=draft).get_json()["data"]
+    assert not data["valid"]
+    assert "project: ''" in data["yaml"]               # half-built steps still convert
 
 
 def test_list_with_folder_and_last_run(client, app):

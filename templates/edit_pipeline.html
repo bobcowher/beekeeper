@@ -4,16 +4,47 @@
 <div class="page-header" id="pipeline-edit-header" data-name="{{ name }}">
     <a href="{{ url_for('pipelines.detail', name=name) }}" class="back-btn">&larr; Back</a>
     <h1>Edit {{ name }}</h1>
+    <span class="definition-dirty" id="yaml-dirty" hidden>unsaved changes</span>
 </div>
 
 <p class="pipeline-error pipeline-page-error" id="pipeline-page-error" role="alert" hidden></p>
 
 <section class="card">
-    <h2>Pipeline Definition <span class="definition-dirty" id="yaml-dirty" hidden>unsaved changes</span></h2>
-    <div class="form-group">
-        <label for="pipeline-yaml">Pipeline YAML</label>
-        <textarea id="pipeline-yaml" class="code-editor" spellcheck="false" rows="12">{{ yaml }}</textarea>
+    <div class="tab-bar" role="tablist" aria-label="Editor">
+        <button type="button" class="tab-btn active" role="tab" id="tab-graphical"
+                aria-controls="panel-graphical" aria-selected="true">Graphical</button>
+        <button type="button" class="tab-btn" role="tab" id="tab-yaml"
+                aria-controls="panel-yaml" aria-selected="false">YAML</button>
     </div>
+    <p class="editor-notice" id="editor-notice" role="status" aria-live="polite" hidden></p>
+
+    <div id="panel-graphical" role="tabpanel" aria-labelledby="tab-graphical">
+        <div class="form-row">
+            <div class="form-group">
+                <label for="g-description">Description <span class="muted">(optional)</span></label>
+                <input type="text" id="g-description" data-path="description" placeholder="What this pipeline produces">
+            </div>
+            <div class="form-group">
+                <label for="g-folder">Folder <span class="muted">(optional)</span></label>
+                <input type="text" id="g-folder" data-path="folder" list="folder-options" maxlength="64" placeholder="e.g. chess">
+                <datalist id="folder-options">
+                    {% for f in folders %}<option value="{{ f }}">{% endfor %}
+                </datalist>
+            </div>
+        </div>
+        <h2 class="editor-steps-title">Steps
+            <span class="tooltip-icon" title="Steps run top to bottom. A step starts when the one above it succeeds; if a step fails, the pipeline stops and can be resumed from that step.">?</span>
+        </h2>
+        <ol class="step-editor-list" id="step-editor-list"></ol>
+    </div>
+
+    <div id="panel-yaml" role="tabpanel" aria-labelledby="tab-yaml" hidden>
+        <div class="form-group">
+            <label for="pipeline-yaml">Pipeline YAML</label>
+            <textarea id="pipeline-yaml" class="code-editor" spellcheck="false" rows="12">{{ yaml }}</textarea>
+        </div>
+    </div>
+
     <ul id="yaml-errors" class="validation-errors" aria-live="polite"></ul>
     <div class="editor-actions">
         <button class="btn btn-primary" id="btn-yaml-save">Save Changes</button>
@@ -23,7 +54,7 @@
     </div>
 </section>
 
-<section class="card">
+<section class="card" id="field-reference" hidden>
     <h2>Field Reference</h2>
     <table class="field-reference-table">
         <tbody>

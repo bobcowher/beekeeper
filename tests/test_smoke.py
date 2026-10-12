@@ -333,14 +333,14 @@ def test_pipelines_page_explains_pipelines_until_first_exists(client):
     assert 'id="project-list"' not in html
 
 
-def test_new_pipeline_starts_from_commented_valid_template(client, app):
+def test_new_pipeline_starts_from_valid_template(client, app):
     from services import pipeline_store
     resp = client.post("/pipelines/new", data={"name": "fresh", "folder": "My Folder"})
     assert resp.status_code == 302 and resp.headers["Location"].endswith("/pipelines/fresh/edit")
     defn, text = pipeline_store.load_pipeline(app.config["PIPELINES_DIR"], "fresh")
     assert defn["folder"] == "My Folder"
     assert [s["name"] for s in defn["steps"]] == ["prepare"]
-    assert "# A train step queues a training run" in text   # comments kept as inline docs
+    assert "$BEEKEEPER_PIPELINE_RUN_DIR" in defn["steps"][0]["command"]
 
 
 def test_dashboard_activity_merges_recent_runs_and_queue(client, app):
@@ -426,7 +426,8 @@ def test_pipeline_edit_page_renders_raw_yaml(client, app):
     client.post("/pipelines/new", data={"name": "fresh"})
     html = client.get("/pipelines/fresh/edit").get_data(as_text=True)
     assert 'label for="pipeline-yaml"' in html
-    assert "# A task step runs a shell command." in html   # comments survive
+    assert "BEEKEEPER_PIPELINE_RUN_DIR" in html             # the file's text, in the YAML tab
+    assert 'id="tab-graphical"' in html and 'id="step-editor-list"' in html
     assert client.get("/pipelines/ghost/edit").status_code == 404
 
 

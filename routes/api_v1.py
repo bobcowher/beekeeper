@@ -28,7 +28,7 @@ from routes.files import _safe_path, _fmt_size, _zip_directory
 from routes.runs import _resolve_run, _safe_run_path
 from services.run_refs import public_run, run_ref
 from services import pipeline_engine, pipeline_store
-from services.pipeline_schema import NAME_RE as PIPELINE_NAME_RE, PipelineValidationError, parse_text, to_yaml, validate as validate_pipeline
+from services.pipeline_schema import NAME_RE as PIPELINE_NAME_RE, PipelineValidationError, draft_yaml, parse_text, to_yaml, validate as validate_pipeline
 
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
@@ -656,12 +656,25 @@ def pipelines_create():
 @api_v1_bp.route("/pipelines/validate", methods=["POST"])
 @api_key_required
 def pipelines_validate():
+    """Validate a YAML or JSON definition.
+
+    Besides the verdict, returns what an editor needs to switch views: `parsed` (the mapping as
+    given, even when invalid), `definition` (normalized, when valid) and, for JSON bodies,
+    `yaml` (that mapping as YAML, valid or not).
+    """
     try:
-        data, _ = _parse_body()
+        data, text = _parse_body()
+    except PipelineValidationError as e:
+        return api_response(data={"valid": False, "errors": e.errors, "normalized_yaml": None,
+                                  "parsed": None, "definition": None, "yaml": None})
+    draft = draft_yaml(data) if text is None and isinstance(data, dict) else None
+    try:
         defn = validate_pipeline(data)
     except PipelineValidationError as e:
-        return api_response(data={"valid": False, "errors": e.errors, "normalized_yaml": None})
-    return api_response(data={"valid": True, "errors": [], "normalized_yaml": to_yaml(defn)})
+        return api_response(data={"valid": False, "errors": e.errors, "normalized_yaml": None,
+                                  "parsed": data, "definition": None, "yaml": draft})
+    return api_response(data={"valid": True, "errors": [], "normalized_yaml": to_yaml(defn),
+                              "parsed": data, "definition": defn, "yaml": draft})
 
 
 @api_v1_bp.route("/pipelines/<name>", methods=["GET"])

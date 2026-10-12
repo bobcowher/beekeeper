@@ -20,6 +20,14 @@ import time
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _fresh_rate_limit():
+    # The live server shares the process-global limiter (100 req/min per IP) across the whole
+    # module; reset it per test, as the app fixture does, so results don't depend on suite size.
+    from services.rate_limiter import get_rate_limiter
+    get_rate_limiter()._requests.clear()
+
+
 @pytest.fixture(scope="module")
 def live_server(tmp_path_factory):
     """Start Flask in a background thread with a real temp projects directory."""
@@ -370,6 +378,8 @@ def test_pipeline_page_yaml_errors_and_run(live_server):
         page.fill("#name", "ui-pipe")
         page.click("button[type=submit]")
         page.wait_for_url("**/pipelines/ui-pipe/edit")
+        page.locator(".step-editor").first.wait_for()
+        page.click("#tab-yaml")
         page.fill("#pipeline-yaml", "name: ui-pipe\nsteps:\n  - {name: a, type: train, project: demo, branch: no}\n")
         page.click("#btn-yaml-save")
         page.locator("#yaml-errors li").first.wait_for()
@@ -654,7 +664,7 @@ def test_pipeline_network_error_is_reported_without_pageerror(live_server):
         )
         assert response.ok
         page.goto(live_server + "/pipelines/error-pipe/edit")
-        page.locator("#pipeline-yaml").wait_for()
+        page.locator(".step-editor").first.wait_for()
 
         errors = []
         page.on("pageerror", lambda err: errors.append(str(err)))
@@ -891,4 +901,145 @@ def test_pipeline_run_view_opens_steps_on_click_and_switches_runs(live_server):
         assert mobile.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         mobile.screenshot(path="/tmp/beekeeper-pipeline-failed-390.png", full_page=True)
         assert errors == []
+        browser.close()
+
+
+def _pipeline_yaml(page, live_server, name):
+    return page.request.get(f"{live_server}/api/v1/pipelines/{name}").json()["data"]["yaml"]
+
+
+@pytest.mark.browser
+def test_pipeline_editor_builds_steps_graphically(live_server):
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        errors = []
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        page.goto(live_server + "/pipelines/new")
+        page.fill("#name", "graph-pipe")
+        page.click("button[type=submit]")
+        page.wait_for_url("**/pipelines/graph-pipe/edit")
+        first = page.locator(".step-editor").first
+        first.wait_for()
+        assert page.locator("#tab-graphical").get_attribute("aria-selected") == "true"
+        assert page.locator(".step-editor-name").first.input_value() == "prepare"
+
+        page.fill("#g-description", "Built in the graphical editor")
+        page.locator(".step-insert-btn").last.click()
+        second = page.locator(".step-editor").nth(1)
+        second.locator(".segmented-btn", has_text="Train").click()
+        second = page.locator(".step-editor").nth(1)
+        second.locator(".step-editor-name").fill("fit")
+        second.locator("select").select_option("demo")
+        second.locator("text=+ Add Variable").click()
+        second.locator('input[aria-label="Variable name"]').fill("EPOCHS")
+        second.locator('input[aria-label="Variable value"]').fill("3")
+        assert page.locator("#yaml-dirty").is_visible()
+        page.screenshot(path="/tmp/beekeeper-pipeline-editor.png", full_page=True)
+
+        page.click("#btn-yaml-save")
+        page.wait_for_url("**/pipelines/graph-pipe")
+        saved = _pipeline_yaml(page, live_server, "graph-pipe")
+        assert "description: Built in the graphical editor" in saved
+        assert "- name: fit\n  type: train\n  project: demo\n  env_vars:\n    EPOCHS: '3'" in saved
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_editor_round_trips_between_tabs(live_server):
+    from playwright.sync_api import sync_playwright
+
+    yaml = ("# keep me\nname: trip-pipe\nsteps:\n  - name: one\n    type: task\n    command: echo one\n"
+            "  - name: two\n    type: task\n    command: echo two\n")
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        _create_pipeline(page, live_server, yaml)
+        page.goto(live_server + "/pipelines/trip-pipe/edit")
+        page.locator(".step-editor").nth(1).wait_for()
+
+        # Looking without editing leaves the YAML text, comments included, untouched.
+        page.click("#tab-yaml")
+        page.locator("#pipeline-yaml").wait_for()
+        assert page.locator("#pipeline-yaml").input_value() == yaml
+        assert page.locator("#field-reference").is_visible()
+
+        # YAML edits show up graphically.
+        page.fill("#pipeline-yaml", yaml.replace("echo two", "echo TWO"))
+        page.click("#tab-graphical")
+        page.locator(".step-editor").nth(1).wait_for()
+        assert page.locator(".step-editor textarea").nth(1).input_value() == "echo TWO"
+        assert not page.locator("#field-reference").is_visible()
+
+        # The first graphical edit warns about the comment, and reordering/deleting reach the YAML.
+        page.click('button[aria-label="Move step 2 up"]')
+        notice = page.locator("#editor-notice")
+        assert notice.is_visible() and "1 comment" in notice.inner_text()
+        assert page.locator(".step-editor-name").first.input_value() == "two"
+        assert page.locator('button[aria-label="Move step 1 up"]').is_disabled()
+        page.click('button[aria-label="Delete step 2"]')
+        assert page.locator(".step-editor").count() == 1
+        page.click("#tab-yaml")
+        page.wait_for_function("!document.getElementById('pipeline-yaml').value.includes('# keep me')")
+        text = page.locator("#pipeline-yaml").input_value()
+        assert "name: two" in text and "echo TWO" in text and "name: one" not in text
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_editor_blocks_graphical_for_yaml_it_cannot_show(live_server):
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        _create_pipeline(page, live_server, "name: block-pipe\nsteps:\n  - {name: a, type: task, command: 'true'}\n")
+        page.goto(live_server + "/pipelines/block-pipe/edit")
+        page.locator(".step-editor").first.wait_for()
+        page.click("#tab-yaml")
+
+        page.fill("#pipeline-yaml", "name: block-pipe\nsteps: [\n")
+        page.click("#tab-graphical")
+        page.locator("#yaml-errors li").first.wait_for()
+        assert "Invalid YAML" in page.locator("#yaml-errors").inner_text()
+        assert page.locator("#pipeline-yaml").is_visible()
+        assert page.locator("#tab-yaml").get_attribute("aria-selected") == "true"
+
+        page.fill("#pipeline-yaml", "name: block-pipe\nsteps:\n  - {name: a, type: task, command: 'true', retries: 2}\n")
+        page.click("#tab-graphical")
+        page.wait_for_function("document.getElementById('editor-notice').textContent.includes('retries')")
+        assert page.locator("#pipeline-yaml").is_visible()
+
+        # Incomplete-but-representable YAML is fine: the gaps show as field errors.
+        page.fill("#pipeline-yaml", "name: block-pipe\nsteps:\n  - {name: a, type: train}\n")
+        page.click("#tab-graphical")
+        page.locator(".step-editor select").wait_for()
+        page.click("#btn-yaml-save")
+        error = page.locator(".step-editor .field-error").first
+        error.wait_for()
+        assert "required" in error.inner_text()
+        assert page.locator(".step-editor select").get_attribute("class") == "invalid"
+        browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_editor_fits_phone_width(live_server):
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 390, "height": 844})
+        _create_pipeline(page, live_server,
+                         "name: phone-pipe\nsteps:\n  - {name: fetch, type: task, command: './download.sh'}\n"
+                         "  - name: fit\n    type: train\n    project: demo\n    env_vars: {EPOCHS: '3'}\n")
+        page.goto(live_server + "/pipelines/phone-pipe/edit")
+        page.locator(".step-editor").nth(1).wait_for()
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        page.screenshot(path="/tmp/beekeeper-pipeline-editor-390.png", full_page=True)
         browser.close()

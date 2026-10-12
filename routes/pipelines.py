@@ -1,5 +1,4 @@
 import datetime
-import json
 
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
 
@@ -11,27 +10,9 @@ from services.pipeline_schema import NAME_RE
 
 pipelines_bp = Blueprint("pipelines", __name__, url_prefix="/pipelines")
 
-# Saved as text so the comments survive; they are the inline docs for a new pipeline.
-_STARTER_YAML = """\
-name: {name}
-{folder_line}# description: What this pipeline produces
-steps:
-  # A task step runs a shell command. Its working directory is this run's
-  # folder, $BEEKEEPER_PIPELINE_RUN_DIR, which every step can read and write.
-  - name: prepare
-    type: task
-    command: echo "Preparing data in $BEEKEEPER_PIPELINE_RUN_DIR"
-    # timeout_s: 3600
-
-  # A train step queues a training run on a project and waits for it to finish.
-  # Its run folder is exposed to later steps as $BEEKEEPER_STEP_TRAIN_DIR.
-  # - name: train
-  #   type: train
-  #   project: my-project
-  #   branch: main          # optional; defaults to the project's branch
-  #   env_vars:             # optional; strings only
-  #     EPOCHS: "10"
-"""
+# A new pipeline opens in the graphical editor; one runnable step shows what a step looks like.
+_STARTER_STEP = {"name": "prepare", "type": "task",
+                 "command": 'echo "Preparing data in $BEEKEEPER_PIPELINE_RUN_DIR"'}
 
 
 def _ago(iso: str) -> str:
@@ -78,9 +59,7 @@ def create():
     except ValueError as e:
         flash(str(e), "error")
         return redirect(url_for("pipelines.new"))
-    # json.dumps gives a double-quoted string, which is valid YAML for any folder name.
-    folder_line = f"folder: {json.dumps(folder)}\n" if folder else ""
-    pipeline_store.save_pipeline_text(pipelines_dir, name, _STARTER_YAML.format(name=name, folder_line=folder_line))
+    pipeline_store.save_pipeline(pipelines_dir, {"name": name, "folder": folder, "steps": [_STARTER_STEP]})
     return redirect(url_for("pipelines.edit", name=name))
 
 
@@ -97,4 +76,5 @@ def edit(name):
     if not pipeline_store.pipeline_exists(pipelines_dir, name):
         abort(404)
     return render_template("edit_pipeline.html", name=name,
-                           yaml=pipeline_store.read_pipeline_text(pipelines_dir, name))
+                           yaml=pipeline_store.read_pipeline_text(pipelines_dir, name),
+                           folders=list_folders(current_app.config["PROJECTS_DIR"], pipelines_dir))

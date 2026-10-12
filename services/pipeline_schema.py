@@ -224,3 +224,11 @@ def to_yaml(defn: dict) -> str:
         steps.append(s)
     out["steps"] = steps
     return yaml.dump(out, Dumper=_Dumper, sort_keys=False, default_flow_style=False, allow_unicode=True)
+
+
+def draft_yaml(data: dict) -> str:
+    """YAML for a definition that may not validate yet, so an editor can switch views mid-edit."""
+    try:
+        return to_yaml(validate(data))
+    except PipelineValidationError:
+        return yaml.dump(data, Dumper=_Dumper, sort_keys=False, default_flow_style=False, allow_unicode=True)
