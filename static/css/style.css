@@ -1984,7 +1984,15 @@ label {
 .step-editor-num { position: absolute; left: -2.75rem; top: 0.55rem; width: 1.9rem; height: 1.9rem; border-radius: 50%; background: var(--bg-primary); border: 2px solid var(--border); color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.8rem; display: flex; align-items: center; justify-content: center; }
 .step-editor.open .step-editor-num { border-color: var(--accent); color: var(--accent); }
 .step-editor-head { display: flex; align-items: center; gap: 0.5rem; padding-right: 0.5rem; }
-.step-editor-toggle { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 0.6rem; background: none; border: 0; color: inherit; font: inherit; text-align: left; padding: 0.7rem 0.75rem; cursor: pointer; border-radius: 4px; }
+.step-drag-handle { cursor: grab; touch-action: none; user-select: none; color: var(--text-secondary); padding: 0.7rem 0 0.7rem 0.6rem; font-size: 1rem; line-height: 1; opacity: 0.6; }
+.step-drag-handle:hover { opacity: 1; color: var(--text-bright); }
+.step-editor.dragging { z-index: 2; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); border-color: var(--accent); cursor: grabbing; }
+.step-editor.dragging .step-drag-handle { cursor: grabbing; opacity: 1; color: var(--accent); }
+.reordering { user-select: none; }
+/* The insert rows are taken out while dragging; this keeps the cards where they were. */
+.reordering .step-editor:not(:last-child) { margin-bottom: 1.4rem; }
+.reordering .step-editor:not(.dragging) { transition: transform 0.12s; }
+.step-editor-toggle { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 0.6rem; background: none; border: 0; color: inherit; font: inherit; text-align: left; padding: 0.7rem 0.75rem 0.7rem 0.5rem; cursor: pointer; border-radius: 4px; }
 .step-editor-toggle:hover .step-editor-title { color: var(--accent); }
 .step-editor-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .step-editor-title { font-family: var(--font-mono); font-weight: 600; color: var(--text-bright); white-space: nowrap; }
@@ -2027,4 +2035,3 @@ input.invalid, select.invalid, textarea.invalid { border-color: var(--danger); }
     .step-editor-summary { flex-basis: 100%; order: 3; }
     .step-editor-chevron { display: none; }
 }
-.pipeline-row .project-name, .pipeline-row .pipeline-icon { color: var(--pipeline); }

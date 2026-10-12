@@ -393,6 +393,10 @@
         },
             el('span', { className: 'step-editor-num', 'aria-hidden': 'true', text: String(index + 1) }),
             el('div', { className: 'step-editor-head' },
+                el('span', {
+                    className: 'step-drag-handle', title: 'Drag to reorder', 'aria-hidden': 'true',
+                    onpointerdown: event => startDrag(event, card),
+                }, '\u283f'),
                 el('button', {
                     type: 'button', className: 'step-editor-toggle', 'aria-expanded': String(open),
                     'aria-controls': bodyId, onclick: () => setExpanded(step, !expanded.has(step.key)),
@@ -417,6 +421,81 @@
                 step.type === 'train' ? trainBody(step, index) : taskBody(step, index)));
         refreshHeader(card);
         return card;
+    }
+
+    // ── Drag to reorder ─────────────────────────────────────────────────────
+    // Pointer events rather than HTML5 drag-and-drop, so it works with touch too. The dragged
+    // card follows the pointer and swaps places in the DOM as it crosses a neighbour's middle;
+    // the model is reordered once, on release. The ↑/↓ buttons are the keyboard equivalent.
+
+    let drag = null;   // {card, pointerId, startY, scrollTimer}
+
+    function startDrag(event, card) {
+        if (event.button !== 0 || drag) return;
+        event.preventDefault();
+        drag = { card, pointerId: event.pointerId, startY: event.clientY, lastY: event.clientY, scrollTimer: null };
+        // Only cards are siblings while dragging; renderSteps() puts the insert buttons back.
+        list.querySelectorAll('.step-insert').forEach(node => node.remove());
+        list.classList.add('reordering');
+        card.classList.add('dragging');
+        // On window, not the handle: moving the card in the DOM drops pointer capture, and the
+        // release has to end the drag wherever it happens.
+        window.addEventListener('pointermove', moveDrag);
+        window.addEventListener('pointerup', endDrag);
+        window.addEventListener('pointercancel', endDrag);
+    }
+
+    function shiftCard(y) {
+        const { card } = drag;
+        const before = card.offsetTop;
+        const prev = card.previousElementSibling;
+        const next = card.nextElementSibling;
+        const middle = node => {
+            const rect = node.getBoundingClientRect();
+            return rect.top + rect.height / 2;
+        };
+        if (prev && y < middle(prev)) list.insertBefore(card, prev);
+        else if (next && y > middle(next)) list.insertBefore(card, next.nextElementSibling);
+        else return;
+        // Keep the card under the pointer: its slot moved, so move the origin with it.
+        drag.startY += card.offsetTop - before;
+        list.querySelectorAll('.step-editor-num').forEach((num, i) => { num.textContent = String(i + 1); });
+    }
+
+    function moveDrag(event) {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        drag.lastY = event.clientY;
+        shiftCard(event.clientY);
+        drag.card.style.transform = `translateY(${event.clientY - drag.startY}px)`;
+        // Scroll while held near the top or bottom edge, for lists taller than the window.
+        const edge = 60;
+        const speed = event.clientY < edge ? -12 : event.clientY > window.innerHeight - edge ? 12 : 0;
+        clearInterval(drag.scrollTimer);
+        drag.scrollTimer = speed ? setInterval(() => {
+            window.scrollBy(0, speed);
+            drag.startY -= speed;
+            shiftCard(drag.lastY);
+            drag.card.style.transform = `translateY(${drag.lastY - drag.startY}px)`;
+        }, 16) : null;
+    }
+
+    function endDrag(event) {
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        window.removeEventListener('pointermove', moveDrag);
+        window.removeEventListener('pointerup', endDrag);
+        window.removeEventListener('pointercancel', endDrag);
+        clearInterval(drag.scrollTimer);
+        drag.card.style.transform = '';
+        drag.card.classList.remove('dragging');
+        list.classList.remove('reordering');
+        drag = null;
+        const order = [...list.querySelectorAll('.step-editor')].map(node => node.dataset.key);
+        const before = model.steps.map(step => String(step.key));
+        if (order.join() !== before.join()) {
+            model.steps = order.map(key => model.steps.find(step => String(step.key) === key));
+            markModelChanged();
+        }
+        renderSteps();
     }
 
     function insertButton(at) {

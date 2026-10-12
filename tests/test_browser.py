@@ -1054,3 +1054,53 @@ def test_pipeline_editor_fits_phone_width(live_server):
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         page.screenshot(path="/tmp/beekeeper-pipeline-editor-390.png", full_page=True)
         browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_editor_drag_reorders_steps(live_server):
+    from playwright.sync_api import sync_playwright
+
+    yaml = ("name: drag-pipe\nsteps:\n"
+            + "".join(f"  - {{name: s{i}, type: task, command: 'echo {i}'}}\n" for i in range(1, 5)))
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        errors = []
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        _create_pipeline(page, live_server, yaml)
+        page.goto(live_server + "/pipelines/drag-pipe/edit")
+        page.locator(".step-editor").nth(3).wait_for()
+
+        def names():
+            return [t.strip() for t in page.locator(".step-editor-title").all_inner_texts()]
+
+        # Drag s1 down past s3.
+        handle = page.locator(".step-drag-handle").first.bounding_box()
+        target = page.locator(".step-editor").nth(2).bounding_box()
+        page.mouse.move(handle["x"] + handle["width"] / 2, handle["y"] + handle["height"] / 2)
+        page.mouse.down()
+        page.mouse.move(handle["x"] + 5, target["y"] + target["height"] * 0.75, steps=12)
+        assert page.locator(".step-editor.dragging").count() == 1
+        page.screenshot(path="/tmp/beekeeper-pipeline-editor-dragging.png")
+        page.mouse.up()
+        assert names() == ["s2", "s3", "s1", "s4"]
+        assert page.locator(".step-editor.dragging").count() == 0
+        assert page.locator(".step-insert").count() == 3          # insert buttons are back
+        assert page.locator("#yaml-dirty").is_visible()
+        assert page.locator(".step-editor-num").first.inner_text() == "1"
+
+        # Drag s4 up to the top.
+        handle = page.locator(".step-drag-handle").nth(3).bounding_box()
+        top = page.locator(".step-editor").first.bounding_box()
+        page.mouse.move(handle["x"] + handle["width"] / 2, handle["y"] + handle["height"] / 2)
+        page.mouse.down()
+        page.mouse.move(handle["x"] + 300, top["y"] + 2, steps=12)   # released away from the handle
+        page.mouse.up()
+        assert page.locator(".step-editor.dragging").count() == 0
+        assert names() == ["s4", "s2", "s3", "s1"]
+
+        page.click("#tab-yaml")
+        page.wait_for_function("document.getElementById('pipeline-yaml').value.indexOf('s4') < "
+                               "document.getElementById('pipeline-yaml').value.indexOf('s2')")
+        assert errors == []
+        browser.close()
