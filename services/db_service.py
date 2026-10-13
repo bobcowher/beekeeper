@@ -989,7 +989,8 @@ class DatabaseService:
             rows = conn.execute(
                 "SELECT * FROM (SELECT *, ROW_NUMBER() OVER ("
                 "  PARTITION BY pipeline_name ORDER BY started_at DESC, id DESC) AS rn "
-                "  FROM pipeline_runs WHERE status NOT IN ('running', 'queued')) "
+                "  FROM pipeline_runs r WHERE status NOT IN ('running', 'queued') "
+                "  AND EXISTS (SELECT 1 FROM pipeline_step_runs s WHERE s.pipeline_run_pk = r.id)) "
                 "WHERE rn = 1 ORDER BY started_at DESC LIMIT ?", (limit,)
             ).fetchall()
             return [self._pipeline_row(r) for r in rows]

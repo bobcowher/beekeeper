@@ -115,6 +115,15 @@ def test_recent_finished_pipeline_runs_excludes_queued(app):
     assert [r["id"] for r in db.recent_finished_pipeline_runs()] == [pk1]
 
 
+def test_recent_finished_pipeline_runs_skips_runs_cancelled_in_queue(app):
+    db = get_db()
+    pk1, _, _ = db.create_pipeline_run("pl", DEFN)
+    pk2, _, _ = db.create_pipeline_run("pl", DEFN)
+    db.update_pipeline_run(pk2, status="cancelled")
+    db.update_pipeline_run(pk1, status="succeeded")
+    assert [r["id"] for r in db.recent_finished_pipeline_runs()] == [pk1]
+
+
 def test_step_attempts_and_listing(app):
     db = get_db()
     pk, _, _ = db.create_pipeline_run("pl", DEFN)
