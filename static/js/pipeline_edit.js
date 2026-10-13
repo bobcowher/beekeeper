@@ -12,10 +12,10 @@
     const editor = $('pipeline-yaml');
     const list = $('step-editor-list');
 
-    const TOP_KEYS = ['name', 'folder', 'description', 'steps'];
+    const TOP_KEYS = new Set(['name', 'folder', 'description', 'steps']);
     const STEP_KEYS = {
-        train: ['name', 'type', 'project', 'branch', 'env_vars'],
-        task: ['name', 'type', 'command', 'timeout_s'],
+        train: new Set(['name', 'type', 'project', 'branch', 'env_vars']),
+        task: new Set(['name', 'type', 'command', 'timeout_s']),
     };
 
     let mode = 'graphical';
@@ -46,7 +46,7 @@
     }
 
     function errorMessage(data, fallback) {
-        return data && data.error && data.error.message ? data.error.message : fallback;
+        return data?.error?.message || fallback;
     }
 
     function showPageError(message) {
@@ -114,7 +114,7 @@
     // A parsed definition the graphical view can show without dropping anything, or an Error saying why not.
     function modelFromParsed(parsed) {
         if (!isMapping(parsed)) return new Error('the YAML is not a mapping');
-        const extraTop = Object.keys(parsed).filter(key => !TOP_KEYS.includes(key));
+        const extraTop = Object.keys(parsed).filter(key => !TOP_KEYS.has(key));
         if (extraTop.length) return new Error(`it has keys the editor doesn't know: ${extraTop.join(', ')}`);
         const steps = parsed.steps === undefined || parsed.steps === null ? [] : parsed.steps;
         if (!Array.isArray(steps)) return new Error('steps is not a list');
@@ -122,7 +122,7 @@
         for (const [i, step] of steps.entries()) {
             if (!isMapping(step)) return new Error(`step ${i + 1} is not a mapping`);
             if (!STEP_KEYS[step.type]) return new Error(`step ${i + 1} has no type of train or task`);
-            const extra = Object.keys(step).filter(key => !STEP_KEYS[step.type].includes(key));
+            const extra = Object.keys(step).filter(key => !STEP_KEYS[step.type].has(key));
             if (extra.length) return new Error(`step ${i + 1} has keys the editor doesn't know: ${extra.join(', ')}`);
             if (step.env_vars !== undefined && step.env_vars !== null && !isMapping(step.env_vars)) {
                 return new Error(`step ${i + 1}'s env_vars is not a mapping`);
@@ -168,6 +168,7 @@
             const data = await api('/api/v1/projects');
             if (data.success) projects = data.data.projects;
         } catch (error) {
+            // Project choices are optional; existing step values remain available without them.
             projects = [];   // the dropdown still offers the step's current project
         }
     }
@@ -338,9 +339,10 @@
         if (step.type === 'train') {
             if (!step.project) return { text: 'no project chosen', missing: true };
             const vars = step.env.filter(([k]) => k.trim()).length;
+            const variableLabel = vars === 1 ? 'variable' : 'variables';
             return {
                 text: step.project + (step.branch.trim() ? ` @ ${step.branch.trim()}` : '') +
-                    (vars ? ` · ${vars} variable${vars === 1 ? '' : 's'}` : ''),
+                    (vars ? ` · ${vars} ${variableLabel}` : ''),
             };
         }
         const lines = step.command.split('\n').filter(line => line.trim());
@@ -454,8 +456,8 @@
             const rect = node.getBoundingClientRect();
             return rect.top + rect.height / 2;
         };
-        if (prev && y < middle(prev)) list.insertBefore(card, prev);
-        else if (next && y > middle(next)) list.insertBefore(card, next.nextElementSibling);
+        if (prev && y < middle(prev)) prev.before(card);
+        else if (next && y > middle(next)) next.after(card);
         else return;
         // Keep the card under the pointer: its slot moved, so move the origin with it.
         drag.startY += card.offsetTop - before;
@@ -469,7 +471,9 @@
         drag.card.style.transform = `translateY(${event.clientY - drag.startY}px)`;
         // Scroll while held near the top or bottom edge, for lists taller than the window.
         const edge = 60;
-        const speed = event.clientY < edge ? -12 : event.clientY > window.innerHeight - edge ? 12 : 0;
+        let speed = 0;
+        if (event.clientY < edge) speed = -12;
+        else if (event.clientY > window.innerHeight - edge) speed = 12;
         clearInterval(drag.scrollTimer);
         drag.scrollTimer = speed ? setInterval(() => {
             window.scrollBy(0, speed);
@@ -700,7 +704,6 @@
     window.addEventListener('beforeunload', event => {
         if (unsaved) {
             event.preventDefault();
-            event.returnValue = '';
         }
     });
 

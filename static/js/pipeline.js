@@ -21,7 +21,7 @@
     let polling = true;
 
     function errorMessage(data, fallback) {
-        return data && data.error && data.error.message ? data.error.message : fallback;
+        return data?.error?.message || fallback;
     }
 
     function clearPageError(source = null) {
@@ -66,7 +66,9 @@
         if (!start) return '';
         const secs = ((end ? new Date(end) : new Date()) - new Date(start)) / 1000;
         const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = Math.floor(secs % 60);
-        return h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`;
+        if (h) return `${h}h ${m}m`;
+        if (m) return `${m}m ${s}s`;
+        return `${s}s`;
     }
 
     function statusClass(status) {
@@ -93,7 +95,7 @@
     }
 
     function isBusy() {
-        return Boolean((started[0] && started[0].status === 'running') || queued.length);
+        return Boolean(started[0]?.status === 'running' || queued.length);
     }
 
     // A run's train steps carry their effective branch; the definition's are the defaults.
@@ -120,9 +122,9 @@
 
     // Clicking the open step again closes it.
     function chooseStep(runId, name) {
-        const same = selectedStep && selectedStep.runId === runId && selectedStep.name === name;
+        const same = selectedStep?.runId === runId && selectedStep.name === name;
         selectedStep = same ? null : { runId, name };
-        render();
+        void render();
     }
 
     // ── Rendering ───────────────────────────────────────────────────────────
@@ -181,6 +183,36 @@
         });
     }
 
+    function panelNote(step, definitionStep) {
+        if (step.type !== 'task') return `train · ${step.project || definitionStep.project || ''}`;
+        if (!step.has_log) return '';
+        return step.status === 'running' ? 'log · live' : 'log';
+    }
+
+    function renderTrainingPanel(body, run, step, definitionStep) {
+        if (step.run_id) {
+            const paragraph = textElement('p', '', 'Training run ');
+            const link = document.createElement('a');
+            link.href = `/projects/${encodeURIComponent(step.project)}/history/${step.run_id}/log`;
+            link.textContent = step.run_ref;
+            paragraph.appendChild(link);
+            paragraph.append(step.status === 'running' ? ' is running.' : ` ${step.status}.`);
+            body.appendChild(paragraph);
+        } else if (step.status === 'queued') {
+            body.appendChild(textElement('p', '', `Waiting in ${step.project}'s queue` +
+                (step.wait_reason ? `: ${step.wait_reason}` : '.')));
+        } else {
+            const branch = stepBranch(step) ? ` on branch ${stepBranch(step)}` : '';
+            body.appendChild(textElement('p', 'muted',
+                `${run ? 'Not started yet. ' : ''}Queues a training run on ${definitionStep.project || step.project}${branch}.`));
+        }
+        const env = definitionStep.env_vars || {};
+        if (Object.keys(env).length) {
+            body.appendChild(textElement('pre', 'step-command',
+                Object.entries(env).map(([key, value]) => `${key}=${value}`).join('\n')));
+        }
+    }
+
     function renderPanel(run) {
         const panel = $('step-panel');
         const body = $('step-panel-body');
@@ -200,9 +232,7 @@
         panel.hidden = false;
         const def = stepDefinition(step.name);
         $('step-panel-title').textContent = step.name;
-        $('step-panel-note').textContent = step.type === 'task'
-            ? (step.has_log ? (step.status === 'running' ? 'log · live' : 'log') : '')
-            : `train · ${step.project || def.project || ''}`;
+        $('step-panel-note').textContent = panelNote(step, def);
 
         if (step.type === 'task' && run && step.has_log) {
             pre.hidden = false;
@@ -215,35 +245,15 @@
             body.appendChild(command);
             return;
         }
-        if (step.run_id) {
-            const p = textElement('p', '', 'Training run ');
-            const link = document.createElement('a');
-            link.href = `/projects/${encodeURIComponent(step.project)}/history/${step.run_id}/log`;
-            link.textContent = step.run_ref;
-            p.appendChild(link);
-            p.append(step.status === 'running' ? ' is running.' : ` ${step.status}.`);
-            body.appendChild(p);
-        } else if (step.status === 'queued') {
-            body.appendChild(textElement('p', '', `Waiting in ${step.project}'s queue` +
-                (step.wait_reason ? `: ${step.wait_reason}` : '.')));
-        } else {
-            const branch = stepBranch(step) ? ` on branch ${stepBranch(step)}` : '';
-            body.appendChild(textElement('p', 'muted',
-                `${run ? 'Not started yet. ' : ''}Queues a training run on ${def.project || step.project}${branch}.`));
-        }
-        const env = def.env_vars || {};
-        if (Object.keys(env).length) {
-            body.appendChild(textElement('pre', 'step-command',
-                Object.entries(env).map(([k, v]) => `${k}=${v}`).join('\n')));
-        }
+        renderTrainingPanel(body, run, step, def);
     }
 
     async function loadLog(run) {
         const pre = $('step-log');
         if (!run || !selectedStep || pre.hidden) return;
         const step = run.steps.find(s => s.name === selectedStep.name);
-        if (!step || !step.has_log) return;
-        const same = shownLog && shownLog.runId === run.run_id && shownLog.name === step.name;
+        if (!step?.has_log) return;
+        const same = shownLog?.runId === run.run_id && shownLog.name === step.name;
         // A finished log doesn't change; only refetch a live one.
         if (same && shownLog.status === step.status && step.status !== 'running') {
             if (pre.textContent !== shownLog.text) pre.textContent = shownLog.text;
@@ -278,12 +288,14 @@
         $('btn-pipeline-start').hidden = formOpen;
         $('btn-pipeline-start').textContent = isBusy() ? 'Queue Run' : 'Run Pipeline';
         $('btn-run-submit').textContent = isBusy() ? 'Add to Queue' : 'Run';
-        $('btn-pipeline-cancel').hidden = !(run && ['running', 'queued'].includes(run.status));
-        $('btn-pipeline-cancel').textContent = run && run.status === 'queued' ? 'Remove from Queue' : 'Cancel Run';
+        $('btn-pipeline-cancel').hidden = !['running', 'queued'].includes(run?.status);
+        $('btn-pipeline-cancel').textContent = run?.status === 'queued' ? 'Remove from Queue' : 'Cancel Run';
         $('btn-pipeline-resume').hidden = formOpen || !(
             run && latest && run.run_id === latest.run_id && ['failed', 'cancelled'].includes(run.status)
         );
-        const shown = latest ? latest.status : (queued.length ? 'queued' : 'never run');
+        let shown = 'never run';
+        if (queued.length) shown = 'queued';
+        if (latest) shown = latest.status;
         const status = $('pipeline-run-status');
         status.textContent = shown;
         status.className = `status-badge status-${statusClass(latest || queued.length ? shown : 'notrun')}`;
@@ -292,7 +304,7 @@
     // A failed latest run holds the queue until it is resumed or dismissed.
     function pausedBy() {
         const latest = started[0];
-        return queued.length && latest && latest.status === 'failed' && !latest.dismissed ? latest : null;
+        return queued.length && latest?.status === 'failed' && !latest.dismissed ? latest : null;
     }
 
     function renderQueue() {
@@ -315,7 +327,7 @@
             cancel.type = 'button';
             cancel.setAttribute('aria-label', `Remove run #${item.run_id} from the queue`);
             cancel.addEventListener('click', event => {
-                action(`${API}/runs/${item.run_id}/cancel`, 'remove queued run', event.currentTarget);
+                void action(`${API}/runs/${item.run_id}/cancel`, 'remove queued run', event.currentTarget);
             });
             li.append(link, textElement('span', 'queued-run-branches', overridesText(item.overrides)), cancel);
             list.appendChild(li);
@@ -342,8 +354,8 @@
     }
 
     function renderSummary(run) {
-        const isLatest = !run || (started[0] && run.run_id === started[0].run_id);
-        const note = run && run.status === 'queued' ? ' (queued)' : ' (older run)';
+        const isLatest = !run || run.run_id === started[0]?.run_id;
+        const note = run?.status === 'queued' ? ' (queued)' : ' (older run)';
         $('run-title').textContent = run ? `Run #${run.run_id}${isLatest ? '' : note}` : 'Run';
         $('btn-show-latest').hidden = !run || isLatest;
         const summary = $('run-summary');
@@ -356,8 +368,9 @@
         }
         if (run.status === 'queued') {
             const position = queued.findIndex(item => item.run_id === run.run_id) + 1;
+            const positionText = position === 1 ? 'next to start' : `position ${position} in the queue`;
             summary.appendChild(textElement('span', '',
-                `waiting · ${position === 1 ? 'next to start' : `position ${position} in the queue`}` +
+                `waiting · ${positionText}` +
                 ` · branches: ${overridesText(run.overrides)}`));
             $('pipeline-run-error').textContent = '';
             return;
@@ -379,7 +392,7 @@
         $('pipeline-runs-empty').hidden = runs.length > 0;
         $('pipeline-runs').hidden = runs.length === 0;
         runs.forEach(item => {
-            const stepName = (item.steps[item.current_step] || {}).name || '';
+            const stepName = item.steps[item.current_step]?.name || '';
             let progress = '';
             if (item.status === 'running' && stepName) progress = `Running: ${stepName}`;
             if (['failed', 'cancelled'].includes(item.status) && stepName) progress = `Stopped at ${stepName}`;
@@ -424,9 +437,9 @@
     }
 
     function selectRun(runId) {
-        selectedRun = started[0] && runId === started[0].run_id ? null : runId;
+        selectedRun = runId === started[0]?.run_id ? null : runId;
         selectedStep = null;
-        render();
+        void render();
         $('run-card').scrollIntoView({ block: 'nearest' });
     }
 
@@ -456,7 +469,7 @@
                 refreshInFlight = null;
                 if (refreshAgain && polling) {
                     refreshAgain = false;
-                    refresh();
+                    void refresh();
                 }
             });
         return refreshInFlight;
@@ -490,8 +503,10 @@
     function loadBranches(project) {
         if (!branchLists.has(project)) {
             branchLists.set(project, api(`/api/v1/projects/${encodeURIComponent(project)}/branches`)
-                .then(data => data.success ? data.data
-                    : { error: errorMessage(data, 'Could not list branches') })
+                .then(data => {
+                    if (data.success) return data.data;
+                    return { error: errorMessage(data, 'Could not list branches') };
+                })
                 .catch(error => ({ error: error.message })));
         }
         return branchLists.get(project);
@@ -532,7 +547,7 @@
             note.hidden = true;
             row.append(label, textElement('span', 'run-form-project', step.project), select, note);
             rows.appendChild(row);
-            loadBranches(step.project).then(info => fillBranchSelect(select, note, step, info));
+            void loadBranches(step.project).then(info => fillBranchSelect(select, note, step, info));
         });
         $('run-form').hidden = false;
         renderHeader(viewedRun());
@@ -548,7 +563,7 @@
 
     $('btn-pipeline-start').addEventListener('click', event => {
         if ((definition.steps || []).some(step => step.type === 'train')) openRunForm();
-        else action(`${API}/runs`, 'start pipeline', event.currentTarget);
+        else void action(`${API}/runs`, 'start pipeline', event.currentTarget);
     });
     $('btn-run-form-cancel').addEventListener('click', closeRunForm);
     $('run-form').addEventListener('submit', async event => {
@@ -561,23 +576,23 @@
     });
     $('btn-pipeline-cancel').addEventListener('click', event => {
         const run = viewedRun();
-        const verb = run && run.status === 'queued' ? 'Remove from the queue:' : 'Cancel';
+        const verb = run?.status === 'queued' ? 'Remove from the queue:' : 'Cancel';
         if (run && confirm(`${verb} ${run.run_ref}?`)) {
-            action(`${API}/runs/${run.run_id}/cancel`, 'cancel pipeline', event.currentTarget);
+            void action(`${API}/runs/${run.run_id}/cancel`, 'cancel pipeline', event.currentTarget);
         }
     });
     $('btn-pipeline-resume').addEventListener('click', event => {
         const run = started[0];
-        if (run) action(`${API}/runs/${run.run_id}/resume`, 'resume pipeline', event.currentTarget);
+        if (run) void action(`${API}/runs/${run.run_id}/resume`, 'resume pipeline', event.currentTarget);
     });
     $('btn-queue-skip').addEventListener('click', event => {
         const run = pausedBy();
-        if (run) action(`${API}/runs/${run.run_id}/dismiss`, 'continue the queue', event.currentTarget);
+        if (run) void action(`${API}/runs/${run.run_id}/dismiss`, 'continue the queue', event.currentTarget);
     });
     $('btn-show-latest').addEventListener('click', () => selectRun(started[0] ? started[0].run_id : null));
     $('btn-step-close').addEventListener('click', () => {
         selectedStep = null;
-        render();
+        void render();
     });
     $('btn-pipeline-delete').addEventListener('click', async event => {
         if (!confirm(`Delete pipeline ${NAME} and its run history? Training runs are kept.`)) return;
@@ -615,7 +630,7 @@
         if (document.hidden) {
             clearPoll();
         } else {
-            refresh().finally(schedulePoll);
+            void refresh().finally(schedulePoll);
         }
     });
     window.addEventListener('pagehide', () => {
@@ -625,9 +640,9 @@
     window.addEventListener('pageshow', event => {
         if (event.persisted) {
             polling = true;
-            refresh().finally(schedulePoll);
+            void refresh().finally(schedulePoll);
         }
     });
 
-    refresh().finally(schedulePoll);
+    void refresh().finally(schedulePoll);
 })();
