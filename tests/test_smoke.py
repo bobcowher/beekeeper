@@ -370,7 +370,7 @@ def test_dashboard_activity_merges_recent_runs_and_queue(client, app):
 
     assert data["queued"][0] == {
         "project": "myproject", "branch": "dev", "position": 1,
-        "url": "/projects/myproject",
+        "url": "/projects/myproject", "pipeline_ref": None, "pipeline_url": None, "env": {},
     }
     assert [item["run_ref"] for item in data["recent"]] == ["fac#1", "myproject-1"]
     assert [item["status"] for item in data["recent"]] == ["failed", "completed"]
@@ -440,6 +440,26 @@ def test_dashboard_activity_excludes_queued_pipeline_runs(client, app):
     assert all(item["run_ref"] != "fac#2" for item in data["running"])
     assert all(item["run_ref"] != "fac#2" for item in data["recent"])
     assert any(item["run_ref"] == "fac#1" for item in data["recent"])
+
+
+def test_dashboard_shows_pipeline_waiting_on_a_queue_as_queued_not_running(client, app):
+    from services import pipeline_engine, pipeline_store
+
+    make_project_dir(app, "trainer")
+    pipeline_store.save_pipeline(app.config["PIPELINES_DIR"], {"name": "tune", "steps": [
+        {"name": "wsd", "type": "train", "project": "trainer", "branch": "exp",
+         "env_vars": {"TUNING_NAME": "wsd_seed2"}}]})
+    pipeline_engine.start_pipeline_run(app.config["PROJECTS_DIR"], app.config["PIPELINES_DIR"], "tune")
+    pipeline_engine.tick(app.config["PROJECTS_DIR"], app.config["PIPELINES_DIR"])   # step 0 -> queued
+
+    data = client.get("/dashboard/activity").get_json()
+
+    assert all(item["run_ref"] != "tune#1" for item in data["running"])
+    assert all(item["run_ref"] != "tune#1" for item in data["recent"])
+    assert data["queued"] == [{
+        "project": "trainer", "branch": "exp", "position": 1, "url": "/projects/trainer",
+        "pipeline_ref": "tune#1", "pipeline_url": "/pipelines/tune", "env": {"TUNING_NAME": "wsd_seed2"},
+    }]
 
 
 def test_new_pipeline_creates_template_and_redirects(client, app):

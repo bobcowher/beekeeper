@@ -94,6 +94,18 @@
         return selectedRun ? runs.find(run => run.run_id === selectedRun) : started[0];
     }
 
+    // A running run whose current step is only waiting in a project queue is shown as waiting.
+    function shownStatus(run) {
+        return run.waiting ? 'waiting' : run.status;
+    }
+
+    function waitingText(run) {
+        const step = run.steps[run.current_step] || {};
+        const where = step.project ? ` in ${step.project}'s queue` : '';
+        const position = step.queue_position ? ` (position ${step.queue_position})` : '';
+        return `${step.name} waiting${where}${position} for ${duration(step.started_at || run.started_at)}`;
+    }
+
     function isBusy() {
         return Boolean(started[0]?.status === 'running' || queued.length);
     }
@@ -133,7 +145,7 @@
         const def = stepDefinition(step.name);
         if (step.type === 'train') {
             const branch = stepBranch(step) ? ` @ ${stepBranch(step)}` : '';
-            return textElement('div', 'step-detail', `${step.project || def.project || ''}${branch}`);
+            return textElement('div', 'step-detail step-detail-wrap', `${step.project || def.project || ''}${branch}`);
         }
         const line = textElement('div', 'step-detail', '');
         const code = textElement('code', '', def.command || '');
@@ -303,7 +315,7 @@
         );
         let shown = 'never run';
         if (queued.length) shown = 'queued';
-        if (latest) shown = latest.status;
+        if (latest) shown = shownStatus(latest);
         const status = $('pipeline-run-status');
         status.textContent = shown;
         status.className = `status-badge status-${statusClass(latest || queued.length ? shown : 'notrun')}`;
@@ -361,6 +373,11 @@
         setInfo('info-runs', String(runs.length));
     }
 
+    function runningText(run) {
+        if (run.waiting) return waitingText(run);
+        return run.status === 'running' ? `running for ${duration(run.started_at)}` : duration(run.started_at, run.ended_at);
+    }
+
     function renderSummary(run) {
         const isLatest = !run || run.run_id === started[0]?.run_id;
         let note = '';
@@ -387,7 +404,7 @@
         const done = run.steps.filter(s => s.status === 'succeeded').length;
         const parts = [
             `started ${new Date(run.started_at).toLocaleString()}`,
-            run.status === 'running' ? `running for ${duration(run.started_at)}` : duration(run.started_at, run.ended_at),
+            runningText(run),
             `${done} of ${run.steps.length} steps succeeded`,
         ];
         if (Object.keys(run.overrides || {}).length) parts.push(`branches: ${overridesText(run.overrides)}`);
@@ -403,10 +420,10 @@
         runs.forEach(item => {
             const stepName = item.steps[item.current_step]?.name || '';
             let progress = '';
-            if (item.status === 'running' && stepName) progress = `Running: ${stepName}`;
+            if (item.status === 'running' && stepName) progress = `${item.waiting ? 'Waiting' : 'Running'}: ${stepName}`;
             if (['failed', 'cancelled'].includes(item.status) && stepName) progress = `Stopped at ${stepName}`;
             if (item.status === 'succeeded') progress = `${item.steps.length}/${item.steps.length} steps`;
-            if (item.status === 'queued') progress = 'Waiting';
+            if (item.status === 'queued') progress = 'In queue';
 
             const row = document.createElement('tr');
             row.dataset.run = item.run_id;
@@ -417,7 +434,7 @@
             runButton.setAttribute('aria-label', `Show pipeline run #${item.run_id}`);
             runCell.appendChild(runButton);
             const statusCell = document.createElement('td');
-            statusCell.appendChild(badge(item.status));
+            statusCell.appendChild(badge(shownStatus(item)));
             [
                 runCell,
                 statusCell,
@@ -604,7 +621,8 @@
         const step = run?.steps.find(s => s.name === selectedStep?.name);
         if (!step || !canRerunFrom(run, step)) return;
         const later = run.steps.length - step.index - 1;
-        const tail = later ? ` and the ${later} step${later === 1 ? '' : 's'} after it` : '';
+        const noun = later === 1 ? 'step' : 'steps';
+        const tail = later ? ` and the ${later} ${noun} after it` : '';
         if (!confirm(`Re-run ${run.run_ref} from ${step.name}? ${step.name}${tail} run again; earlier steps' outputs are reused.`)) return;
         void action(`${API}/runs/${run.run_id}/resume`, 're-run pipeline', event.currentTarget, { from_step: step.name });
     });

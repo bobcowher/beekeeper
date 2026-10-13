@@ -103,7 +103,8 @@
          data-parallel="{{ 'true' if project.get('parallel_runs_enabled') else 'false' }}"
          data-default-branch="{{ project.get('branch', 'main') }}"></div>{# rows added by training.js; kept empty so :empty applies #}
     <div id="queue-section" class="queue-section" style="display:none">
-        <h3 class="queue-title">Queued</h3>
+        <p class="queue-title">Queued</p>
+        <p class="queue-wait" id="queue-wait" hidden></p>
         <ol id="queue-list" class="queue-list"></ol>
     </div>
 </section>

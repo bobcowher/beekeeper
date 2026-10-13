@@ -106,19 +106,56 @@ async function refreshQueueOnce() {
     const data = await r.json();
     const entries = data?.data?.queue || [];
     queueSection.style.display = entries.length ? '' : 'none';
-    queueListEl.innerHTML = '';
-    entries.forEach(e => {
-        const li = document.createElement('li');
-        li.className = 'queue-row';
-        li.innerHTML = `
-            <span class="run-branch">${escHtml(e.branch || DEFAULT_BRANCH)}</span>
-            <span class="muted queue-source">${escHtml(e.source)}</span>
-            <span class="muted">${escHtml(formatAge(e.created_at))}</span>
-            ${e.wait_reason ? `<span class="queue-wait">waiting: ${escHtml(e.wait_reason)}</span>` : ''}
-            <button class="btn btn-secondary btn-sm" data-queue-id="${e.queue_id}">Cancel</button>`;
-        li.querySelector('button').addEventListener('click', () => void cancelQueued(e.queue_id));
-        queueListEl.appendChild(li);
-    });
+    showQueueWait(entries[0]?.wait_reason);
+    queueListEl.replaceChildren(...entries.map(queueRow));
+}
+
+// Why the head of the queue hasn't started — unless the Start hint above already says so.
+function showQueueWait(reason) {
+    const el = document.getElementById('queue-wait');
+    if (!el) return;
+    el.hidden = !reason || reason === startReasonEl?.textContent;
+    el.textContent = reason ? `Next starts when free: ${reason}` : '';
+}
+
+function textEl(tag, className, value) {
+    const el = document.createElement(tag);
+    if (className) el.className = className;
+    el.textContent = value;
+    return el;
+}
+
+// "pipeline:tune-wsd#1" links to that pipeline; other sources (manual, api) are plain text.
+function queueSource(source) {
+    const match = /^pipeline:(.+)#(\d+)$/.exec(source || '');
+    if (!match) return textEl('span', 'muted', source === 'manual' ? 'added here' : `via ${source}`);
+    const link = textEl('a', 'queue-source', `${match[1]}#${match[2]}`);
+    link.href = `/pipelines/${encodeURIComponent(match[1])}`;
+    link.title = 'Queued by this pipeline run';
+    return link;
+}
+
+function queueRow(entry) {
+    const li = textEl('li', 'queue-row', '');
+    li.dataset.queueId = entry.queue_id;
+    const main = textEl('div', 'queue-main', '');
+    const line = textEl('div', 'queue-line', '');
+    line.append(textEl('span', 'run-branch', entry.branch || DEFAULT_BRANCH), queueSource(entry.source),
+                textEl('span', 'muted', formatAge(entry.created_at)));
+    main.appendChild(line);
+    // The pipeline's own handoff variables say nothing about this run; its settings do.
+    const env = Object.entries(entry.env_vars || {}).filter(([key]) => !key.startsWith('BEEKEEPER_'));
+    if (env.length) {
+        const chips = textEl('div', 'queue-env', '');
+        env.forEach(([key, value]) => chips.appendChild(textEl('code', 'env-chip', `${key}=${value}`)));
+        main.appendChild(chips);
+    }
+    const cancel = textEl('button', 'btn btn-secondary btn-sm', 'Cancel');
+    cancel.type = 'button';
+    cancel.setAttribute('aria-label', `Cancel queued run ${entry.position} (${entry.branch || DEFAULT_BRANCH})`);
+    cancel.addEventListener('click', () => void cancelQueued(entry.queue_id));
+    li.append(textEl('span', 'queue-pos', `#${entry.position}`), main, cancel);
+    return li;
 }
 
 function refreshQueue() {

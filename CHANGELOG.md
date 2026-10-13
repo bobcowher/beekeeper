@@ -60,6 +60,11 @@
 - Dashboard Recent Activity shows one entry per project or pipeline (its latest finished
   run); pipeline entries are marked in blue.
 - On the project page the branch picker and Start/Add to Queue sit above the running runs.
+- A pipeline run whose current step is only waiting in a project's queue shows as
+  **waiting** (with its queue position) rather than running, on the pipeline page, the
+  Pipelines list and the dashboard, where it is listed under Queued.
+- Queued runs on the project page show their position, a link to the pipeline that queued
+  them and their env vars (the settings that tell experiments apart), and fit phone widths.
 - Default API rate limit raised from 100 to 600 requests per minute per IP, since the
   web UI's own polling counts against it. Existing installs keep their saved value; change
   it under Admin -> API rate limit.

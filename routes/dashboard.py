@@ -36,9 +36,14 @@ def _running_training(projects_dir):
 
 
 def _running_pipelines(db):
-    running = []
+    """Running pipeline runs, and the names of those only waiting in a project queue
+    (the Queued list shows those, through their queue entry)."""
+    running, waiting = [], set()
     for row in db.running_pipeline_runs():
         run = pipeline_engine.describe_run(row)
+        if run["waiting"]:
+            waiting.add(run["pipeline"])
+            continue
         index = run.get("current_step", 0)
         step = run["steps"][index] if index < len(run["steps"]) else None
         running.append({
@@ -47,7 +52,20 @@ def _running_pipelines(db):
             "elapsed": _seconds_between(run.get("started_at")), "status": "running",
             "url": f"/pipelines/{run['pipeline']}",
         })
-    return running
+    return running, waiting
+
+
+def _queued_item(entry):
+    source = entry.get("source") or ""
+    pipeline_ref = source[len("pipeline:"):] if source.startswith("pipeline:") else None
+    return {
+        "project": entry["project_name"], "branch": entry.get("branch") or "",
+        "position": entry["position"], "url": f"/projects/{entry['project_name']}",
+        "pipeline_ref": pipeline_ref,
+        "pipeline_url": f"/pipelines/{pipeline_ref.rsplit('#', 1)[0]}" if pipeline_ref else None,
+        # The pipeline's own handoff variables say nothing about the experiment.
+        "env": {k: v for k, v in (entry.get("env_vars") or {}).items() if not k.startswith("BEEKEEPER_")},
+    }
 
 
 def _recent_activity(db, active):
@@ -78,16 +96,14 @@ def _recent_activity(db, active):
 def _activity_data():
     db = get_db()
     projects_dir = current_app.config["PROJECTS_DIR"]
-    running = _running_training(projects_dir) + _running_pipelines(db)
+    pipelines, waiting = _running_pipelines(db)
+    running = _running_training(projects_dir) + pipelines
+    queued = [_queued_item(entry) for entry in db.list_all_queued_runs()]
 
-    queued = [{
-        "project": entry["project_name"], "branch": entry.get("branch") or "",
-        "position": entry["position"], "url": f"/projects/{entry['project_name']}",
-    } for entry in db.list_all_queued_runs()]
-
-    # One entry per project or pipeline: its latest finished run, unless it's running now
-    # (then the Running list already shows it).
+    # One entry per project or pipeline: its latest finished run, unless it's active now
+    # (then the Running or Queued list already shows it).
     active = {(item["kind"], item["name"]) for item in running}
+    active |= {("pipeline", name) for name in waiting}
     return {"running": running, "queued": queued, "recent": _recent_activity(db, active)}
 
 

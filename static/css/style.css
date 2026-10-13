@@ -1864,11 +1864,18 @@ label {
     border-radius: 3px 3px 0 0;
 }
 
-.queue-section { margin-top: 0.75rem; }
-.queue-title { font-size: 0.9rem; margin: 0 0 0.25rem; color: var(--text-secondary); }
-.queue-list { margin: 0; padding-left: 1.25rem; }
-.queue-row { display: flex; gap: 0.75rem; align-items: center; padding: 0.25rem 0; }
-.queue-wait { color: var(--accent-dim); font-size: 0.8rem; }
+.queue-section { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+.queue-title { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin: 0 0 0.5rem; }
+.queue-wait { color: var(--text-secondary); font-size: 0.8rem; margin: 0 0 0.5rem; }
+.queue-list { list-style: none; margin: 0; padding: 0; }
+.queue-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.75rem; align-items: center; padding: 0.45rem 0; border-top: 1px solid var(--border); font-size: 0.85rem; }
+.queue-row:first-child { border-top: 0; }
+.queue-pos { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.queue-line { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; align-items: baseline; min-width: 0; }
+.queue-line .run-branch { overflow-wrap: anywhere; }
+.queue-source { color: var(--pipeline); }
+.queue-env { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.3rem; }
+.env-chip { font-size: 0.72rem; padding: 1px 6px; border: 1px solid var(--border); border-radius: 3px; color: var(--text-secondary); background: var(--bg-secondary); overflow-wrap: anywhere; }
 .start-reason { font-size: 0.8rem; max-width: 32rem; }
 
 /* Pipelines */
@@ -1899,7 +1906,7 @@ label {
 .run-history-link:hover, .run-history-link:focus { color: var(--accent); text-decoration: underline; }
 .status-succeeded { background: rgba(78, 201, 78, 0.15); color: var(--success); }
 .status-failed { background: rgba(201, 64, 64, 0.15); color: var(--danger); }
-.status-queued { background: rgba(232, 185, 49, 0.15); color: var(--accent); }
+.status-queued, .status-waiting { background: rgba(232, 185, 49, 0.15); color: var(--accent); }
 .status-cancelled, .status-skipped { background: rgba(133, 133, 133, 0.15); color: var(--text-secondary); }
 @media (max-width: 600px) {
     .deploy-version {
@@ -1956,6 +1963,7 @@ label {
 .step-node.selected { box-shadow: 0 0 0 2px var(--accent); }
 .step-type { font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; margin-left: 2px; vertical-align: middle; }
 .step-detail { color: var(--text-secondary); font-size: 0.8rem; margin-top: 0.3rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.step-detail-wrap { white-space: normal; overflow-wrap: anywhere; }   /* a train step's branch matters; show it whole */
 .step-detail code { font-family: var(--font-mono); }
 .step-status-line { margin-top: 0.45rem; display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
 .step-node .pipeline-error { margin-top: 0.3rem; }

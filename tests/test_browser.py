@@ -1254,3 +1254,103 @@ def test_pipeline_step_panel_reruns_from_step(live_server):
         assert page.locator("#btn-step-rerun").is_hidden()
         assert errors == []
         browser.close()
+
+
+@pytest.mark.browser
+def test_project_queue_list_shows_pipeline_source_and_settings(live_server):
+    from playwright.sync_api import sync_playwright
+
+    reason = "Training is already running. To run multiple runs simultaneously, enable Parallel Runs in Edit Project."
+    queue = [
+        {"queue_id": 7, "position": 1, "branch": "arch-modern-wsd", "source": "pipeline:tune-wsd#1",
+         "env_vars": {"BEEKEEPER_PIPELINE": "tune-wsd", "BEEKEEPER_PIPELINE_RUN_DIR": "/x/run_1",
+                      "LR_SCHEDULE": "wsd", "TUNING_NAME": "wsd_seed2"},
+         "wait_reason": reason, "created_at": "2026-10-12T22:37:44"},
+        {"queue_id": 8, "position": 2, "branch": "arch-modern-accum", "source": "manual",
+         "env_vars": {}, "wait_reason": None, "created_at": "2026-10-12T22:37:45"},
+    ]
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        for width in (1280, 390):
+            page = browser.new_page(viewport={"width": width, "height": 900})
+            errors = []
+            page.on("pageerror", lambda err: errors.append(str(err)))
+            page.route("**/api/v1/projects/demo/queue",
+                       lambda route: route.fulfill(json={"success": True, "data": {"queue": queue}}))
+            page.goto(f"{live_server}/projects/demo")
+            page.locator("#queue-list .queue-row").nth(1).wait_for()
+            first = page.locator("#queue-list .queue-row").first
+            assert first.locator(".queue-pos").inner_text() == "#1"
+            assert first.locator("a.queue-source").get_attribute("href") == "/pipelines/tune-wsd"
+            chips = first.locator(".env-chip").all_inner_texts()
+            assert chips == ["LR_SCHEDULE=wsd", "TUNING_NAME=wsd_seed2"]
+            assert "added here" in page.locator("#queue-list .queue-row").nth(1).inner_text()
+            assert "Next starts when free" in page.locator("#queue-wait").inner_text()
+            assert page.evaluate("document.documentElement.scrollWidth") <= width
+            box = first.locator("button").bounding_box()
+            assert box["x"] + box["width"] <= width
+            page.locator("#queue-section").scroll_into_view_if_needed()
+            page.screenshot(path=f"/tmp/beekeeper-project-queue-{width}.png", full_page=True)
+            assert errors == []
+            page.close()
+        browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_waiting_on_a_project_queue_reads_as_waiting(live_server):
+    from playwright.sync_api import sync_playwright
+
+    run = {"run_id": 1, "run_ref": "wait-pipe#1", "pipeline": "wait-pipe", "status": "running",
+           "waiting": True, "started": True, "current_step": 0, "error": None, "overrides": {},
+           "dismissed": False, "started_at": "2026-10-12T22:37:44", "ended_at": None,
+           "steps": [{"index": 0, "name": "wsd", "type": "train", "status": "queued", "attempt": 1,
+                      "error": None, "exit_code": None, "started_at": None, "ended_at": None, "run_dir": None,
+                      "project": "demo", "branch": "arch-modern-wsd-a-rather-long-branch-name",
+                      "queue_position": 2, "wait_reason": "Training is already running."}]}
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        _create_pipeline(page, live_server, "name: wait-pipe\nsteps:\n  - {name: wsd, type: train, project: demo}\n")
+        page.route("**/api/v1/pipelines/wait-pipe/runs?limit=50",
+                   lambda route: route.fulfill(json={"success": True, "data": {"runs": [run]}}))
+        page.goto(live_server + "/pipelines/wait-pipe")
+        page.wait_for_function("document.getElementById('pipeline-run-status').textContent === 'waiting'")
+        assert "wsd waiting in demo's queue (position 2)" in page.locator("#run-summary").inner_text()
+        assert "Waiting: wsd" in page.locator("#pipeline-runs tbody").inner_text()
+        assert "arch-modern-wsd-a-rather-long-branch-name" in page.locator("#step-chain").inner_text()
+        page.screenshot(path="/tmp/beekeeper-pipeline-waiting.png", full_page=True)
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.browser
+def test_dashboard_queued_card_names_the_pipeline_and_its_settings(live_server):
+    from playwright.sync_api import sync_playwright
+
+    activity = {"running": [], "recent": [], "queued": [
+        {"project": "demo", "branch": "arch-modern-wsd", "position": 1, "url": "/projects/demo",
+         "pipeline_ref": "tune-wsd#1", "pipeline_url": "/pipelines/tune-wsd", "env": {"TUNING_NAME": "wsd_seed2"}},
+        {"project": "demo", "branch": "", "position": 2, "url": "/projects/demo",
+         "pipeline_ref": None, "pipeline_url": None, "env": {}},
+    ]}
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        page.route("**/dashboard/activity", lambda route: route.fulfill(json=activity))
+        page.goto(live_server + "/")
+        page.wait_for_function("document.querySelectorAll('#queued-activity .activity-row').length === 2")
+        first, second = page.locator("#queued-activity .activity-row").all()
+        assert first.get_attribute("href") == "/pipelines/tune-wsd"
+        assert "activity-pipeline" in first.get_attribute("class")
+        assert "demo · arch-modern-wsd · position 1 · TUNING_NAME=wsd_seed2" in first.inner_text()
+        assert second.get_attribute("href") == "/projects/demo"
+        page.locator("#queued-activity-card").screenshot(path="/tmp/beekeeper-dashboard-queued.png")
+        assert errors == []
+        browser.close()

@@ -825,3 +825,19 @@ def test_start_wakes_dispatcher(env, monkeypatch):
     monkeypatch.setattr(dispatcher, "wake", lambda: calls.append(1))
     eng.start_pipeline_run(env["pd"], env["pl"], "fac")
     assert calls
+
+
+def test_run_waiting_on_a_project_queue_reports_waiting_and_position(env):
+    get_db().enqueue_run("pre", branch="other")          # someone else is ahead in pre's queue
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    tick(env)
+
+    view = eng.describe_run(get_db().get_pipeline_run("fac", 1))
+    assert view["status"] == "running" and view["waiting"] is True
+    assert view["steps"][0]["status"] == "queued" and view["steps"][0]["queue_position"] == 2
+
+    get_db().cancel_queue_entry(get_db().list_queue("pre")[0]["id"])
+    start_queued_run("pre")
+    tick(env)
+    view = eng.describe_run(get_db().get_pipeline_run("fac", 1))
+    assert view["waiting"] is False and "queue_position" not in view["steps"][0]

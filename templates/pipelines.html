@@ -36,7 +36,8 @@
                               aria-label="{{ s.name }}: {{ s.status }}" title="{{ s.name }}: {{ s.status }}"></span>
                         {% endfor %}
                     </span>
-                    <span class="project-status status-badge status-{{ pl.last.status }}">#{{ pl.last.run_id }} {{ pl.last.status }}</span>
+                    {% set shown = 'waiting' if pl.last.waiting else pl.last.status %}
+                    <span class="project-status status-badge status-{{ shown }}">#{{ pl.last.run_id }} {{ shown }}</span>
                     <span class="pipeline-row-when">{{ pl.last_run_ago }}</span>
                     {% else %}
                     <span class="pipeline-row-when">never run</span>

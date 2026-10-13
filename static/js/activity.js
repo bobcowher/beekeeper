@@ -46,6 +46,19 @@
         return link;
     }
 
+    // A queue entry a pipeline created is shown as that pipeline's run, with the settings
+    // (env vars) that tell its experiments apart.
+    function queuedRow(item) {
+        const env = Object.entries(item.env || {}).map(([key, value]) => `${key}=${value}`).join(' ');
+        const parts = [`${item.branch || 'default branch'}`, `position ${item.position}`];
+        if (item.pipeline_ref) parts.unshift(item.project);
+        if (env) parts.push(env);
+        const identity = item.pipeline_ref
+            ? {kind: 'pipeline', run_ref: item.pipeline_ref, url: item.pipeline_url}
+            : {kind: 'training', run_ref: item.project, url: item.url};
+        return activityRow(identity, parts.join(' · '), 'queued');
+    }
+
     function render(data) {
         runningEl.replaceChildren();
         if (!data.running.length) {
@@ -63,14 +76,7 @@
 
         queuedEl.replaceChildren();
         queuedCard.hidden = data.queued.length === 0;
-        data.queued.forEach(item => {
-            const row = activityRow(
-                {kind: 'training', run_ref: item.project, url: item.url},
-                `${item.branch || 'default branch'} · position ${item.position}`,
-                'queued'
-            );
-            queuedEl.appendChild(row);
-        });
+        data.queued.forEach(item => queuedEl.appendChild(queuedRow(item)));
 
         recentEl.replaceChildren();
         if (!data.recent.length) {

@@ -161,40 +161,60 @@ def cancel_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict: 
     return {"run_id": run_number, "run_ref": pipeline_ref(name, run_number), "status": final}
 
 
-def resume_pipeline_run(projects_dir, pipelines_dir, name, run_number,
-                        from_step=None) -> dict:  # NOSONAR - shared handler signature
+def _check_resumable(db, run, from_step):
+    name, run_number = run["pipeline_name"], run["run_number"]
+    if from_step is not None and not isinstance(from_step, str):
+        raise PipelineError("INVALID_STEP", "from_step must be a step name", 400)
+    resumable_statuses = ("failed", "cancelled", "succeeded") if from_step is not None else ("failed", "cancelled")
+    if run["status"] not in resumable_statuses:
+        raise PipelineError("NOT_RESUMABLE", f"{pipeline_ref(name, run_number)} is {run['status']}", 409)
+    if any(r["pipeline_name"] == name for r in db.running_pipeline_runs()):
+        raise PipelineError("PIPELINE_ACTIVE", f"Pipeline '{name}' already has a running run", 409)
+    latest = db.latest_pipeline_run(name)
+    if latest is None or latest["id"] != run["id"]:
+        raise PipelineError("NOT_LATEST", "Only the latest run of a pipeline can be resumed", 409)
+
+
+def _resume_index(run, from_step):
+    """The step a resume restarts at: where the run stopped, or the named step that already ran."""
+    if from_step is None:
+        return run["current_step"]
+    steps = run["definition"]["steps"]
+    idx = next((i for i, step in enumerate(steps) if step["name"] == from_step), None)
+    if idx is None:
+        raise PipelineError("INVALID_STEP", f"Unknown step '{from_step}'", 400)
+    if idx > run["current_step"]:
+        raise PipelineError("NOT_RESUMABLE", f"step '{from_step}' has not run yet", 409)
+    return idx
+
+
+def _check_artifacts(db, run, idx):
+    for s in db.list_step_runs(run["id"]):
+        if s["step_index"] < idx and s["status"] == "succeeded" and not os.path.isdir(s["run_dir"] or ""):
+            raise PipelineError("ARTIFACTS_MISSING",
+                                f"Output of step '{s['step_name']}' no longer exists ({s['run_dir']})", 409)
+
+
+def _supersede_after(db, run, idx):
+    """Mark later steps' current attempts so a re-run runs them again instead of reusing them."""
+    for j in range(idx + 1, len(run["definition"]["steps"])):
+        later = db.current_step_run(run["id"], j)
+        if later is not None and later["status"] != "superseded":
+            db.update_step_run(later["id"], status="superseded")
+
+
+def resume_pipeline_run(projects_dir, pipelines_dir, name, run_number,  # NOSONAR - shared handler signature
+                        from_step=None) -> dict:
     db = get_db()
     with _engine_lock:
         run = _get_run(name, run_number)
-        if from_step is not None and not isinstance(from_step, str):
-            raise PipelineError("INVALID_STEP", "from_step must be a step name", 400)
-        resumable_statuses = ("failed", "cancelled", "succeeded") if from_step is not None else ("failed", "cancelled")
-        if run["status"] not in resumable_statuses:
-            raise PipelineError("NOT_RESUMABLE", f"{pipeline_ref(name, run_number)} is {run['status']}", 409)
-        if any(r["pipeline_name"] == name for r in db.running_pipeline_runs()):
-            raise PipelineError("PIPELINE_ACTIVE", f"Pipeline '{name}' already has a running run", 409)
-        latest = db.latest_pipeline_run(name)
-        if latest is None or latest["id"] != run["id"]:
-            raise PipelineError("NOT_LATEST", "Only the latest run of a pipeline can be resumed", 409)
+        _check_resumable(db, run, from_step)
+        idx = _resume_index(run, from_step)
         steps = run["definition"]["steps"]
-        if from_step is None:
-            idx = run["current_step"]
-        else:
-            idx = next((i for i, step in enumerate(steps) if step["name"] == from_step), None)
-            if idx is None:
-                raise PipelineError("INVALID_STEP", f"Unknown step '{from_step}'", 400)
-            if idx > run["current_step"]:
-                raise PipelineError("NOT_RESUMABLE", f"step '{from_step}' has not run yet", 409)
-        for s in db.list_step_runs(run["id"]):
-            if s["step_index"] < idx and s["status"] == "succeeded" and not os.path.isdir(s["run_dir"] or ""):
-                raise PipelineError("ARTIFACTS_MISSING",
-                                    f"Output of step '{s['step_name']}' no longer exists ({s['run_dir']})", 409)
+        _check_artifacts(db, run, idx)
         _check_runnable(projects_dir, steps[idx:])
         db.delete_skipped_steps(run["id"])
-        for j in range(idx + 1, len(steps)):
-            later = db.current_step_run(run["id"], j)
-            if later is not None and later["status"] != "superseded":
-                db.update_step_run(later["id"], status="superseded")
+        _supersede_after(db, run, idx)
         db.create_step_run(run["id"], idx, steps[idx]["name"], steps[idx]["type"])
         db.update_pipeline_run(run["id"], status="running", current_step=idx, error=None,
                                ended_at=None, dismissed=0)
@@ -298,13 +318,20 @@ def _describe_train_step(db, step, step_run, view):
     if step_run and step_run["status"] == "queued" and step_run["queue_id"]:
         entry = db.get_queue_entry(step_run["queue_id"])
         view["wait_reason"] = entry["wait_reason"] if entry else None
+        view["queue_position"] = db.queue_position(step_run["queue_id"])
+
+
+def _shown_step_status(step_run):
+    """A step a re-run will run again (superseded) shows as pending, like one not reached yet."""
+    if step_run is None or step_run["status"] == "superseded":
+        return "pending"
+    return step_run["status"]
 
 
 def _describe_step(db, index, step, step_run):
     view = {
         "index": index, "name": step["name"], "type": step["type"],
-        "status": ("pending" if step_run and step_run["status"] == "superseded"
-                   else step_run["status"] if step_run else "pending"),
+        "status": _shown_step_status(step_run),
         "attempt": step_run["attempt"] if step_run else 0,
         "error": step_run["error"] if step_run else None,
         "exit_code": step_run["exit_code"] if step_run else None,
@@ -331,6 +358,8 @@ def describe_run(run) -> dict:
         "pipeline": run["pipeline_name"], "status": run["status"], "current_step": run["current_step"],
         "error": run["error"], "overrides": run["overrides"], "dismissed": run["dismissed"],
         "started": bool(by_index),   # false for queued runs and runs removed from the queue
+        # Running, but only waiting in a project's queue: nothing is executing yet.
+        "waiting": run["status"] == "running" and steps[run["current_step"]]["status"] == "queued",
         "started_at": run["started_at"], "ended_at": run["ended_at"], "steps": steps,
     }
 
