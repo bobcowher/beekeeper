@@ -484,6 +484,13 @@ def resume_pipeline(name: str, run_id: int) -> dict:
 
 
 @mcp.tool()
+def dismiss_pipeline_run(name: str, run_id: int) -> dict:
+    """A failed run pauses its pipeline's queue. Dismiss it (without resuming) to let the
+    next queued run start. Only the latest started run can be dismissed."""
+    return _post(f"/pipelines/{name}/runs/{run_id}/dismiss")
+
+
+@mcp.tool()
 def get_step_log(name: str, run_id: int, step_name: str, tail: int = 200) -> dict:
     """Log of a task step. For train steps use get_logs(project, run_id) with the step's run_id."""
     return _get(f"/pipelines/{name}/runs/{run_id}/steps/{step_name}/log?tail={tail}")

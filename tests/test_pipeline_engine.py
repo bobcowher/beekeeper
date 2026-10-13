@@ -368,7 +368,66 @@ def test_queued_run_missing_project_fails_and_queue_continues(env, app):
     assert get_db().get_pipeline_run("fac", 3)["status"] == "queued"
     make_project_dir(app, "ft")
     tick(env)
+    assert get_db().get_pipeline_run("fac", 3)["status"] == "queued"   # paused behind the failure
+    eng.dismiss_pipeline_run(env["pd"], env["pl"], "fac", 2)
+    tick(env)
     assert get_db().get_pipeline_run("fac", 3)["status"] == "running"
+
+
+def _fail(run_number):
+    run = get_db().get_pipeline_run("fac", run_number)
+    s0 = get_db().current_step_run(run["id"], 0)
+    get_db().update_step_run(s0["id"], status="failed", error="boom")
+    get_db().update_pipeline_run(run["id"], status="failed", error="boom", ended_at=eng._now())
+
+
+def test_failed_run_pauses_queue_until_dismissed(env):
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    _fail(1)
+    tick(env)
+    assert get_db().get_pipeline_run("fac", 2)["status"] == "queued"
+
+    result = eng.dismiss_pipeline_run(env["pd"], env["pl"], "fac", 1)
+
+    assert result["status"] == "failed"
+    assert get_db().get_pipeline_run("fac", 1)["dismissed"] is True
+    assert eng.describe_run(get_db().get_pipeline_run("fac", 1))["dismissed"] is True
+    tick(env)
+    assert get_db().get_pipeline_run("fac", 2)["status"] == "running"
+
+
+def test_resumed_run_that_succeeds_lets_queue_continue(env):
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    _fail(1)
+    eng.resume_pipeline_run(env["pd"], env["pl"], "fac", 1)
+    run1 = get_db().get_pipeline_run("fac", 1)
+    get_db().update_pipeline_run(run1["id"], status="succeeded", ended_at=eng._now())
+    tick(env)
+    assert get_db().get_pipeline_run("fac", 2)["status"] == "running"
+
+
+def test_cancelled_run_does_not_pause_queue(env):
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    eng.cancel_pipeline_run(env["pd"], env["pl"], "fac", 1)
+    tick(env)
+    assert get_db().get_pipeline_run("fac", 2)["status"] == "running"
+
+
+def test_dismiss_only_the_latest_failed_run(env):
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    with pytest.raises(eng.PipelineError) as e:
+        eng.dismiss_pipeline_run(env["pd"], env["pl"], "fac", 1)
+    assert e.value.code == "NOT_DISMISSABLE"
+    _fail(1)
+    eng.dismiss_pipeline_run(env["pd"], env["pl"], "fac", 1)
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    _fail(2)
+    with pytest.raises(eng.PipelineError) as e:
+        eng.dismiss_pipeline_run(env["pd"], env["pl"], "fac", 1)
+    assert e.value.code == "NOT_LATEST"
 
 
 def test_delete_refused_with_queued_run(env):

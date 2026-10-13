@@ -75,7 +75,7 @@ def test_pipeline_run_numbers_and_queue(app):
     assert [r["run_number"] for r in db.queued_pipeline_runs("pl")] == [2]
     assert db.pipelines_with_queued_runs() == ["pl"]
     assert db.has_active_pipeline_run("pl")
-    db.update_pipeline_run(pk1, status="failed")
+    db.update_pipeline_run(pk1, status="cancelled")
     run = db.promote_pipeline_run("pl")
     assert run["id"] == pk2 and run["status"] == "running"
     assert run["definition"] == DEFN and run["status"] == "running" and run["current_step"] == 0
@@ -93,6 +93,8 @@ def test_pipeline_queue_promotes_in_order(app):
     assert db.promote_pipeline_run("pl")["id"] == pk2
     assert db.promote_pipeline_run("pl") is None
     db.update_pipeline_run(pk2, status="failed")
+    assert db.promote_pipeline_run("pl") is None          # a failure pauses the queue
+    db.update_pipeline_run(pk2, dismissed=1)
     assert db.promote_pipeline_run("pl")["id"] == pk3
 
 

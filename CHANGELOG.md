@@ -17,7 +17,8 @@
   handoff environment variables expose prior outputs, failed/cancelled runs can be resumed,
   and administrators can disable inline tasks.
 - **Pipeline experiments:** choose a branch for each train step when starting a run, and
-  queue additional runs of the same pipeline in FIFO order.
+  queue additional runs of the same pipeline in FIFO order. A failed run pauses the queue
+  until it is resumed or skipped.
 
 ### Changed
 - **Breaking:** `/api/v1/busy` now also reports `running_tasks`; MCP >= 0.4.0 is required.

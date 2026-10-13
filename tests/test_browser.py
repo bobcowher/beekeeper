@@ -1154,3 +1154,46 @@ def test_pipeline_run_form_overrides_branch_and_queues(live_server):
         page.wait_for_function("document.getElementById('queued-runs').hidden")
         assert errors == []
         browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_failed_run_pauses_queue_until_skipped(live_server):
+    from playwright.sync_api import sync_playwright
+
+    def run(n, status, dismissed=False):
+        return {"run_id": n, "run_ref": f"paused-pipe#{n}", "pipeline": "paused-pipe", "status": status,
+                "current_step": 0, "error": "step 'a': boom" if status == "failed" else None,
+                "overrides": {}, "dismissed": dismissed,
+                "started_at": "2026-10-12T10:00:00", "ended_at": None,
+                "steps": [{"index": 0, "name": "a", "type": "task", "status":
+                           "failed" if status == "failed" else "pending", "attempt": 1, "error": None,
+                           "exit_code": None, "started_at": None, "ended_at": None, "run_dir": None,
+                           "has_log": False}]}
+
+    state = {"dismissed": False}
+
+    def serve_runs(route):
+        runs = [run(2, "queued"), run(1, "failed", state["dismissed"])]
+        route.fulfill(json={"success": True, "data": {"runs": runs}})
+
+    def dismiss(route):
+        state["dismissed"] = True
+        route.fulfill(json={"success": True, "data": {"run_id": 1, "status": "failed"}})
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        _create_pipeline(page, live_server, "name: paused-pipe\nsteps:\n  - {name: a, type: task, command: 'false'}\n")
+        page.route("**/api/v1/pipelines/paused-pipe/runs?limit=50", serve_runs)
+        page.route("**/api/v1/pipelines/paused-pipe/runs/1/dismiss", dismiss)
+        page.goto(live_server + "/pipelines/paused-pipe")
+        page.locator("#queue-paused").wait_for()
+        assert "#1 failed" in page.locator("#queue-paused").inner_text()
+        assert page.locator("#btn-pipeline-resume").is_visible()
+        page.screenshot(path="/tmp/beekeeper-pipeline-paused.png", full_page=True)
+        page.click("#btn-queue-skip")
+        page.wait_for_selector("#queue-paused", state="hidden")
+        assert errors == []
+        browser.close()

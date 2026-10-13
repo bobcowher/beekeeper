@@ -1933,7 +1933,8 @@ label {
 .run-form-row select.overridden { border-color: var(--accent-dim); }
 .run-form-note { grid-column: 1 / -1; font-size: 0.75rem; margin: 0; }
 .run-form-actions { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
-.queued-runs { margin-top: 0.75rem; }
+.queued-runs { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+.queue-paused { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; border-left: 3px solid var(--danger); background: rgba(201, 64, 64, 0.08); font-size: 0.85rem; }
 .queued-runs ul { list-style: none; margin: 0; padding: 0; }
 .queued-runs li { display: flex; align-items: center; gap: 0.6rem; padding: 0.35rem 0; border-top: 1px solid var(--border); font-size: 0.85rem; }
 .queued-runs li:first-child { border-top: 0; }

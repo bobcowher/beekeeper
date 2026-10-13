@@ -52,10 +52,6 @@
             <button type="button" class="btn btn-secondary btn-sm" id="btn-run-form-cancel">Cancel</button>
         </div>
     </form>
-    <div class="queued-runs" id="queued-runs" hidden>
-        <p class="queued-runs-title">Queued</p>
-        <ul id="queued-list"></ul>
-    </div>
     <p class="pipeline-error" id="pipeline-run-error" role="alert"></p>
     <ol id="step-chain" class="step-chain"></ol>
     <p class="muted step-hint" id="step-hint">Select a step to see its log or command.</p>
@@ -67,6 +63,14 @@
         </div>
         <pre id="step-log" class="run-log-terminal step-log" aria-label="Selected step log" tabindex="0" hidden></pre>
         <div id="step-panel-body" class="step-panel-body"></div>
+    </div>
+    <div class="queued-runs" id="queued-runs" hidden>
+        <p class="queued-runs-title">Queued</p>
+        <div class="queue-paused" id="queue-paused" hidden>
+            <span id="queue-paused-text"></span>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-queue-skip">Skip and continue</button>
+        </div>
+        <ul id="queued-list"></ul>
     </div>
 </section>
 

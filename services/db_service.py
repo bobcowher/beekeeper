@@ -170,15 +170,17 @@ class DatabaseService:
                 status TEXT NOT NULL,
                 definition TEXT NOT NULL,
                 overrides TEXT,
+                dismissed INTEGER NOT NULL DEFAULT 0,
                 current_step INTEGER NOT NULL DEFAULT 0,
                 error TEXT,
                 started_at TIMESTAMP NOT NULL,
                 ended_at TIMESTAMP,
                 UNIQUE(pipeline_name, run_number))''')
-            try:
-                conn.execute('ALTER TABLE pipeline_runs ADD COLUMN overrides TEXT')
-            except Exception:
-                pass  # column already exists
+            for col, typedef in (('overrides', 'TEXT'), ('dismissed', 'INTEGER NOT NULL DEFAULT 0')):
+                try:
+                    conn.execute(f'ALTER TABLE pipeline_runs ADD COLUMN {col} {typedef}')
+                except Exception:
+                    pass  # column already exists
             conn.execute('''CREATE TABLE IF NOT EXISTS pipeline_step_runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 pipeline_run_pk INTEGER NOT NULL,
@@ -908,7 +910,7 @@ class DatabaseService:
 
     # --- Pipelines ----------------------------------------------------------------
 
-    _PIPELINE_RUN_FIELDS = {"status", "current_step", "error", "ended_at"}
+    _PIPELINE_RUN_FIELDS = {"status", "current_step", "error", "ended_at", "dismissed"}
     _STEP_RUN_FIELDS = {"status", "queue_id", "run_pk", "exit_code", "pid", "log_path",
                         "run_dir", "error", "started_at", "ended_at"}
 
@@ -919,6 +921,7 @@ class DatabaseService:
         run = dict(row)
         run["definition"] = json.loads(run["definition"])
         run["overrides"] = json.loads(run.get("overrides") or "{}")
+        run["dismissed"] = bool(run.get("dismissed"))
         return run
 
     def create_pipeline_run(self, pipeline_name: str, definition: dict,
@@ -1016,7 +1019,9 @@ class DatabaseService:
                 "AND status IN ('running', 'queued')", (pipeline_name,)).fetchone() is not None
 
     def promote_pipeline_run(self, pipeline_name: str) -> dict | None:
-        """Promote the oldest queued run if the pipeline is idle."""
+        """Promote the oldest queued run if the pipeline is idle and not paused.
+
+        A failed latest run pauses the queue until it is resumed or dismissed."""
         conn = sqlite3.connect(self.db_path, isolation_level=None, timeout=30)
         conn.row_factory = sqlite3.Row
         try:
@@ -1024,6 +1029,13 @@ class DatabaseService:
             if conn.execute(
                     "SELECT 1 FROM pipeline_runs WHERE pipeline_name = ? AND status = 'running'",
                     (pipeline_name,)).fetchone():
+                conn.execute('ROLLBACK')
+                return None
+            latest = conn.execute(
+                '''SELECT status, dismissed FROM pipeline_runs r WHERE r.pipeline_name = ?
+                   AND EXISTS (SELECT 1 FROM pipeline_step_runs s WHERE s.pipeline_run_pk = r.id)
+                   ORDER BY r.run_number DESC LIMIT 1''', (pipeline_name,)).fetchone()
+            if latest and latest["status"] == "failed" and not latest["dismissed"]:
                 conn.execute('ROLLBACK')
                 return None
             queued = conn.execute(

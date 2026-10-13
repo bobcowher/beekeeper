@@ -105,6 +105,8 @@ def test_runs_lifecycle(client, app):
     assert client.post("/api/v1/pipelines/fac/runs/2/cancel").get_json()["data"]["status"] == "cancelled"
     assert client.post("/api/v1/pipelines/fac/runs/1/cancel").status_code == 200
     assert client.post("/api/v1/pipelines/fac/runs/1/resume").status_code == 200
+    dismiss = client.post("/api/v1/pipelines/fac/runs/1/dismiss")
+    assert dismiss.status_code == 409 and dismiss.get_json()["error"]["code"] == "NOT_DISMISSABLE"
 
 
 def test_start_run_accepts_branch_overrides(client, app):

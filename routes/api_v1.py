@@ -756,7 +756,8 @@ def pipeline_runs_get(name, run_id):
 @api_v1_bp.route("/pipelines/<name>/runs/<int:run_id>/<action>", methods=["POST"])
 @api_key_required
 def pipeline_runs_action(name, run_id, action):
-    handlers = {"cancel": pipeline_engine.cancel_pipeline_run, "resume": pipeline_engine.resume_pipeline_run}
+    handlers = {"cancel": pipeline_engine.cancel_pipeline_run, "resume": pipeline_engine.resume_pipeline_run,
+                "dismiss": pipeline_engine.dismiss_pipeline_run}
     if action not in handlers:
         return api_response(error_code="NOT_FOUND", error_message=f"Unknown action '{action}'", status_code=404)
     try:
@@ -1941,6 +1942,7 @@ Read both outputs before taking any action.
 | `pipeline_status(name, run_id=None)` | Latest or specified pipeline run and steps |
 | `cancel_pipeline(name, run_id)` | Cancel a run and stop its current step |
 | `resume_pipeline(name, run_id)` | Resume the latest failed/cancelled run |
+| `dismiss_pipeline_run(name, run_id)` | Skip a failed run so the queue continues |
 | `get_step_log(name, run_id, step_name, tail=200)` | Task-step log output |
 | `list_branches(name)` | Available branches |
 | `switch_branch(name, branch)` | Switch branch (training must be stopped) |
@@ -2097,6 +2099,7 @@ Remember the answer. This determines what counts as a good run.
 | `pipeline_status(name, run_id=None)` | Pipeline and step status |
 | `cancel_pipeline(name, run_id)` | Cancel a pipeline run |
 | `resume_pipeline(name, run_id)` | Resume a stopped pipeline run |
+| `dismiss_pipeline_run(name, run_id)` | Skip a failed run so the queue continues |
 | `get_step_log(name, run_id, step_name)` | Read a task-step log |
 | `get_stats()` | GPU, CPU, RAM |
 | `check_busy()` | Is any training running? |

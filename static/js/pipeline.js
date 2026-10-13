@@ -289,7 +289,19 @@
         status.className = `status-badge status-${statusClass(latest || queued.length ? shown : 'notrun')}`;
     }
 
+    // A failed latest run holds the queue until it is resumed or dismissed.
+    function pausedBy() {
+        const latest = started[0];
+        return queued.length && latest && latest.status === 'failed' && !latest.dismissed ? latest : null;
+    }
+
     function renderQueue() {
+        const blocker = pausedBy();
+        $('queue-paused').hidden = !blocker;
+        if (blocker) {
+            $('queue-paused-text').textContent =
+                `Paused: #${blocker.run_id} failed. Resume it, or skip it to start the next queued run.`;
+        }
         const list = $('queued-list');
         list.replaceChildren();
         $('queued-runs').hidden = queued.length === 0;
@@ -557,6 +569,10 @@
     $('btn-pipeline-resume').addEventListener('click', event => {
         const run = started[0];
         if (run) action(`${API}/runs/${run.run_id}/resume`, 'resume pipeline', event.currentTarget);
+    });
+    $('btn-queue-skip').addEventListener('click', event => {
+        const run = pausedBy();
+        if (run) action(`${API}/runs/${run.run_id}/dismiss`, 'continue the queue', event.currentTarget);
     });
     $('btn-show-latest').addEventListener('click', () => selectRun(started[0] ? started[0].run_id : null));
     $('btn-step-close').addEventListener('click', () => {

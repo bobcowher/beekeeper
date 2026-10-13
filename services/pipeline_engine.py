@@ -181,10 +181,26 @@ def resume_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:
         _check_runnable(projects_dir, steps[idx:])
         db.delete_skipped_steps(run["id"])
         db.create_step_run(run["id"], idx, steps[idx]["name"], steps[idx]["type"])
-        db.update_pipeline_run(run["id"], status="running", error=None, ended_at=None)
+        db.update_pipeline_run(run["id"], status="running", error=None, ended_at=None, dismissed=0)
     log.info("Pipeline %s resumed at step %s", pipeline_ref(name, run_number), steps[idx]["name"])
     _wake_dispatcher()
     return {"run_id": run_number, "run_ref": pipeline_ref(name, run_number), "status": "running"}
+
+
+def dismiss_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:
+    """Leave a failed run as it is and let the queued runs behind it start."""
+    db = get_db()
+    with _engine_lock:
+        run = _get_run(name, run_number)
+        if run["status"] != "failed":
+            raise PipelineError("NOT_DISMISSABLE", f"{pipeline_ref(name, run_number)} is {run['status']}", 409)
+        latest = db.latest_pipeline_run(name)
+        if latest is None or latest["id"] != run["id"]:
+            raise PipelineError("NOT_LATEST", "Only the latest run of a pipeline holds its queue", 409)
+        db.update_pipeline_run(run["id"], dismissed=1)
+    log.info("Pipeline %s dismissed; queue continues", pipeline_ref(name, run_number))
+    _wake_dispatcher()
+    return {"run_id": run_number, "run_ref": pipeline_ref(name, run_number), "status": run["status"]}
 
 
 MAX_ADVANCES_PER_TICK = 50   # bounds the loop below if a step never stops changing
@@ -278,7 +294,7 @@ def describe_run(run) -> dict:
     return {
         "run_id": run["run_number"], "run_ref": pipeline_ref(run["pipeline_name"], run["run_number"]),
         "pipeline": run["pipeline_name"], "status": run["status"], "current_step": run["current_step"],
-        "error": run["error"], "overrides": run["overrides"], "started_at": run["started_at"],
+        "error": run["error"], "overrides": run["overrides"], "dismissed": run["dismissed"], "started_at": run["started_at"],
         "ended_at": run["ended_at"], "steps": steps,
     }
 
