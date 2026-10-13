@@ -16,7 +16,7 @@ def make_runs(n):
 def attach(pk_run, status):
     db = get_db()
     created = db.create_pipeline_run("fac", DEFN)
-    ppk, _ = created
+    ppk, _, _ = created
     s = db.current_step_run(ppk, 0)
     db.update_step_run(s["id"], status="succeeded", run_pk=pk_run)
     db.update_pipeline_run(ppk, status=status)

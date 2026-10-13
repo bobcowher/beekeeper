@@ -63,24 +63,61 @@ def test_run_dir_is_absolute(pdir):
     assert os.path.isabs(path) and path.endswith(os.path.join("pl", "runs", "run_3"))
 
 
-def test_pipeline_run_numbers_and_single_active(app):
+def test_pipeline_run_numbers_and_queue(app):
     db = get_db()
-    pk1, n1 = db.create_pipeline_run("pl", DEFN)
-    assert n1 == 1
-    assert db.create_pipeline_run("pl", DEFN) is None          # already running
+    pk1, n1, status1 = db.create_pipeline_run("pl", DEFN, {"b": "feat/x"})
+    assert (n1, status1) == (1, "running")
+    pk2, n2, status2 = db.create_pipeline_run("pl", DEFN)
+    assert (n2, status2) == (2, "queued")
+    assert db.current_step_run(pk2, 0) is None
+    assert db.get_pipeline_run("pl", 1)["overrides"] == {"b": "feat/x"}
+    assert db.get_pipeline_run("pl", 2)["overrides"] == {}
+    assert [r["run_number"] for r in db.queued_pipeline_runs("pl")] == [2]
+    assert db.pipelines_with_queued_runs() == ["pl"]
+    assert db.has_active_pipeline_run("pl")
     db.update_pipeline_run(pk1, status="failed")
-    pk2, n2 = db.create_pipeline_run("pl", DEFN)
-    assert n2 == 2
-    run = db.get_pipeline_run("pl", 2)
+    run = db.promote_pipeline_run("pl")
+    assert run["id"] == pk2 and run["status"] == "running"
     assert run["definition"] == DEFN and run["status"] == "running" and run["current_step"] == 0
     assert db.current_step_run(pk2, 0)["status"] == "pending"
     assert [r["run_number"] for r in db.running_pipeline_runs()] == [2]
     assert db.latest_pipeline_run("pl")["id"] == pk2
 
 
+def test_pipeline_queue_promotes_in_order(app):
+    db = get_db()
+    pk1, _, _ = db.create_pipeline_run("pl", DEFN)
+    pk2, _, _ = db.create_pipeline_run("pl", DEFN)
+    pk3, _, _ = db.create_pipeline_run("pl", DEFN)
+    db.update_pipeline_run(pk1, status="succeeded")
+    assert db.promote_pipeline_run("pl")["id"] == pk2
+    assert db.promote_pipeline_run("pl") is None
+    db.update_pipeline_run(pk2, status="failed")
+    assert db.promote_pipeline_run("pl")["id"] == pk3
+
+
+def test_latest_pipeline_run_ignores_never_started_runs(app):
+    db = get_db()
+    pk1, _, _ = db.create_pipeline_run("pl", DEFN)
+    pk2, _, _ = db.create_pipeline_run("pl", DEFN)
+    assert db.latest_pipeline_run("pl")["id"] == pk1
+    db.update_pipeline_run(pk1, status="failed")
+    assert db.latest_pipeline_run("pl")["id"] == pk1
+    db.update_pipeline_run(pk2, status="cancelled")
+    assert db.latest_pipeline_run("pl")["id"] == pk1
+
+
+def test_recent_finished_pipeline_runs_excludes_queued(app):
+    db = get_db()
+    pk1, _, _ = db.create_pipeline_run("pl", DEFN)
+    db.create_pipeline_run("pl", DEFN)
+    db.update_pipeline_run(pk1, status="failed")
+    assert [r["id"] for r in db.recent_finished_pipeline_runs()] == [pk1]
+
+
 def test_step_attempts_and_listing(app):
     db = get_db()
-    pk, _ = db.create_pipeline_run("pl", DEFN)
+    pk, _, _ = db.create_pipeline_run("pl", DEFN)
     s0 = db.current_step_run(pk, 0)
     db.update_step_run(s0["id"], status="failed", error="boom")
     db.create_step_run(pk, 1, "b", "train", status="skipped")
@@ -93,7 +130,7 @@ def test_step_attempts_and_listing(app):
 
 def test_internal_updates_require_at_least_one_field(app):
     db = get_db()
-    pk, _ = db.create_pipeline_run("pl", DEFN)
+    pk, _, _ = db.create_pipeline_run("pl", DEFN)
     step = db.current_step_run(pk, 0)
     with pytest.raises(ValueError, match="at least one pipeline run field"):
         db.update_pipeline_run(pk)
@@ -103,7 +140,7 @@ def test_internal_updates_require_at_least_one_field(app):
 
 def test_delete_pipeline_records_resets_numbering(app):
     db = get_db()
-    pk, _ = db.create_pipeline_run("pl", DEFN)
+    pk, _, _ = db.create_pipeline_run("pl", DEFN)
     db.update_pipeline_run(pk, status="succeeded")
     db.delete_pipeline_records("pl")
     assert db.latest_pipeline_run("pl") is None

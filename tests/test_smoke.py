@@ -359,7 +359,7 @@ def test_dashboard_activity_merges_recent_runs_and_queue(client, app):
     )
     pipeline_store.save_pipeline(app.config["PIPELINES_DIR"], {
         "name": "fac", "steps": [{"name": "a", "type": "task", "command": "true"}]})
-    pipeline_pk, _ = db.create_pipeline_run("fac", {
+    pipeline_pk, _, _ = db.create_pipeline_run("fac", {
         "name": "fac", "folder": "", "description": "",
         "steps": [{"name": "a", "type": "task", "command": "true", "timeout_s": 10}],
     })
@@ -393,7 +393,7 @@ def test_dashboard_recent_activity_shows_each_project_and_pipeline_once(client, 
     defn = {"name": "fac", "folder": "", "description": "",
             "steps": [{"name": "a", "type": "task", "command": "true", "timeout_s": 10}]}
     for _ in range(3):
-        run_pk, _ = db.create_pipeline_run("fac", defn)
+        run_pk, _, _ = db.create_pipeline_run("fac", defn)
         db.update_pipeline_run(run_pk, status="succeeded", ended_at=datetime.datetime.now().isoformat())
 
     recent = client.get("/dashboard/activity").get_json()["recent"]
