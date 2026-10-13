@@ -21,6 +21,129 @@ _PIPELINE_PINNED_RUNS_SQL = '''
                                       WHERE s2.pipeline_run_pk = r2.id)
                         ORDER BY r2.run_number DESC LIMIT 1)))
 '''
+_BEGIN_IMMEDIATE_SQL = 'BEGIN IMMEDIATE'
+
+
+def _add_columns(conn, table, columns):
+    for column, typedef in columns:
+        try:
+            conn.execute(f'ALTER TABLE {table} ADD COLUMN {column} {typedef}')
+        except Exception:
+            pass  # Existing databases may already have the column.
+
+
+def _metric_analysis_migrations(conn):
+    exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='metric_analyses'"
+    ).fetchone()
+    if not exists:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS metric_analyses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, run_pk INTEGER NOT NULL,
+                metric_name TEXT NOT NULL, trend TEXT, recent_trend TEXT,
+                initial_value REAL, final_value REAL, best_value REAL, best_step INTEGER,
+                peak_value REAL, peak_step INTEGER, peak_reversal_pct REAL DEFAULT 0,
+                improvement_percent REAL, converged BOOLEAN DEFAULT 0,
+                convergence_step INTEGER, anomaly_count INTEGER DEFAULT 0,
+                anomaly_details TEXT, summary TEXT, sampled_points TEXT, total_points INTEGER,
+                parsed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (run_pk) REFERENCES training_runs(id) ON DELETE CASCADE,
+                UNIQUE(run_pk, metric_name))
+        ''')
+    _add_columns(conn, 'metric_analyses', [
+        ('recent_trend', 'TEXT'), ('peak_value', 'REAL'), ('peak_step', 'INTEGER'),
+        ('peak_reversal_pct', 'REAL DEFAULT 0'), ('smoothed_points', 'TEXT'),
+        ('smoothed_final_value', 'REAL'), ('ema_alpha', 'REAL'),
+    ])
+    columns = {row['name'] for row in conn.execute("PRAGMA table_info(metric_analyses)")}
+    if 'run_id' in columns and 'run_pk' not in columns:
+        conn.execute('ALTER TABLE metric_analyses RENAME COLUMN run_id TO run_pk')
+    conn.execute('DROP INDEX IF EXISTS idx_metric_analyses_run')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_metric_analyses_run_pk ON metric_analyses(run_pk)')
+
+
+def _training_run_migrations(conn):
+    columns = {row['name'] for row in conn.execute("PRAGMA table_info(training_runs)")}
+    missing = [
+        (column, typedef) for column, typedef in [
+            ('notes', "TEXT NOT NULL DEFAULT ''"), ('notable', 'INTEGER NOT NULL DEFAULT 0'),
+            ('tags', "TEXT NOT NULL DEFAULT ''"), ('persistent_dir', 'TEXT'),
+            ('run_number', 'INTEGER'),
+        ] if column not in columns
+    ]
+    _add_columns(conn, 'training_runs', missing)
+
+
+def _pipeline_table_migrations(conn):
+    conn.execute('''CREATE TABLE IF NOT EXISTS pipeline_run_counters (
+        pipeline_name TEXT PRIMARY KEY, last_number INTEGER NOT NULL)''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS pipeline_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, pipeline_name TEXT NOT NULL,
+        run_number INTEGER NOT NULL, status TEXT NOT NULL, definition TEXT NOT NULL,
+        overrides TEXT, dismissed INTEGER NOT NULL DEFAULT 0,
+        current_step INTEGER NOT NULL DEFAULT 0, error TEXT,
+        started_at TIMESTAMP NOT NULL, ended_at TIMESTAMP,
+        UNIQUE(pipeline_name, run_number))''')
+    _add_columns(conn, 'pipeline_runs', [
+        ('overrides', 'TEXT'), ('dismissed', 'INTEGER NOT NULL DEFAULT 0'),
+    ])
+    conn.execute('''CREATE TABLE IF NOT EXISTS pipeline_step_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, pipeline_run_pk INTEGER NOT NULL,
+        step_index INTEGER NOT NULL, step_name TEXT NOT NULL, step_type TEXT NOT NULL,
+        attempt INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL, queue_id INTEGER,
+        run_pk INTEGER, exit_code INTEGER, pid INTEGER, log_path TEXT, run_dir TEXT,
+        error TEXT, started_at TIMESTAMP, ended_at TIMESTAMP,
+        UNIQUE(pipeline_run_pk, step_index, attempt))''')
+    conn.execute('''CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started
+                    ON pipeline_runs(started_at DESC)''')
+
+
+def _backfill_run_numbers(conn):
+    conn.execute('''
+        UPDATE training_runs SET run_number = (
+            SELECT numbered.n FROM (
+                SELECT id,
+                       COALESCE((SELECT MAX(run_number) FROM training_runs t2
+                                 WHERE t2.project_name = t.project_name), 0)
+                       + ROW_NUMBER() OVER (PARTITION BY project_name ORDER BY started_at, id) AS n
+                FROM training_runs t WHERE run_number IS NULL
+            ) AS numbered WHERE numbered.id = training_runs.id
+        ) WHERE run_number IS NULL
+    ''')
+    conn.execute('''
+        INSERT INTO run_counters (project_name, last_number)
+        SELECT project_name, MAX(run_number) FROM training_runs
+        WHERE run_number IS NOT NULL GROUP BY project_name
+        ON CONFLICT(project_name) DO UPDATE
+            SET last_number = MAX(last_number, excluded.last_number)
+    ''')
+    conn.execute(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_training_runs_project_number '
+        'ON training_runs(project_name, run_number)'
+    )
+
+
+def _metric_analysis_row(row):
+    columns = row.keys()
+    return {
+        'trend': row['trend'], 'recent_trend': row['recent_trend'],
+        'initial_value': row['initial_value'], 'final_value': row['final_value'],
+        'best_value': row['best_value'], 'best_step': row['best_step'],
+        'peak_value': row['peak_value'], 'peak_step': row['peak_step'],
+        'peak_reversal_pct': row['peak_reversal_pct'] if row['peak_reversal_pct'] is not None else 0.0,
+        'improvement_percent': row['improvement_percent'], 'converged': bool(row['converged']),
+        'convergence_step': row['convergence_step'], 'anomaly_count': row['anomaly_count'],
+        'anomalies': json.loads(row['anomaly_details']) if row['anomaly_details'] else [],
+        'summary': row['summary'],
+        'sampled_points': json.loads(row['sampled_points']) if row['sampled_points'] else [],
+        'total_points': row['total_points'],
+        'smoothed_points': json.loads(row['smoothed_points'])
+        if 'smoothed_points' in columns and row['smoothed_points'] else [],
+        'smoothed_final_value': row['smoothed_final_value']
+        if 'smoothed_final_value' in columns and row['smoothed_final_value'] is not None else None,
+        'ema_alpha': row['ema_alpha']
+        if 'ema_alpha' in columns and row['ema_alpha'] is not None else None,
+    }
 
 
 class DatabaseService:
@@ -60,89 +183,16 @@ class DatabaseService:
     def _run_migrations(self):
         """Run database migrations for existing databases."""
         with self._get_connection() as conn:
-            # Check if lockout columns exist
-            cursor = conn.execute("PRAGMA table_info(users)")
-            columns = [row['name'] for row in cursor.fetchall()]
-
-            # Add lockout columns if missing
-            if 'failed_login_attempts' not in columns:
-                conn.execute('ALTER TABLE users ADD COLUMN failed_login_attempts INTEGER DEFAULT 0')
-            if 'locked_until' not in columns:
-                conn.execute('ALTER TABLE users ADD COLUMN locked_until TIMESTAMP')
-
-            # Check if metric_analyses table exists
-            cursor = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='metric_analyses'"
-            )
-            if not cursor.fetchone():
-                # Create metric_analyses table
-                conn.execute('''
-                    CREATE TABLE IF NOT EXISTS metric_analyses (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        run_pk INTEGER NOT NULL,
-                        metric_name TEXT NOT NULL,
-                        trend TEXT,
-                        recent_trend TEXT,
-                        initial_value REAL,
-                        final_value REAL,
-                        best_value REAL,
-                        best_step INTEGER,
-                        peak_value REAL,
-                        peak_step INTEGER,
-                        peak_reversal_pct REAL DEFAULT 0,
-                        improvement_percent REAL,
-                        converged BOOLEAN DEFAULT 0,
-                        convergence_step INTEGER,
-                        anomaly_count INTEGER DEFAULT 0,
-                        anomaly_details TEXT,
-                        summary TEXT,
-                        sampled_points TEXT,
-                        total_points INTEGER,
-                        parsed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (run_pk) REFERENCES training_runs(id) ON DELETE CASCADE,
-                        UNIQUE(run_pk, metric_name)
-                    )
-                ''')
-                conn.execute(
-                    'CREATE INDEX IF NOT EXISTS idx_metric_analyses_run_pk ON metric_analyses(run_pk)'
-                )
-
-            # Migrate existing databases: add new columns if missing
-            for col, typedef in [
-                ('recent_trend', 'TEXT'),
-                ('peak_value', 'REAL'),
-                ('peak_step', 'INTEGER'),
-                ('peak_reversal_pct', 'REAL DEFAULT 0'),
-                ('smoothed_points', 'TEXT'),
-                ('smoothed_final_value', 'REAL'),
-                ('ema_alpha', 'REAL'),
-            ]:
-                try:
-                    conn.execute(f'ALTER TABLE metric_analyses ADD COLUMN {col} {typedef}')
-                except Exception:
-                    pass  # column already exists
-
-            ma_columns = {row['name'] for row in conn.execute("PRAGMA table_info(metric_analyses)")}
-            if 'run_id' in ma_columns and 'run_pk' not in ma_columns:
-                conn.execute('ALTER TABLE metric_analyses RENAME COLUMN run_id TO run_pk')
-            conn.execute('DROP INDEX IF EXISTS idx_metric_analyses_run')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_metric_analyses_run_pk ON metric_analyses(run_pk)')
-
-            # Add annotation columns to training_runs if missing
-            cursor = conn.execute("PRAGMA table_info(training_runs)")
-            tr_columns = {row['name'] for row in cursor.fetchall()}
-            for col, typedef in [
-                ('notes',   "TEXT NOT NULL DEFAULT ''"),
-                ('notable', 'INTEGER NOT NULL DEFAULT 0'),
-                ('tags',    "TEXT NOT NULL DEFAULT ''"),
-                ('persistent_dir', 'TEXT'),
-                ('run_number', 'INTEGER'),
-            ]:
-                if col not in tr_columns:
-                    try:
-                        conn.execute(f'ALTER TABLE training_runs ADD COLUMN {col} {typedef}')
-                    except Exception:
-                        pass
+            user_columns = {row['name'] for row in conn.execute("PRAGMA table_info(users)")}
+            missing_user_columns = [
+                (column, typedef) for column, typedef in [
+                    ('failed_login_attempts', 'INTEGER DEFAULT 0'),
+                    ('locked_until', 'TIMESTAMP'),
+                ] if column not in user_columns
+            ]
+            _add_columns(conn, 'users', missing_user_columns)
+            _metric_analysis_migrations(conn)
+            _training_run_migrations(conn)
 
             conn.execute('''CREATE TABLE IF NOT EXISTS run_counters (
                 project_name TEXT PRIMARY KEY, last_number INTEGER NOT NULL)''')
@@ -161,75 +211,12 @@ class DatabaseService:
                 started_at TIMESTAMP)''')
             conn.execute('''CREATE INDEX IF NOT EXISTS idx_run_queue_project_status
                             ON run_queue(project_name, status)''')
-            conn.execute('''CREATE TABLE IF NOT EXISTS pipeline_run_counters (
-                pipeline_name TEXT PRIMARY KEY, last_number INTEGER NOT NULL)''')
-            conn.execute('''CREATE TABLE IF NOT EXISTS pipeline_runs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pipeline_name TEXT NOT NULL,
-                run_number INTEGER NOT NULL,
-                status TEXT NOT NULL,
-                definition TEXT NOT NULL,
-                overrides TEXT,
-                dismissed INTEGER NOT NULL DEFAULT 0,
-                current_step INTEGER NOT NULL DEFAULT 0,
-                error TEXT,
-                started_at TIMESTAMP NOT NULL,
-                ended_at TIMESTAMP,
-                UNIQUE(pipeline_name, run_number))''')
-            for col, typedef in (('overrides', 'TEXT'), ('dismissed', 'INTEGER NOT NULL DEFAULT 0')):
-                try:
-                    conn.execute(f'ALTER TABLE pipeline_runs ADD COLUMN {col} {typedef}')
-                except Exception:
-                    pass  # column already exists
-            conn.execute('''CREATE TABLE IF NOT EXISTS pipeline_step_runs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pipeline_run_pk INTEGER NOT NULL,
-                step_index INTEGER NOT NULL,
-                step_name TEXT NOT NULL,
-                step_type TEXT NOT NULL,
-                attempt INTEGER NOT NULL DEFAULT 1,
-                status TEXT NOT NULL,
-                queue_id INTEGER,
-                run_pk INTEGER,
-                exit_code INTEGER,
-                pid INTEGER,
-                log_path TEXT,
-                run_dir TEXT,
-                error TEXT,
-                started_at TIMESTAMP,
-                ended_at TIMESTAMP,
-                UNIQUE(pipeline_run_pk, step_index, attempt))''')
-            conn.execute('''CREATE INDEX IF NOT EXISTS idx_pipeline_runs_started
-                            ON pipeline_runs(started_at DESC)''')
+            _pipeline_table_migrations(conn)
 
             conn.execute('''CREATE TABLE IF NOT EXISTS schema_migrations (
                 name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
 
-            # Backfill per-project run numbers for rows created before run_number existed.
-            # Numbers continue after any already-assigned numbers in the same project.
-            conn.execute('''
-                UPDATE training_runs SET run_number = (
-                    SELECT numbered.n FROM (
-                        SELECT id,
-                               COALESCE((SELECT MAX(run_number) FROM training_runs t2
-                                         WHERE t2.project_name = t.project_name), 0)
-                               + ROW_NUMBER() OVER (PARTITION BY project_name ORDER BY started_at, id) AS n
-                        FROM training_runs t WHERE run_number IS NULL
-                    ) AS numbered WHERE numbered.id = training_runs.id
-                ) WHERE run_number IS NULL
-            ''')
-            conn.execute('''
-                INSERT INTO run_counters (project_name, last_number)
-                SELECT project_name, MAX(run_number) FROM training_runs
-                WHERE run_number IS NOT NULL GROUP BY project_name
-                ON CONFLICT(project_name) DO UPDATE
-                    SET last_number = MAX(last_number, excluded.last_number)
-            ''')
-            conn.execute(
-                'CREATE UNIQUE INDEX IF NOT EXISTS idx_training_runs_project_number '
-                'ON training_runs(project_name, run_number)'
-            )
-
+            _backfill_run_numbers(conn)
             conn.commit()
 
     def migration_applied(self, name: str) -> bool:
@@ -506,7 +493,7 @@ class DatabaseService:
         """Create a run record with the project's next run number. Returns (run_pk, run_id)."""
         conn = sqlite3.connect(self.db_path, isolation_level=None, timeout=30)
         try:
-            conn.execute('BEGIN IMMEDIATE')
+            conn.execute(_BEGIN_IMMEDIATE_SQL)
             run_id = conn.execute(
                 '''INSERT INTO run_counters (project_name, last_number) VALUES (?, 1)
                    ON CONFLICT(project_name) DO UPDATE SET last_number = last_number + 1
@@ -773,32 +760,7 @@ class DatabaseService:
                     (run_pk,)
                 ).fetchall()
 
-            result = {}
-            for row in rows:
-                result[row['metric_name']] = {
-                    'trend': row['trend'],
-                    'recent_trend': row['recent_trend'],
-                    'initial_value': row['initial_value'],
-                    'final_value': row['final_value'],
-                    'best_value': row['best_value'],
-                    'best_step': row['best_step'],
-                    'peak_value': row['peak_value'],
-                    'peak_step': row['peak_step'],
-                    'peak_reversal_pct': row['peak_reversal_pct'] if row['peak_reversal_pct'] is not None else 0.0,
-                    'improvement_percent': row['improvement_percent'],
-                    'converged': bool(row['converged']),
-                    'convergence_step': row['convergence_step'],
-                    'anomaly_count': row['anomaly_count'],
-                    'anomalies': json.loads(row['anomaly_details']) if row['anomaly_details'] else [],
-                    'summary': row['summary'],
-                    'sampled_points': json.loads(row['sampled_points']) if row['sampled_points'] else [],
-                    'total_points': row['total_points'],
-                    'smoothed_points': json.loads(row['smoothed_points']) if 'smoothed_points' in row.keys() and row['smoothed_points'] else [],
-                    'smoothed_final_value': row['smoothed_final_value'] if 'smoothed_final_value' in row.keys() and row['smoothed_final_value'] is not None else None,
-                    'ema_alpha': row['ema_alpha'] if 'ema_alpha' in row.keys() and row['ema_alpha'] is not None else None,
-                }
-
-            return result
+            return {row['metric_name']: _metric_analysis_row(row) for row in rows}
 
     def delete_metric_analyses(self, run_pk: int):
         """Delete all analyses for a run."""
@@ -929,7 +891,7 @@ class DatabaseService:
         """Create a running run or append one to its pipeline's queue."""
         conn = sqlite3.connect(self.db_path, isolation_level=None, timeout=30)
         try:
-            conn.execute('BEGIN IMMEDIATE')
+            conn.execute(_BEGIN_IMMEDIATE_SQL)
             active = conn.execute(
                 "SELECT 1 FROM pipeline_runs WHERE pipeline_name = ? AND status IN ('running', 'queued')",
                 (pipeline_name,)).fetchone()
@@ -1025,7 +987,7 @@ class DatabaseService:
         conn = sqlite3.connect(self.db_path, isolation_level=None, timeout=30)
         conn.row_factory = sqlite3.Row
         try:
-            conn.execute('BEGIN IMMEDIATE')
+            conn.execute(_BEGIN_IMMEDIATE_SQL)
             if conn.execute(
                     "SELECT 1 FROM pipeline_runs WHERE pipeline_name = ? AND status = 'running'",
                     (pipeline_name,)).fetchone():

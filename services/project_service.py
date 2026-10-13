@@ -41,6 +41,7 @@ def ensure_data_dir_symlink(workspace_dir: str, data_dir_local: str, data_dir_re
 
 CONDA_ENV_PREFIX = "beekeeper-"
 RESERVED_OUTPUT_PATH_ROOTS = {".git", "persistent", "run_logs"}
+PROJECT_CONFIG_FILE = "project.json"
 
 
 def _normalize_workspace_path(path: str, label: str = "Output path") -> str:
@@ -76,27 +77,30 @@ def validate_workspace_path(path: str, label: str = "Path") -> str:
     return _normalize_workspace_path(path, label)
 
 
-def parse_output_paths(value) -> list[str]:
-    """Parse API/form output path input into normalized workspace-relative paths."""
+def _raw_output_paths(value):
     if value is None:
         return []
     if isinstance(value, str):
         raw_items = []
         for line in value.splitlines():
             raw_items.extend(line.split(","))
-    elif isinstance(value, (list, tuple)):
-        raw_items = []
-        for item in value:
-            if isinstance(item, str):
-                raw_items.extend(item.splitlines())
-            else:
-                raw_items.append(str(item))
-    else:
+        return raw_items
+    if not isinstance(value, (list, tuple)):
         raise ValueError("output_paths must be a list of strings or newline-separated text.")
+    raw_items = []
+    for item in value:
+        if isinstance(item, str):
+            raw_items.extend(item.splitlines())
+        else:
+            raw_items.append(str(item))
+    return raw_items
 
+
+def parse_output_paths(value) -> list[str]:
+    """Parse API/form output path input into normalized workspace-relative paths."""
     paths = []
     seen = set()
-    for item in raw_items:
+    for item in _raw_output_paths(value):
         item = (item or "").strip()
         if not item:
             continue
@@ -164,9 +168,9 @@ def rename_project(projects_dir, name, new_name, pipelines_dir=None):
     """
     old_dir = os.path.join(projects_dir, name)
     new_dir = os.path.join(projects_dir, new_name)
-    config_path = os.path.join(new_dir, "project.json")
+    config_path = os.path.join(new_dir, PROJECT_CONFIG_FILE)
 
-    with open(os.path.join(old_dir, "project.json")) as f:
+    with open(os.path.join(old_dir, PROJECT_CONFIG_FILE)) as f:
         project_data = _json.load(f)
 
     os.rename(old_dir, new_dir)
@@ -243,7 +247,7 @@ def create_project(projects_dir, data):
 
 def retry_setup(projects_dir, name):
     """Re-run setup for a project in error state with a clean workspace."""
-    config_path = os.path.join(projects_dir, name, "project.json")
+    config_path = os.path.join(projects_dir, name, PROJECT_CONFIG_FILE)
     project = Project.load(config_path)
 
     # Clean workspace to force fresh git clone (preserves venv and data symlinks point to external data)
@@ -437,7 +441,7 @@ def delete_project(projects_dir, name):
         raise ProjectBusyError(f"Project '{name}' has an active run; stop it before deleting.")
 
     project_dir = os.path.join(projects_dir, name)
-    config_path = os.path.join(project_dir, "project.json")  # NOSONAR
+    config_path = os.path.join(project_dir, PROJECT_CONFIG_FILE)  # NOSONAR
 
     # Clean up conda env if this was a conda project
     if os.path.isfile(config_path):

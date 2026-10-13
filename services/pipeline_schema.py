@@ -13,7 +13,7 @@ from models.project import normalize_folder
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 STEP_NAME_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
 PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+ENV_KEY_RE = re.compile(r"^[A-Za-z_]\w*$", re.ASCII)
 MAX_STEPS = 32
 DEFAULT_TASK_TIMEOUT = 3600
 MAX_TASK_TIMEOUT = 86400
@@ -59,21 +59,25 @@ def parse_text(text: str) -> dict:
 def _reject_duplicate_keys(node):
     """Reject duplicate YAML mapping keys before safe_load's last-value-wins construction."""
     if isinstance(node, yaml.MappingNode):
-        seen = set()
-        for key_node, value_node in node.value:
-            key = (key_node.tag, key_node.value) if isinstance(key_node, yaml.ScalarNode) else str(key_node)
-            if key in seen:
-                label = repr(key_node.value) if isinstance(key_node, yaml.ScalarNode) else "mapping key"
-                raise PipelineValidationError([{
-                    "path": "",
-                    "message": f"Invalid YAML: duplicate mapping key {label} at line {key_node.start_mark.line + 1}",
-                }])
-            seen.add(key)
-            _reject_duplicate_keys(key_node)
-            _reject_duplicate_keys(value_node)
+        _reject_duplicate_mapping_keys(node)
     elif isinstance(node, yaml.SequenceNode):
         for item in node.value:
             _reject_duplicate_keys(item)
+
+
+def _reject_duplicate_mapping_keys(node):
+    seen = set()
+    for key_node, value_node in node.value:
+        key = (key_node.tag, key_node.value) if isinstance(key_node, yaml.ScalarNode) else str(key_node)
+        if key in seen:
+            label = repr(key_node.value) if isinstance(key_node, yaml.ScalarNode) else "mapping key"
+            raise PipelineValidationError([{
+                "path": "",
+                "message": f"Invalid YAML: duplicate mapping key {label} at line {key_node.start_mark.line + 1}",
+            }])
+        seen.add(key)
+        _reject_duplicate_keys(key_node)
+        _reject_duplicate_keys(value_node)
 
 
 def _not_string(value) -> str:
@@ -110,39 +114,33 @@ def _env_field(env, path, err):
     return dict(env) if ok else None
 
 
-def _validate_step(step, path, err):
-    if not isinstance(step, dict):
-        err(path, "must be a mapping")
-        return None
+def _validated_step_name(step, path, err):
     name = _str_field(step, "name", path, err, required=True)
     if name is not None and not STEP_NAME_RE.fullmatch(name):
         err(f"{path}.name", "use lowercase letters, digits, '_' or '-' (max 32)")
-        name = None
-    stype = step.get("type")
-    if stype not in ("train", "task"):
-        err(f"{path}.type", "must be 'train' or 'task'")
         return None
-    allowed = TRAIN_KEYS if stype == "train" else TASK_KEYS
-    for key in sorted(set(step) - allowed, key=str):
-        err(f"{path}.{key}", f"unknown key for a {stype} step")
+    return name
 
-    if stype == "train":
-        project = _str_field(step, "project", path, err, required=True)
-        if project is not None and not PROJECT_NAME_RE.fullmatch(project):
-            err(f"{path}.project", "must name a project using only letters, digits, '_' or '-'")
-            project = None
-        branch = _str_field(step, "branch", path, err)
-        branch_ok = branch is None or valid_branch_name(branch)
-        if not branch_ok:
-            err(f"{path}.branch", "is not a valid branch name")
-        env = _env_field(step.get("env_vars", {}), f"{path}.env_vars", err)
-        if name is None or project is None or env is None or not branch_ok:
-            return None
-        out = {"name": name, "type": "train", "project": project, "env_vars": env}
-        if branch is not None:
-            out["branch"] = branch
-        return out
 
+def _validate_train_step(step, path, err, name):
+    project = _str_field(step, "project", path, err, required=True)
+    if project is not None and not PROJECT_NAME_RE.fullmatch(project):
+        err(f"{path}.project", "must name a project using only letters, digits, '_' or '-'")
+        project = None
+    branch = _str_field(step, "branch", path, err)
+    branch_ok = branch is None or valid_branch_name(branch)
+    if not branch_ok:
+        err(f"{path}.branch", "is not a valid branch name")
+    env = _env_field(step.get("env_vars", {}), f"{path}.env_vars", err)
+    if name is None or project is None or env is None or not branch_ok:
+        return None
+    result = {"name": name, "type": "train", "project": project, "env_vars": env}
+    if branch is not None:
+        result["branch"] = branch
+    return result
+
+
+def _validate_task_step(step, path, err, name):
     command = _str_field(step, "command", path, err, required=True)
     if command is not None and not command.strip():
         err(f"{path}.command", "must not be empty")
@@ -154,6 +152,46 @@ def _validate_step(step, path, err):
     if name is None or command is None or timeout is None:
         return None
     return {"name": name, "type": "task", "command": command, "timeout_s": timeout}
+
+
+def _validate_step(step, path, err):
+    if not isinstance(step, dict):
+        err(path, "must be a mapping")
+        return None
+    name = _validated_step_name(step, path, err)
+    stype = step.get("type")
+    if stype not in ("train", "task"):
+        err(f"{path}.type", "must be 'train' or 'task'")
+        return None
+    allowed = TRAIN_KEYS if stype == "train" else TASK_KEYS
+    for key in sorted(set(step) - allowed, key=str):
+        err(f"{path}.{key}", f"unknown key for a {stype} step")
+
+    if stype == "train":
+        return _validate_train_step(step, path, err, name)
+    return _validate_task_step(step, path, err, name)
+
+
+def _validate_steps(steps, err):
+    if not isinstance(steps, list) or not steps:
+        err("steps", "must be a non-empty list")
+        return []
+    if len(steps) > MAX_STEPS:
+        err("steps", f"at most {MAX_STEPS} steps")
+        return []
+    seen: dict[str, str] = {}
+    output = []
+    for index, step in enumerate(steps):
+        validated = _validate_step(step, f"steps[{index}]", err)
+        if validated is None:
+            continue
+        variable = step_dir_var(validated["name"])
+        if variable in seen:
+            err(f"steps[{index}].name", f"duplicates or collides with step '{seen[variable]}' (both use {variable})")
+            continue
+        seen[variable] = validated["name"]
+        output.append(validated)
+    return output
 
 
 def validate(data, expected_name: str | None = None) -> dict:
@@ -185,24 +223,7 @@ def validate(data, expected_name: str | None = None) -> dict:
     elif not isinstance(description, str):
         err("description", _not_string(description))
 
-    steps = data.get("steps")
-    out_steps = []
-    if not isinstance(steps, list) or not steps:
-        err("steps", "must be a non-empty list")
-    elif len(steps) > MAX_STEPS:
-        err("steps", f"at most {MAX_STEPS} steps")
-    else:
-        seen: dict[str, str] = {}
-        for i, step in enumerate(steps):
-            out = _validate_step(step, f"steps[{i}]", err)
-            if out is None:
-                continue
-            var = step_dir_var(out["name"])
-            if var in seen:
-                err(f"steps[{i}].name", f"duplicates or collides with step '{seen[var]}' (both use {var})")
-                continue
-            seen[var] = out["name"]
-            out_steps.append(out)
+    out_steps = _validate_steps(data.get("steps"), err)
 
     if errors:
         raise PipelineValidationError(errors)

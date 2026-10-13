@@ -3,6 +3,7 @@
 import os
 import json
 import logging
+import re
 from typing import Optional
 from pathlib import Path
 from datetime import datetime as dt
@@ -13,6 +14,7 @@ from tbparse import SummaryReader
 from services.db_service import get_db
 
 log = logging.getLogger(__name__)
+EVENT_TIMESTAMP_RE = re.compile(r'events\.out\.tfevents\.(\d+)')
 
 
 def _resolve_run_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -> str:
@@ -31,6 +33,26 @@ def _resolve_run_tensorboard_dir(projects_dir: str, project_name: str, run: dict
         if os.path.isdir(candidate):
             return candidate
     return candidates[0]
+
+
+def _find_tensorboard_dir(projects_dir, project_name, run):
+    tensorboard_dir = _resolve_run_tensorboard_dir(projects_dir, project_name, run)
+    if os.path.isdir(tensorboard_dir):
+        return tensorboard_dir
+    log.info("Stored TB path not found, attempting auto-discovery")
+    discovered = _discover_tensorboard_dir(projects_dir, project_name, run)
+    if discovered:
+        log.info("Auto-discovered TensorBoard data at: %s", discovered)
+        return discovered
+    log.warning("Auto-discovery found no matching TensorBoard directories")
+    return None
+
+
+def _metric_group_data(group):
+    wall_time = group['wall_time'] if 'wall_time' in group.columns else group['step']
+    data = list(zip(group['step'].tolist(), group['value'].tolist(), wall_time.tolist()))
+    data.sort(key=lambda item: item[0])
+    return data
 
 
 def parse_run_metrics(projects_dir: str, project_name: str, run_pk: int) -> dict:
@@ -54,24 +76,14 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_pk: int) -> dict
             log.warning(f"Run {run_pk} has no tensorboard_dir")
             return {'success': False, 'reason': 'no_tensorboard_dir'}
 
-        # Try the stored path first. New runs store project-relative persistent
-        # paths; older runs stored workspace-relative TensorBoard paths.
-        tb_dir = _resolve_run_tensorboard_dir(projects_dir, project_name, run)
-
-        # If stored path doesn't exist, auto-discover TensorBoard data
-        if not os.path.isdir(tb_dir):
-            log.info("Stored TB path not found, attempting auto-discovery")
-            try:
-                discovered = _discover_tensorboard_dir(projects_dir, project_name, run)
-                if discovered:
-                    tb_dir = discovered
-                    log.info(f"Auto-discovered TensorBoard data at: {tb_dir}")
-                else:
-                    log.warning("Auto-discovery found no matching TensorBoard directories")
-                    return {'success': False, 'reason': 'directory_not_found', 'path': tb_dir}
-            except Exception as e:
-                log.error(f"Auto-discovery failed with exception: {e}", exc_info=True)
-                return {'success': False, 'reason': 'directory_not_found', 'path': tb_dir}
+        stored_dir = _resolve_run_tensorboard_dir(projects_dir, project_name, run)
+        try:
+            tb_dir = _find_tensorboard_dir(projects_dir, project_name, run)
+        except Exception:
+            log.exception("Auto-discovery failed with exception")
+            return {'success': False, 'reason': 'directory_not_found', 'path': stored_dir}
+        if not tb_dir:
+            return {'success': False, 'reason': 'directory_not_found', 'path': stored_dir}
 
         # Check if any event files exist
         event_files = list(Path(tb_dir).glob('**/events.out.tfevents.*'))
@@ -89,7 +101,7 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_pk: int) -> dict
                 return {'success': False, 'reason': 'no_scalars', 'path': tb_dir, 'event_files': len(event_files)}
 
         except Exception as e:
-            log.error(f"Failed to parse TensorBoard events in {tb_dir}: {e}")
+            log.exception("Failed to parse TensorBoard events in %s", tb_dir)
             return {'success': False, 'reason': 'parse_error', 'error': str(e)}
 
         # Group by metric tag
@@ -97,38 +109,15 @@ def parse_run_metrics(projects_dir: str, project_name: str, run_pk: int) -> dict
 
         log.info(f"Found {len(metric_groups)} metrics for run {run_pk}")
 
-        # Analyze each metric
         for metric_name, group in metric_groups:
-            # Extract data as list of (step, value, wall_time)
-            # Use wall_time if available, otherwise fall back to step
-            if 'wall_time' in group.columns:
-                data = list(zip(
-                    group['step'].tolist(),
-                    group['value'].tolist(),
-                    group['wall_time'].tolist()
-                ))
-            else:
-                # Fallback: use step as wall_time
-                data = list(zip(
-                    group['step'].tolist(),
-                    group['value'].tolist(),
-                    group['step'].tolist()
-                ))
-
-            # Sort by step
-            data.sort(key=lambda x: x[0])
-
-            # Analyze the metric
-            analysis = analyze_metric(metric_name, data)
-
-            # Save to database
-            db.save_metric_analysis(run_pk, metric_name, analysis)
+            db.save_metric_analysis(run_pk, metric_name, analyze_metric(
+                metric_name, _metric_group_data(group)))
 
         log.info(f"Successfully parsed and analyzed {len(metric_groups)} metrics for run {run_pk}")
         return {'success': True}
 
     except Exception as e:
-        log.error(f"Error parsing metrics for run {run_pk}: {e}", exc_info=True)
+        log.exception("Error parsing metrics for run %s", run_pk)
         return {'success': False, 'reason': 'unexpected_error', 'error': str(e)}
 
 
@@ -262,6 +251,18 @@ def analyze_metric(metric_name: str, data: list) -> dict:
     }
 
 
+def _classify_trend(normalized_slope, slope, r_squared, metric_name):
+    if normalized_slope < 0.05:
+        return 'stable'
+    if _is_scheduled_metric(metric_name):
+        return 'stable'
+    improving = (_is_lower_better(metric_name) and slope < 0) or (
+        not _is_lower_better(metric_name) and slope > 0)
+    if improving:
+        return 'improving'
+    return 'worsening' if r_squared >= 0.4 else 'unstable'
+
+
 def detect_trend(values: list, metric_name: str) -> str:
     """
     Detect trend in values, ignoring initial spikes and being sensitive to RL noise.
@@ -300,37 +301,9 @@ def detect_trend(values: list, metric_name: str) -> str:
     ss_tot = np.sum((v_smoothed - np.mean(v_smoothed)) ** 2)
     r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
 
-    # 4. Significance test
-    is_lower_better = _is_lower_better(metric_name)
     value_range = np.max(v_smoothed) - np.min(v_smoothed)
-    
-    if value_range > 0:
-        # Check how much the linear trend explains vs the noise
-        # For RL, a lower R² is acceptable if the slope is clearly in one direction
-        normalized_slope = abs(slope * len(x_smoothed)) / (value_range if value_range != 0 else 1)
-    else:
-        normalized_slope = 0
-
-    # Thresholds
-    SLOPE_THRESHOLD = 0.05  # 5% change over the run is significant
-    STABILITY_THRESHOLD = 0.4  # R² threshold for "consistent" trend
-
-    if normalized_slope < SLOPE_THRESHOLD:
-        return 'stable'
-
-    # Scheduled metrics (epsilon, lr, etc.) are following a deliberate decay — label as stable
-    if _is_scheduled_metric(metric_name):
-        return 'stable'
-
-    # Check if slope direction matches desired improvement
-    if (is_lower_better and slope < 0) or (not is_lower_better and slope > 0):
-        # Right direction with significant slope → improving (regardless of R²)
-        return 'improving'
-    else:
-        # Wrong direction: distinguish consistent worsening from noisy instability
-        if r_squared >= STABILITY_THRESHOLD:
-            return 'worsening'
-        return 'unstable'
+    normalized_slope = abs(slope * len(x_smoothed)) / value_range if value_range > 0 else 0
+    return _classify_trend(normalized_slope, slope, r_squared, metric_name)
 
 
 def detect_convergence(data: list) -> dict:
@@ -418,7 +391,6 @@ def smart_sample(data: list, target: int = 100) -> list:
     if len(data) <= target:
         return [{'step': int(d[0]), 'value': float(d[1]), 'wall_time': float(d[2])} for d in data]
 
-    sampled = []
     indices = set()
 
     values = [d[1] for d in data]
@@ -449,7 +421,7 @@ def smart_sample(data: list, target: int = 100) -> list:
                 indices.add(idx)
 
     # Convert to sorted list
-    indices = sorted(list(indices))
+    indices = sorted(indices)
 
     return [
         {
@@ -459,6 +431,49 @@ def smart_sample(data: list, target: int = 100) -> list:
         }
         for i in indices
     ]
+
+
+def _tensorboard_error(result):
+    reason = result.get('reason', 'unknown')
+    messages = {
+        'no_tensorboard_dir': 'Run has no TensorBoard directory configured',
+        'directory_not_found': f"TensorBoard directory not found: {result.get('path', 'unknown')}",
+        'no_event_files': (
+            "TensorBoard directory exists but contains no event files. "
+            "Check if the training script is writing TensorBoard data. "
+            f"Path: {result.get('path', 'unknown')}"),
+        'no_scalars': (
+            f"TensorBoard event files exist ({result.get('event_files', 0)} files) "
+            "but contain no scalar metrics. This usually means the data hasn't been "
+            "flushed yet. Try calling writer.flush() in your training script, or wait "
+            "longer for automatic flushing."),
+        'parse_error': f"Failed to parse TensorBoard events: {result.get('error', 'unknown')}",
+    }
+    return {
+        'error': 'NO_TENSORBOARD_DATA',
+        'message': messages.get(reason, f"Failed to parse TensorBoard data: {reason}"),
+        'diagnostic': result,
+    }
+
+
+def _format_metric_analysis(analysis, detail):
+    metric_data = {
+        'trend': analysis['trend'], 'recent_trend': analysis.get('recent_trend'),
+        'initial_value': analysis['initial_value'], 'final_value': analysis['final_value'],
+        'smoothed_final_value': analysis.get('smoothed_final_value'),
+        'best_value': analysis['best_value'], 'best_step': analysis['best_step'],
+        'peak_value': analysis.get('peak_value'), 'peak_step': analysis.get('peak_step'),
+        'peak_reversal_pct': analysis.get('peak_reversal_pct', 0.0),
+        'ema_alpha': analysis.get('ema_alpha'),
+        'improvement_percent': analysis['improvement_percent'],
+        'converged': analysis['converged'], 'convergence_step': analysis['convergence_step'],
+        'anomaly_count': analysis['anomaly_count'], 'anomalies': analysis['anomalies'],
+        'summary': analysis['summary'], 'total_points': analysis['total_points'],
+    }
+    if detail in ['medium', 'high']:
+        metric_data['smoothed_points'] = analysis.get('smoothed_points', [])
+        metric_data['sampled_points'] = analysis['sampled_points']
+    return metric_data
 
 
 def get_metric_analysis(
@@ -495,31 +510,7 @@ def get_metric_analysis(
     if not cached:
         result = parse_run_metrics(projects_dir, project_name, run_pk)
         if not result['success']:
-            # Provide diagnostic error messages
-            reason = result.get('reason', 'unknown')
-            if reason == 'no_tensorboard_dir':
-                message = 'Run has no TensorBoard directory configured'
-            elif reason == 'directory_not_found':
-                message = f"TensorBoard directory not found: {result.get('path', 'unknown')}"
-            elif reason == 'no_event_files':
-                message = (f"TensorBoard directory exists but contains no event files. "
-                          f"Check if the training script is writing TensorBoard data. "
-                          f"Path: {result.get('path', 'unknown')}")
-            elif reason == 'no_scalars':
-                message = (f"TensorBoard event files exist ({result.get('event_files', 0)} files) "
-                          f"but contain no scalar metrics. This usually means the data hasn't been "
-                          f"flushed yet. Try calling writer.flush() in your training script, or wait "
-                          f"longer for automatic flushing.")
-            elif reason == 'parse_error':
-                message = f"Failed to parse TensorBoard events: {result.get('error', 'unknown')}"
-            else:
-                message = f"Failed to parse TensorBoard data: {reason}"
-
-            return {
-                'error': 'NO_TENSORBOARD_DATA',
-                'message': message,
-                'diagnostic': result
-            }
+            return _tensorboard_error(result)
 
         # Fetch after parsing
         cached = db.get_metric_analyses(run_pk, metric_filter)
@@ -531,39 +522,52 @@ def get_metric_analysis(
             'message': 'No metrics found matching the filter'
         }
 
-    # Format response based on detail level
-    result = {}
+    return {'metrics': {
+        metric_name: _format_metric_analysis(analysis, detail)
+        for metric_name, analysis in cached.items()
+    }}
 
-    for metric_name, analysis in cached.items():
-        metric_data = {
-            'trend': analysis['trend'],
-            'recent_trend': analysis.get('recent_trend'),
-            'initial_value': analysis['initial_value'],
-            'final_value': analysis['final_value'],
-            'smoothed_final_value': analysis.get('smoothed_final_value'),
-            'best_value': analysis['best_value'],
-            'best_step': analysis['best_step'],
-            'peak_value': analysis.get('peak_value'),
-            'peak_step': analysis.get('peak_step'),
-            'peak_reversal_pct': analysis.get('peak_reversal_pct', 0.0),
-            'ema_alpha': analysis.get('ema_alpha'),
-            'improvement_percent': analysis['improvement_percent'],
-            'converged': analysis['converged'],
-            'convergence_step': analysis['convergence_step'],
-            'anomaly_count': analysis['anomaly_count'],
-            'anomalies': analysis['anomalies'],
-            'summary': analysis['summary'],
-            'total_points': analysis['total_points']
-        }
 
-        # Add smoothed + raw sampled points for medium/high detail
-        if detail in ['medium', 'high']:
-            metric_data['smoothed_points'] = analysis.get('smoothed_points', [])
-            metric_data['sampled_points'] = analysis['sampled_points']
+def _event_timestamps(root, event_files):
+    timestamps = []
+    for filename in event_files:
+        match = EVENT_TIMESTAMP_RE.search(filename)
+        if match:
+            timestamps.append(int(match.group(1)))
+    if timestamps:
+        return timestamps
+    return [int(os.path.getmtime(os.path.join(root, filename))) for filename in event_files]
 
-        result[metric_name] = metric_data
 
-    return {'metrics': result}
+def _tensorboard_candidate(root, event_files, run_start):
+    timestamps = _event_timestamps(root, event_files)
+    oldest = dt.fromtimestamp(min(timestamps))
+    newest = dt.fromtimestamp(max(timestamps))
+    differences = [
+        abs((oldest - run_start).total_seconds()),
+        abs((newest - run_start).total_seconds()),
+    ]
+    if min(differences) >= 3600:
+        return None
+    return {
+        'path': root, 'time_diff': min(differences), 'event_count': len(event_files),
+        'oldest': oldest, 'newest': newest,
+    }
+
+
+def _tensorboard_candidates(search_paths, run_start):
+    candidates = []
+    for search_path in search_paths:
+        if not os.path.isdir(search_path):
+            continue
+        for root, _, files in os.walk(search_path):
+            event_files = [name for name in files if name.startswith('events.out.tfevents.')]
+            if not event_files:
+                continue
+            candidate = _tensorboard_candidate(root, event_files, run_start)
+            if candidate:
+                candidates.append(candidate)
+    return candidates
 
 
 def _discover_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -> Optional[str]:
@@ -580,7 +584,6 @@ def _discover_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -
     Returns:
         Absolute path to discovered TensorBoard directory, or None
     """
-    import datetime
     from dateutil import parser as date_parser
 
     log.debug(f"Auto-discovering TB dir for project={project_name}, run_pk={run.get('id')}")
@@ -607,54 +610,7 @@ def _discover_tensorboard_dir(projects_dir: str, project_name: str, run: dict) -
         os.path.join(project_dir, 'workspace'),
     ]
 
-    candidates = []
-
-    # Search for directories with TensorBoard event files
-    for search_path in search_paths:
-        if not os.path.isdir(search_path):
-            continue
-
-        # Look for event files in this directory and subdirectories
-        for root, dirs, files in os.walk(search_path):
-            event_files = [f for f in files if f.startswith('events.out.tfevents.')]
-            if event_files:
-                # Found a directory with event files
-                # Parse timestamps from TensorBoard event filenames
-                # Format: events.out.tfevents.{timestamp}.{hostname}.{pid}.{suffix}
-                import re
-                timestamps = []
-                for filename in event_files:
-                    match = re.search(r'events\.out\.tfevents\.(\d+)', filename)
-                    if match:
-                        timestamps.append(int(match.group(1)))
-
-                if not timestamps:
-                    # Fallback to mtime if filename parsing fails
-                    event_paths = [os.path.join(root, f) for f in event_files]
-                    timestamps = [int(os.path.getmtime(p)) for p in event_paths]
-
-                oldest_timestamp = min(timestamps)
-                newest_timestamp = max(timestamps)
-
-                # Convert to datetime
-                oldest_dt = datetime.datetime.fromtimestamp(oldest_timestamp)
-                newest_dt = datetime.datetime.fromtimestamp(newest_timestamp)
-
-                # Check if this matches our run timeframe
-                # Allow some tolerance (events might start slightly after run start)
-                time_diff_start = abs((oldest_dt - run_start).total_seconds())
-                time_diff_end = abs((newest_dt - run_start).total_seconds())
-
-                # Consider it a match if event file timestamps overlap with run time
-                # (within 1 hour of run start, or if run was active when files were written)
-                if time_diff_start < 3600 or time_diff_end < 3600:
-                    candidates.append({
-                        'path': root,
-                        'time_diff': min(time_diff_start, time_diff_end),
-                        'event_count': len(event_files),
-                        'oldest': oldest_dt,
-                        'newest': newest_dt
-                    })
+    candidates = _tensorboard_candidates(search_paths, run_start)
 
     if not candidates:
         return None
@@ -689,7 +645,6 @@ def _generate_summary(
     anomalies: list
 ) -> str:
     """Generate human-readable summary with better qualitative analysis."""
-    is_lower_better = _is_lower_better(metric_name)
     parts = []
 
     # Qualitative trend description
@@ -783,8 +738,8 @@ def _delete_tb_dirs(to_delete: list[tuple[str, str, dt]]) -> list[str]:
             log.info(f"Deleting directory: {path}")
             shutil.rmtree(path)
             deleted_names.append(name)
-        except Exception as e:
-            log.error(f"Failed to delete {name}: {e}")
+        except Exception:
+            log.exception("Failed to delete %s", name)
     return deleted_names
 
 

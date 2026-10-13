@@ -45,6 +45,29 @@ def _is_transient(code, projects_dir, name) -> bool:
     return code == "SETUP_INCOMPLETE" and _setup_active(projects_dir, name)
 
 
+def _claim_started_run(db, projects_dir, name, entry, result):
+    try:
+        run = db.get_run(name, result["run_id"])
+        if run is None:
+            raise RuntimeError(f"Started run {name}#{result['run_id']} has no database record")
+        claimed = db.mark_queue_started(entry["id"], run["id"])
+    except Exception:
+        # start_training has already reserved/launched work. If the durable
+        # queue handoff fails, stop it so a later tick cannot launch a duplicate.
+        try:
+            process_manager.stop_training(projects_dir, name, run_id=result["run_id"])
+        except Exception:
+            log.exception("Queue: could not stop %s after handoff failure", result.get("run_ref"))
+        raise
+    if claimed:
+        log.info("Queue: started %s from queue entry %s", result.get("run_ref"), entry["id"])
+        return
+    # Cancelled while start_training ran: stop the run rather than orphan it.
+    log.warning("Queue: entry %s was cancelled during start; stopping %s",
+                entry["id"], result.get("run_ref"))
+    process_manager.stop_training(projects_dir, name, run_id=result["run_id"])
+
+
 def dispatch_project_queue(projects_dir, name) -> None:
     """Try to start the oldest queued run for one project."""
     db = get_db()
@@ -55,26 +78,7 @@ def dispatch_project_queue(projects_dir, name) -> None:
     result = process_manager.start_training(
         projects_dir, name, branch=entry["branch"], extra_env=entry["env_vars"] or None)
     if "error" not in result:
-        try:
-            run = db.get_run(name, result["run_id"])
-            if run is None:
-                raise RuntimeError(f"Started run {name}#{result['run_id']} has no database record")
-            claimed = db.mark_queue_started(entry["id"], run["id"])
-        except Exception:
-            # start_training has already reserved/launched work. If the durable
-            # queue handoff fails, stop it so a later tick cannot launch a duplicate.
-            try:
-                process_manager.stop_training(projects_dir, name, run_id=result["run_id"])
-            except Exception:
-                log.exception("Queue: could not stop %s after handoff failure", result.get("run_ref"))
-            raise
-        if claimed:
-            log.info("Queue: started %s from queue entry %s", result.get("run_ref"), entry["id"])
-        else:
-            # Cancelled while start_training ran: stop the run rather than orphan it.
-            log.warning("Queue: entry %s was cancelled during start; stopping %s",
-                        entry["id"], result.get("run_ref"))
-            process_manager.stop_training(projects_dir, name, run_id=result["run_id"])
+        _claim_started_run(db, projects_dir, name, entry, result)
     elif _is_transient(result.get("code"), projects_dir, name):
         if entry.get("wait_reason") != result["error"]:
             db.set_queue_wait_reason(entry["id"], result["error"])

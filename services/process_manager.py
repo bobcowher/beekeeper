@@ -292,24 +292,27 @@ def get_runs_for_project(name: str) -> list:
     return result
 
 
+def _active_run_log_path(name, run_id):
+    if run_id is not None:
+        info = next(
+            (item for item in _running.values()
+             if item.get("project_name") == name and item.get("run_id") == run_id),
+            None,
+        )
+        return info.get("log_path") if info else None
+    active = [
+        info for info in _running.values()
+        if info.get("project_name") == name and not info.get("starting")
+    ]
+    return active[0].get("log_path") if len(active) == 1 else None
+
+
 def get_run_log_path(projects_dir: str, name: str, run_id: int | None = None) -> str:
     """Return the log file path for a run. For completed runs, resolves via DB."""
     with _lock:
-        if run_id is not None:
-            info = next(
-                (i for i in _running.values()
-                 if i.get("project_name") == name and i.get("run_id") == run_id),
-                None,
-            )
-            if info and info.get("log_path"):
-                return info["log_path"]
-        else:
-            active = [
-                info for info in _running.values()
-                if info.get("project_name") == name and not info.get("starting")
-            ]
-            if len(active) == 1 and active[0].get("log_path"):
-                return active[0]["log_path"]
+        active_path = _active_run_log_path(name, run_id)
+        if active_path:
+            return active_path
 
     if run_id is not None:
         run = get_db().get_run(name, run_id)
@@ -516,8 +519,8 @@ def _archive_run_log(projects_dir: str, project_name: str, run_id: int, source_l
     try:
         shutil.copy2(source_log_path, dest_path)
         return f"run_logs/{filename}"
-    except Exception as e:
-        log.error("Failed to archive log for run %s: %s", run_ref(project_name, run_id), e)
+    except Exception:
+        log.exception("Failed to archive log for run %s", run_ref(project_name, run_id))
         return None
 
 
@@ -1072,7 +1075,7 @@ def stop_training(projects_dir, name, run_id=None):  # NOSONAR — sequential st
         try:
             pgid = os.getpgid(proc.pid)
             os.killpg(pgid, signal.SIGTERM)
-        except (ProcessLookupError, OSError):
+        except OSError:
             pass
 
         try:
@@ -1082,7 +1085,7 @@ def stop_training(projects_dir, name, run_id=None):  # NOSONAR — sequential st
                 pgid = os.getpgid(proc.pid)
                 os.killpg(pgid, signal.SIGKILL)
                 proc.wait(timeout=3)
-            except (ProcessLookupError, OSError):
+            except OSError:
                 pass
 
         exit_code = proc.returncode if proc.returncode is not None else -15

@@ -127,7 +127,7 @@ def delete_pipeline(pipelines_dir, name) -> None:
         get_db().delete_pipeline_records(name)
 
 
-def cancel_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:
+def cancel_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:  # NOSONAR - shared handler signature
     db = get_db()
     with _engine_lock:
         run = _get_run(name, run_number)
@@ -161,7 +161,7 @@ def cancel_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:
     return {"run_id": run_number, "run_ref": pipeline_ref(name, run_number), "status": final}
 
 
-def resume_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:
+def resume_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:  # NOSONAR - shared handler signature
     db = get_db()
     with _engine_lock:
         run = _get_run(name, run_number)
@@ -187,7 +187,7 @@ def resume_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:
     return {"run_id": run_number, "run_ref": pipeline_ref(name, run_number), "status": "running"}
 
 
-def dismiss_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:
+def dismiss_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:  # NOSONAR - shared handler signature
     """Leave a failed run as it is and let the queued runs behind it start."""
     db = get_db()
     with _engine_lock:
@@ -211,34 +211,44 @@ def _progress_key(run):
     return run["status"], run["current_step"], sr and (sr["id"], sr["status"])
 
 
+def _promote_queued_pipeline(projects_dir, name):
+    db = get_db()
+    with _engine_lock:
+        promoted = db.promote_pipeline_run(name)
+        if not promoted:
+            return
+        try:
+            _check_runnable(projects_dir, promoted["definition"]["steps"])
+        except PipelineError as e:
+            sr = db.current_step_run(promoted["id"], 0)
+            _finish_step(promoted, sr, "failed", error=e.message)
+
+
+def _advance_running_pipeline(projects_dir, pipelines_dir, run):
+    with _engine_lock:
+        # Keep advancing while state changes, so finishing one step launches
+        # the next on this tick rather than DISPATCH_INTERVAL later.
+        for _ in range(MAX_ADVANCES_PER_TICK):
+            fresh = get_db().get_pipeline_run_by_pk(run["id"])
+            if not fresh or fresh["status"] != "running":
+                break
+            before = _progress_key(fresh)
+            _advance(projects_dir, pipelines_dir, fresh)
+            after = get_db().get_pipeline_run_by_pk(run["id"])
+            if not after or _progress_key(after) == before:
+                break
+
+
 def tick(projects_dir, pipelines_dir) -> None:
     db = get_db()
     for name in db.pipelines_with_queued_runs():
         try:
-            with _engine_lock:
-                promoted = db.promote_pipeline_run(name)
-                if promoted:
-                    try:
-                        _check_runnable(projects_dir, promoted["definition"]["steps"])
-                    except PipelineError as e:
-                        sr = db.current_step_run(promoted["id"], 0)
-                        _finish_step(promoted, sr, "failed", error=e.message)
+            _promote_queued_pipeline(projects_dir, name)
         except Exception:
             log.exception("Queued pipeline %s failed to promote", name)
-    for run in get_db().running_pipeline_runs():
+    for run in db.running_pipeline_runs():
         try:
-            with _engine_lock:
-                # Keep advancing while state changes, so finishing one step launches
-                # the next on this tick rather than DISPATCH_INTERVAL later.
-                for _ in range(MAX_ADVANCES_PER_TICK):
-                    fresh = get_db().get_pipeline_run_by_pk(run["id"])
-                    if not fresh or fresh["status"] != "running":
-                        break
-                    before = _progress_key(fresh)
-                    _advance(projects_dir, pipelines_dir, fresh)
-                    after = get_db().get_pipeline_run_by_pk(run["id"])
-                    if not after or _progress_key(after) == before:
-                        break
+            _advance_running_pipeline(projects_dir, pipelines_dir, run)
         except Exception:
             log.exception("Pipeline %s failed to advance", pipeline_ref(run["pipeline_name"], run["run_number"]))
 
@@ -261,36 +271,44 @@ def handoff_env(pipelines_dir, run, step_runs, step_index) -> dict:
     return env
 
 
+def _describe_train_step(db, step, step_run, view):
+    view["project"] = step["project"]
+    view["branch"] = step.get("branch")
+    if step_run and step_run["run_pk"]:
+        training_run = db.get_training_run(step_run["run_pk"])
+        if training_run:
+            view["run_id"] = training_run["run_number"]
+            view["run_ref"] = run_ref(step["project"], training_run["run_number"])
+    if step_run and step_run["status"] == "queued" and step_run["queue_id"]:
+        entry = db.get_queue_entry(step_run["queue_id"])
+        view["wait_reason"] = entry["wait_reason"] if entry else None
+
+
+def _describe_step(db, index, step, step_run):
+    view = {
+        "index": index, "name": step["name"], "type": step["type"],
+        "status": step_run["status"] if step_run else "pending",
+        "attempt": step_run["attempt"] if step_run else 0,
+        "error": step_run["error"] if step_run else None,
+        "exit_code": step_run["exit_code"] if step_run else None,
+        "started_at": step_run["started_at"] if step_run else None,
+        "ended_at": step_run["ended_at"] if step_run else None,
+        "run_dir": step_run["run_dir"] if step_run else None,
+    }
+    if step["type"] == "train":
+        _describe_train_step(db, step, step_run, view)
+    else:
+        view["has_log"] = bool(step_run and step_run["log_path"])
+    return view
+
+
 def describe_run(run) -> dict:
     db = get_db()
     by_index = {s["step_index"]: s for s in db.list_step_runs(run["id"])}
-    steps = []
-    for i, step in enumerate(run["definition"]["steps"]):
-        s = by_index.get(i)
-        view = {
-            "index": i, "name": step["name"], "type": step["type"],
-            "status": s["status"] if s else "pending",
-            "attempt": s["attempt"] if s else 0,
-            "error": s["error"] if s else None,
-            "exit_code": s["exit_code"] if s else None,
-            "started_at": s["started_at"] if s else None,
-            "ended_at": s["ended_at"] if s else None,
-            "run_dir": s["run_dir"] if s else None,
-        }
-        if step["type"] == "train":
-            view["project"] = step["project"]
-            view["branch"] = step.get("branch")
-            if s and s["run_pk"]:
-                tr = db.get_training_run(s["run_pk"])
-                if tr:
-                    view["run_id"] = tr["run_number"]
-                    view["run_ref"] = run_ref(step["project"], tr["run_number"])
-            if s and s["status"] == "queued" and s["queue_id"]:
-                entry = db.get_queue_entry(s["queue_id"])
-                view["wait_reason"] = entry["wait_reason"] if entry else None
-        else:
-            view["has_log"] = bool(s and s["log_path"])
-        steps.append(view)
+    steps = [
+        _describe_step(db, index, step, by_index.get(index))
+        for index, step in enumerate(run["definition"]["steps"])
+    ]
     return {
         "run_id": run["run_number"], "run_ref": pipeline_ref(run["pipeline_name"], run["run_number"]),
         "pipeline": run["pipeline_name"], "status": run["status"], "current_step": run["current_step"],
@@ -346,7 +364,7 @@ def _advance(projects_dir, pipelines_dir, run):
         return
     status = sr["status"]
     if status == "pending":
-        _launch(projects_dir, pipelines_dir, run, step, sr)
+        _launch(pipelines_dir, run, step, sr)
     elif status == "queued":
         _check_queued(projects_dir, run, sr)
     elif status == "running" and step["type"] == "train":
@@ -357,7 +375,7 @@ def _advance(projects_dir, pipelines_dir, run):
         _settle(run, sr)   # finished but the pipeline row wasn't advanced (crash between writes)
 
 
-def _launch(projects_dir, pipelines_dir, run, step, sr):
+def _launch(pipelines_dir, run, step, sr):
     db = get_db()
     idx = run["current_step"]
     env = handoff_env(pipelines_dir, run, db.list_step_runs(run["id"]), idx)
