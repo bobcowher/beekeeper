@@ -8,13 +8,13 @@ from contextlib import contextmanager
 from models.user import User
 
 # Runs a pipeline may still hand off: steps of running pipeline runs, and of each
-# pipeline's latest run when it is failed/cancelled (resumable).
+# pipeline's latest run when it is failed/cancelled/succeeded (resumable).
 _PIPELINE_PINNED_RUNS_SQL = '''
     SELECT s.run_pk FROM pipeline_step_runs s
     JOIN pipeline_runs r ON r.id = s.pipeline_run_pk
     WHERE s.run_pk IS NOT NULL AND (
         r.status = 'running'
-        OR (r.status IN ('failed', 'cancelled')
+        OR (r.status IN ('failed', 'cancelled', 'succeeded')
             AND r.id = (SELECT r2.id FROM pipeline_runs r2
                         WHERE r2.pipeline_name = r.pipeline_name
                           AND EXISTS (SELECT 1 FROM pipeline_step_runs s2

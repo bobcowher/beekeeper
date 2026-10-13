@@ -478,10 +478,18 @@ def cancel_pipeline(name: str, run_id: int) -> dict:
 
 
 @mcp.tool()
-def resume_pipeline(name: str, run_id: int) -> dict:
-    """Re-run a failed/cancelled pipeline run from the step that stopped it, reusing earlier
-    steps' outputs. Only the latest run of a pipeline can be resumed."""
-    return _post(f"/pipelines/{name}/runs/{run_id}/resume")
+def resume_pipeline(name: str, run_id: int, from_step: str | None = None) -> dict:
+    """Resume or re-run the latest started pipeline run.
+
+    Without from_step, a failed/cancelled run resumes at the step that stopped it. With
+    from_step, that named step and every later step run again as new attempts in the same
+    run, while earlier outputs are reused; this also works for succeeded runs. Only the
+    latest started run of a pipeline can be resumed or re-run.
+    """
+    path = f"/pipelines/{name}/runs/{run_id}/resume"
+    if from_step is None:
+        return _post(path)
+    return _post(path, {"from_step": from_step})
 
 
 @mcp.tool()

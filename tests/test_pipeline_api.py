@@ -109,6 +109,30 @@ def test_runs_lifecycle(client, app):
     assert dismiss.status_code == 409 and dismiss.get_json()["error"]["code"] == "NOT_DISMISSABLE"
 
 
+@pytest.mark.parametrize("from_step", [None, 3, True, [], {}])
+def test_resume_rejects_non_string_from_step(client, app, from_step):
+    make_project_dir(app, "p")
+    post_yaml(client, "/api/v1/pipelines", YAML)
+    client.post("/api/v1/pipelines/fac/runs")
+    client.post("/api/v1/pipelines/fac/runs/1/cancel")
+
+    response = client.post("/api/v1/pipelines/fac/runs/1/resume", json={"from_step": from_step})
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "INVALID_STEP"
+
+
+def test_resume_passes_optional_from_step(client, app, monkeypatch):
+    calls = []
+    monkeypatch.setattr(eng, "resume_pipeline_run",
+                        lambda *args, **kwargs: calls.append((args, kwargs)) or {"status": "running"})
+
+    response = client.post("/api/v1/pipelines/fac/runs/7/resume", json={"from_step": "train"})
+
+    assert response.status_code == 200
+    assert calls[0][1] == {"from_step": "train"}
+
+
 def test_start_run_accepts_branch_overrides(client, app):
     make_project_dir(app, "p")
     post_yaml(client, "/api/v1/pipelines", YAML)

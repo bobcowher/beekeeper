@@ -140,6 +140,8 @@ def test_pipeline_run_tools(calls):
     assert calls[-1] == ("_post", "/pipelines/p/runs/3/cancel", None)
     server.resume_pipeline("p", 3)
     assert calls[-1] == ("_post", "/pipelines/p/runs/3/resume", None)
+    server.resume_pipeline("p", 3, from_step="train")
+    assert calls[-1] == ("_post", "/pipelines/p/runs/3/resume", {"from_step": "train"})
     server.dismiss_pipeline_run("p", 3)
     assert calls[-1] == ("_post", "/pipelines/p/runs/3/dismiss", None)
     server.get_step_log("p", 3, "deploy", tail=50)

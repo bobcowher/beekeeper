@@ -38,8 +38,8 @@ def test_latest_failed_pins_but_older_failed_does_not(app):
     assert pks[1] not in deleted and pks[0] in deleted
 
 
-def test_succeeded_pipeline_does_not_pin(app):
+def test_latest_succeeded_pipeline_pins_run_for_rerun(app):
     pks = make_runs(3)
     attach(pks[0], "succeeded")
     deleted = {r["id"] for r in get_db().prune_old_runs("p", keep_last=1)}
-    assert pks[0] in deleted
+    assert pks[0] not in deleted and deleted == {pks[1]}

@@ -747,8 +747,19 @@ def pipeline_runs_action(name, run_id, action):
                 "dismiss": pipeline_engine.dismiss_pipeline_run}
     if action not in handlers:
         return api_response(error_code="NOT_FOUND", error_message=f"Unknown action '{action}'", status_code=404)
+    kwargs = {}
+    if action == "resume":
+        body = request.get_json(silent=True)
+        if body is not None and not isinstance(body, dict):
+            return api_response(error_code="INVALID_STEP", error_message="from_step must be a step name",
+                                status_code=400)
+        if body is not None and "from_step" in body:
+            if not isinstance(body["from_step"], str):
+                return api_response(error_code="INVALID_STEP", error_message="from_step must be a step name",
+                                    status_code=400)
+            kwargs["from_step"] = body["from_step"]
     try:
-        result = handlers[action](current_app.config["PROJECTS_DIR"], _pipelines_dir(), name, run_id)
+        result = handlers[action](current_app.config["PROJECTS_DIR"], _pipelines_dir(), name, run_id, **kwargs)
     except pipeline_engine.PipelineError as e:
         return _pipeline_error(e)
     return api_response(data=result)
@@ -1877,7 +1888,7 @@ Read both outputs before taking any action.
 | `list_pipeline_runs(name, limit=20)` | Recent pipeline runs, newest first |
 | `pipeline_status(name, run_id=None)` | Latest or specified pipeline run and steps |
 | `cancel_pipeline(name, run_id)` | Cancel a run and stop its current step |
-| `resume_pipeline(name, run_id)` | Resume the latest failed/cancelled run |
+| `resume_pipeline(name, run_id, from_step=None)` | Resume a failed/cancelled run, or re-run the latest stopped run from a named step |
 | `dismiss_pipeline_run(name, run_id)` | Skip a failed run so the queue continues |
 | `get_step_log(name, run_id, step_name, tail=200)` | Task-step log output |
 | `list_branches(name)` | Available branches |
@@ -2034,7 +2045,7 @@ Remember the answer. This determines what counts as a good run.
 | `list_pipeline_runs(name, limit=20)` | Recent pipeline runs, newest first |
 | `pipeline_status(name, run_id=None)` | Pipeline and step status |
 | `cancel_pipeline(name, run_id)` | Cancel a pipeline run |
-| `resume_pipeline(name, run_id)` | Resume a stopped pipeline run |
+| `resume_pipeline(name, run_id, from_step=None)` | Resume a stopped run or re-run it from a named step |
 | `dismiss_pipeline_run(name, run_id)` | Skip a failed run so the queue continues |
 | `get_step_log(name, run_id, step_name)` | Read a task-step log |
 | `get_stats()` | GPU, CPU, RAM |

@@ -140,13 +140,13 @@ def cancel_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict: 
                     "status": final}
         if run["status"] != "running":
             raise PipelineError("NOT_RUNNING", f"{pipeline_ref(name, run_number)} is {run['status']}", 409)
-        sr = db.current_step_run(run["id"], run["current_step"])
+        sr = _live_step_run(db, run["id"], run["current_step"])
         if sr and sr["status"] == "succeeded":
             # Finished but never advanced (crash between writes): settle first, so a
             # finished pipeline is not recorded as cancelled.
             _settle(run, sr)
             run = db.get_pipeline_run_by_pk(run["id"])
-            sr = db.current_step_run(run["id"], run["current_step"])
+            sr = _live_step_run(db, run["id"], run["current_step"])
         if run["status"] == "running":
             if sr is None:
                 step = run["definition"]["steps"][run["current_step"]]
@@ -161,27 +161,43 @@ def cancel_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict: 
     return {"run_id": run_number, "run_ref": pipeline_ref(name, run_number), "status": final}
 
 
-def resume_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:  # NOSONAR - shared handler signature
+def resume_pipeline_run(projects_dir, pipelines_dir, name, run_number,
+                        from_step=None) -> dict:  # NOSONAR - shared handler signature
     db = get_db()
     with _engine_lock:
         run = _get_run(name, run_number)
-        if run["status"] not in ("failed", "cancelled"):
+        if from_step is not None and not isinstance(from_step, str):
+            raise PipelineError("INVALID_STEP", "from_step must be a step name", 400)
+        resumable_statuses = ("failed", "cancelled", "succeeded") if from_step is not None else ("failed", "cancelled")
+        if run["status"] not in resumable_statuses:
             raise PipelineError("NOT_RESUMABLE", f"{pipeline_ref(name, run_number)} is {run['status']}", 409)
         if any(r["pipeline_name"] == name for r in db.running_pipeline_runs()):
             raise PipelineError("PIPELINE_ACTIVE", f"Pipeline '{name}' already has a running run", 409)
         latest = db.latest_pipeline_run(name)
         if latest is None or latest["id"] != run["id"]:
             raise PipelineError("NOT_LATEST", "Only the latest run of a pipeline can be resumed", 409)
-        idx = run["current_step"]
         steps = run["definition"]["steps"]
+        if from_step is None:
+            idx = run["current_step"]
+        else:
+            idx = next((i for i, step in enumerate(steps) if step["name"] == from_step), None)
+            if idx is None:
+                raise PipelineError("INVALID_STEP", f"Unknown step '{from_step}'", 400)
+            if idx > run["current_step"]:
+                raise PipelineError("NOT_RESUMABLE", f"step '{from_step}' has not run yet", 409)
         for s in db.list_step_runs(run["id"]):
             if s["step_index"] < idx and s["status"] == "succeeded" and not os.path.isdir(s["run_dir"] or ""):
                 raise PipelineError("ARTIFACTS_MISSING",
                                     f"Output of step '{s['step_name']}' no longer exists ({s['run_dir']})", 409)
         _check_runnable(projects_dir, steps[idx:])
         db.delete_skipped_steps(run["id"])
+        for j in range(idx + 1, len(steps)):
+            later = db.current_step_run(run["id"], j)
+            if later is not None and later["status"] != "superseded":
+                db.update_step_run(later["id"], status="superseded")
         db.create_step_run(run["id"], idx, steps[idx]["name"], steps[idx]["type"])
-        db.update_pipeline_run(run["id"], status="running", error=None, ended_at=None, dismissed=0)
+        db.update_pipeline_run(run["id"], status="running", current_step=idx, error=None,
+                               ended_at=None, dismissed=0)
     log.info("Pipeline %s resumed at step %s", pipeline_ref(name, run_number), steps[idx]["name"])
     _wake_dispatcher()
     return {"run_id": run_number, "run_ref": pipeline_ref(name, run_number), "status": "running"}
@@ -287,7 +303,8 @@ def _describe_train_step(db, step, step_run, view):
 def _describe_step(db, index, step, step_run):
     view = {
         "index": index, "name": step["name"], "type": step["type"],
-        "status": step_run["status"] if step_run else "pending",
+        "status": ("pending" if step_run and step_run["status"] == "superseded"
+                   else step_run["status"] if step_run else "pending"),
         "attempt": step_run["attempt"] if step_run else 0,
         "error": step_run["error"] if step_run else None,
         "exit_code": step_run["exit_code"] if step_run else None,
@@ -331,6 +348,11 @@ def running_task_labels() -> list[str]:
 
 # --- State machine ---------------------------------------------------------------
 
+def _live_step_run(db, pipeline_run_pk, step_index):
+    """Return the current attempt unless it was invalidated by a re-run."""
+    step_run = db.current_step_run(pipeline_run_pk, step_index)
+    return None if step_run and step_run["status"] == "superseded" else step_run
+
 def _stop_training_run(projects_dir, run_pk):
     tr = get_db().get_training_run(run_pk)
     if tr:
@@ -358,7 +380,7 @@ def _advance(projects_dir, pipelines_dir, run):
     db = get_db()
     idx = run["current_step"]
     step = run["definition"]["steps"][idx]
-    sr = db.current_step_run(run["id"], idx)
+    sr = _live_step_run(db, run["id"], idx)
     if sr is None:
         db.create_step_run(run["id"], idx, step["name"], step["type"])
         return
@@ -479,7 +501,7 @@ def _settle(run, sr):
     if sr["status"] == "succeeded":
         if idx + 1 < len(steps):
             nxt = steps[idx + 1]
-            if db.current_step_run(run["id"], idx + 1) is None:
+            if _live_step_run(db, run["id"], idx + 1) is None:
                 db.create_step_run(run["id"], idx + 1, nxt["name"], nxt["type"])
             db.update_pipeline_run(run["id"], current_step=idx + 1)
         else:
@@ -487,7 +509,7 @@ def _settle(run, sr):
             log.info("Pipeline %s succeeded", pipeline_ref(run["pipeline_name"], run["run_number"]))
         return
     for j in range(idx + 1, len(steps)):
-        if db.current_step_run(run["id"], j) is None:
+        if _live_step_run(db, run["id"], j) is None:
             db.create_step_run(run["id"], j, steps[j]["name"], steps[j]["type"], status="skipped")
     final = "cancelled" if sr["status"] == "cancelled" else "failed"
     db.update_pipeline_run(run["id"], status=final, ended_at=_now(),

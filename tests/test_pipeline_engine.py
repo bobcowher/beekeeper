@@ -289,6 +289,164 @@ def test_resume_reuses_earlier_outputs(env):
     assert entry["env_vars"]["BEEKEEPER_STEP_PRETRAIN_DIR"] == step(1, 0)["run_dir"]
 
 
+def _mark_pipeline_succeeded(env, run):
+    """Record all three steps as completed without launching external work."""
+    db = get_db()
+    pre_dir = os.path.join(env["pl"], "pre-output")
+    os.makedirs(pre_dir, exist_ok=True)
+    db.update_step_run(db.current_step_run(run["id"], 0)["id"],
+                       status="succeeded", run_dir=pre_dir, ended_at=eng._now())
+    fine_dir = os.path.join(env["pl"], "fine-output")
+    os.makedirs(fine_dir, exist_ok=True)
+    fine = db.create_step_run(run["id"], 1, "fine-tune", "train")
+    db.update_step_run(fine, status="succeeded", run_dir=fine_dir,
+                       ended_at=eng._now())
+    deploy = db.create_step_run(run["id"], 2, "deploy", "task")
+    db.update_step_run(deploy, status="succeeded", run_dir=env["pl"], ended_at=eng._now())
+    db.update_pipeline_run(run["id"], status="succeeded", current_step=2, ended_at=eng._now())
+    return db.get_pipeline_run_by_pk(run["id"]), pre_dir
+
+
+def _record_succeeded_pipeline(env):
+    """Create a completed three-step run without launching external work."""
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    return _mark_pipeline_succeeded(env, get_db().get_pipeline_run("fac", 1))
+
+
+def test_rerun_succeeded_pipeline_from_middle_step(env):
+    run, pre_dir = _record_succeeded_pipeline(env)
+    original_pre = step(1, 0)
+
+    resumed = eng.resume_pipeline_run(env["pd"], env["pl"], "fac", 1, from_step="fine-tune")
+
+    assert resumed == {"run_id": 1, "run_ref": "fac#1", "status": "running"}
+    assert step(1, 0) == original_pre
+    assert step(1, 1)["attempt"] == 2 and step(1, 1)["status"] == "pending"
+    assert step(1, 2)["attempt"] == 1 and step(1, 2)["status"] == "superseded"
+    described = eng.describe_run(get_db().get_pipeline_run("fac", 1))
+    assert described["steps"][2]["status"] == "pending"
+    assert described["steps"][2]["attempt"] == 1
+
+    tick(env)
+    entry = get_db().list_queue("ft")[0]
+    assert entry["env_vars"]["BEEKEEPER_STEP_PRETRAIN_DIR"] == pre_dir
+    assert entry["env_vars"]["BEEKEEPER_PREV_STEP_DIR"] == pre_dir
+    _, fine_pk, _ = start_queued_run("ft")
+    tick(env)
+    finish(fine_pk)
+    tick(env)
+    assert step(1, 1)["attempt"] == 2 and step(1, 1)["status"] == "succeeded"
+    assert step(1, 2)["attempt"] == 2
+
+    deadline = time.time() + 10
+    while get_db().get_pipeline_run("fac", 1)["status"] == "running" and time.time() < deadline:
+        tick(env)
+        time.sleep(0.05)
+    assert get_db().get_pipeline_run("fac", 1)["status"] == "succeeded"
+    assert step(1, 2)["attempt"] == 2 and step(1, 2)["status"] == "succeeded"
+    with get_db()._get_connection() as conn:
+        attempts = conn.execute(
+            "SELECT step_index, attempt, status FROM pipeline_step_runs "
+            "WHERE pipeline_run_pk = ? ORDER BY step_index, attempt", (run["id"],)).fetchall()
+    assert [tuple(row) for row in attempts] == [
+        (0, 1, "succeeded"),
+        (1, 1, "succeeded"), (1, 2, "succeeded"),
+        (2, 1, "superseded"), (2, 2, "succeeded"),
+    ]
+
+
+def test_rerun_rejects_unknown_or_not_yet_run_step(env):
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    run = get_db().get_pipeline_run("fac", 1)
+    get_db().update_step_run(step(1, 0)["id"], status="failed")
+    get_db().update_pipeline_run(run["id"], status="failed", ended_at=eng._now())
+    with pytest.raises(eng.PipelineError) as exc:
+        eng.resume_pipeline_run(env["pd"], env["pl"], "fac", 1, from_step="missing")
+    assert exc.value.code == "INVALID_STEP" and exc.value.status == 400
+    with pytest.raises(eng.PipelineError) as exc:
+        eng.resume_pipeline_run(env["pd"], env["pl"], "fac", 1, from_step="fine-tune")
+    assert exc.value.code == "NOT_RESUMABLE" and exc.value.message == "step 'fine-tune' has not run yet"
+
+
+def test_rerun_requires_latest_started_run(env):
+    _record_succeeded_pipeline(env)
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    run2 = get_db().get_pipeline_run("fac", 2)
+    get_db().update_step_run(get_db().current_step_run(run2["id"], 0)["id"], status="failed")
+    get_db().update_pipeline_run(run2["id"], status="failed", ended_at=eng._now())
+
+    with pytest.raises(eng.PipelineError) as exc:
+        eng.resume_pipeline_run(env["pd"], env["pl"], "fac", 1, from_step="pretrain")
+    assert exc.value.code == "NOT_LATEST"
+
+
+def test_plain_resume_after_rerun_failure_does_not_reuse_superseded_step(env):
+    _record_succeeded_pipeline(env)
+    eng.resume_pipeline_run(env["pd"], env["pl"], "fac", 1, from_step="fine-tune")
+    fine = step(1, 1)
+    get_db().update_step_run(fine["id"], status="succeeded", run_dir="/tmp", ended_at=eng._now())
+    run = get_db().get_pipeline_run("fac", 1)
+    eng._settle(run, dict(fine, status="succeeded"))
+    deploy = step(1, 2)
+    assert deploy["attempt"] == 2
+    get_db().update_step_run(deploy["id"], status="failed", error="boom", ended_at=eng._now())
+    run = get_db().get_pipeline_run("fac", 1)
+    eng._settle(run, dict(deploy, status="failed", error="boom"))
+
+    eng.resume_pipeline_run(env["pd"], env["pl"], "fac", 1)
+    assert step(1, 2)["attempt"] == 3 and step(1, 2)["status"] == "pending"
+    get_db().update_step_run(step(1, 2)["id"], status="succeeded", ended_at=eng._now())
+    run = get_db().get_pipeline_run("fac", 1)
+    eng._settle(run, step(1, 2))
+    assert get_db().get_pipeline_run("fac", 1)["status"] == "succeeded"
+
+
+def test_cancel_during_rerun_skips_superseded_later_steps(env):
+    _record_succeeded_pipeline(env)
+    eng.resume_pipeline_run(env["pd"], env["pl"], "fac", 1, from_step="fine-tune")
+
+    result = eng.cancel_pipeline_run(env["pd"], env["pl"], "fac", 1)
+
+    assert result["status"] == "cancelled"
+    assert step(1, 1)["attempt"] == 2 and step(1, 1)["status"] == "cancelled"
+    assert step(1, 2)["attempt"] == 2 and step(1, 2)["status"] == "skipped"
+
+
+def test_rerun_failure_pauses_queued_run_again(env):
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    run1 = get_db().get_pipeline_run("fac", 1)
+    _mark_pipeline_succeeded(env, run1)
+    eng.resume_pipeline_run(env["pd"], env["pl"], "fac", 1, from_step="deploy")
+    rerun = step(1, 2)
+    get_db().update_step_run(rerun["id"], status="failed", error="rerun failed", ended_at=eng._now())
+    eng._settle(get_db().get_pipeline_run("fac", 1), dict(rerun, status="failed", error="rerun failed"))
+
+    tick(env)
+
+    assert get_db().get_pipeline_run("fac", 1)["status"] == "failed"
+    assert get_db().get_pipeline_run("fac", 2)["status"] == "queued"
+
+
+def test_rerun_task_log_uses_attempt_suffix(env):
+    store.save_pipeline(env["pl"], {"name": "tsk", "steps": [
+        {"name": "work", "type": "task", "command": "sleep 10"}]})
+    eng.start_pipeline_run(env["pd"], env["pl"], "tsk")
+    db = get_db()
+    run = db.get_pipeline_run("tsk", 1)
+    first = db.current_step_run(run["id"], 0)
+    db.update_step_run(first["id"], status="succeeded", run_dir=env["pl"], ended_at=eng._now())
+    db.update_pipeline_run(run["id"], status="succeeded", ended_at=eng._now())
+
+    eng.resume_pipeline_run(env["pd"], env["pl"], "tsk", 1, from_step="work")
+    tick(env)
+
+    rerun = db.current_step_run(run["id"], 0)
+    assert rerun["attempt"] == 2
+    assert rerun["log_path"].endswith("step_0_work_attempt2.log")
+    eng.cancel_pipeline_run(env["pd"], env["pl"], "tsk", 1)
+
+
 def test_resume_failed_run_while_later_run_is_queued(env):
     eng.start_pipeline_run(env["pd"], env["pl"], "fac")
     eng.start_pipeline_run(env["pd"], env["pl"], "fac")
