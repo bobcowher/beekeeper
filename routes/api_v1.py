@@ -28,7 +28,9 @@ from routes.files import _safe_path, _fmt_size, _zip_directory
 from routes.runs import _resolve_run, _safe_run_path
 from services.run_refs import public_run, run_ref
 from services import pipeline_engine, pipeline_store
-from services.pipeline_schema import NAME_RE as PIPELINE_NAME_RE, PipelineValidationError, draft_yaml, parse_text, to_yaml, validate as validate_pipeline
+from services.pipeline_schema import (NAME_RE as PIPELINE_NAME_RE, PipelineValidationError,
+                                      draft_yaml, parse_text, to_yaml, valid_branch_name,
+                                      validate as validate_pipeline)
 
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
@@ -797,6 +799,9 @@ def training_start(name):
     body = request.get_json() or {}
     branch = body.get("branch")  # None -> use project default
     env_vars = body.get("env_vars")
+    if branch is not None and not valid_branch_name(branch):
+        return api_response(error_code="INVALID_BRANCH",
+                            error_message="branch is not a valid branch name", status_code=400)
     if env_vars is not None and not _valid_env(env_vars):
         return api_response(error_code="INVALID_ENV_VARS",
                             error_message="env_vars must map strings to strings", status_code=400)

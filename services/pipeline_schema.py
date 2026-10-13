@@ -4,6 +4,7 @@ Validation runs on the parsed value, so YAML's implicit typing (`no` -> False,
 `0.001` -> float) is caught here and reported with a "quote it" hint.
 """
 import re
+import unicodedata
 
 import yaml
 
@@ -19,6 +20,18 @@ MAX_TASK_TIMEOUT = 86400
 TOP_KEYS = {"name", "folder", "description", "steps"}
 TRAIN_KEYS = {"name", "type", "project", "branch", "env_vars"}
 TASK_KEYS = {"name", "type", "command", "timeout_s"}
+
+
+def valid_branch_name(s) -> bool:
+    if not isinstance(s, str) or not s or len(s) > 255:
+        return False
+    if s[0] in "-/" or s.endswith("/") or s.endswith(".lock"):
+        return False
+    if ".." in s or "@{" in s:
+        return False
+    if any(ch.isspace() or unicodedata.category(ch) == "Cc" for ch in s):
+        return False
+    return not any(ch in "~^:?*[\\" for ch in s)
 
 
 class PipelineValidationError(ValueError):
@@ -119,9 +132,9 @@ def _validate_step(step, path, err):
             err(f"{path}.project", "must name a project using only letters, digits, '_' or '-'")
             project = None
         branch = _str_field(step, "branch", path, err)
-        branch_ok = branch is None or bool(branch.strip())
+        branch_ok = branch is None or valid_branch_name(branch)
         if not branch_ok:
-            err(f"{path}.branch", "must not be empty")
+            err(f"{path}.branch", "is not a valid branch name")
         env = _env_field(step.get("env_vars", {}), f"{path}.env_vars", err)
         if name is None or project is None or env is None or not branch_ok:
             return None

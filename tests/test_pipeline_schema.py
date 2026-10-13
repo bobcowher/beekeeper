@@ -1,7 +1,7 @@
 import pytest
 
 from services.pipeline_schema import (
-    PipelineValidationError, parse_text, step_dir_var, to_yaml, validate,
+    PipelineValidationError, parse_text, step_dir_var, to_yaml, valid_branch_name, validate,
 )
 
 GOOD = """
@@ -66,13 +66,33 @@ def test_yaml_bool_branch_rejected_with_quote_hint():
     assert "quote" in errs["steps[0].branch"]
 
 
+@pytest.mark.parametrize("branch", ["main", "feat/x-1", "release-1.2"])
+def test_valid_branch_names(branch):
+    assert valid_branch_name(branch)
+
+
+@pytest.mark.parametrize("branch", [
+    "-x", "--upload-pack=evil", "a b", "a..b", "a~1", "x.lock", "/x", "x/", "", "a@{b",
+])
+def test_invalid_branch_names(branch):
+    assert not valid_branch_name(branch)
+
+
+def test_invalid_train_branch_rejected():
+    errs = errors_for({
+        "name": "p",
+        "steps": [{"name": "a", "type": "train", "project": "x", "branch": "a..b"}],
+    })
+    assert errs["steps[0].branch"] == "is not a valid branch name"
+
+
 @pytest.mark.parametrize("branch", ["", "   "])
 def test_empty_train_branch_rejected(branch):
     errs = errors_for({
         "name": "p",
         "steps": [{"name": "a", "type": "train", "project": "x", "branch": branch}],
     })
-    assert "empty" in errs["steps[0].branch"]
+    assert errs["steps[0].branch"] == "is not a valid branch name"
 
 
 @pytest.mark.parametrize("text,key", [

@@ -153,6 +153,14 @@ def test_training_start_passes_branch(client, ready_project):
     assert kwargs.get("branch") == "feature/test"
 
 
+def test_training_start_rejects_invalid_branch(client, ready_project):
+    r = client.post("/api/v1/projects/myproject/training/start",
+                    json={"branch": "--upload-pack=evil"},
+                    headers={"Authorization": "Bearer test"})
+    assert r.status_code == 400
+    assert r.get_json()["error"]["code"] == "INVALID_BRANCH"
+
+
 def test_training_status_returns_runs_list(client, ready_project):
     """GET /training/status returns runs list."""
     from unittest.mock import patch
