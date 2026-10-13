@@ -131,7 +131,7 @@ def test_pipeline_run_tools(calls):
     server.start_pipeline("p", branches={"train": "feat/x"})
     assert calls[-1] == ("_post", "/pipelines/p/runs", {"branches": {"train": "feat/x"}})
     server.pipeline_status("p")
-    assert calls[-1] == ("_get", "/pipelines/p/runs?limit=1", None)
+    assert calls[-1] == ("_get", "/pipelines/p/runs/latest", None)
     server.pipeline_status("p", run_id=3)
     assert calls[-1] == ("_get", "/pipelines/p/runs/3", None)
     server.list_pipeline_runs("p", limit=7)

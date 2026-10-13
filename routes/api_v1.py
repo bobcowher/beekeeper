@@ -720,6 +720,17 @@ def pipeline_runs_list(name):
     return api_response(data={"runs": [pipeline_engine.describe_run(r) for r in runs]})
 
 
+@api_v1_bp.route("/pipelines/<name>/runs/latest", methods=["GET"])
+@api_key_required
+def pipeline_runs_latest(name):
+    """The latest run that actually started (queued runs and runs removed from the queue are skipped)."""
+    _require_pipeline(name)
+    run = get_db().latest_pipeline_run(name)
+    if not run:
+        return api_response(error_code="NOT_FOUND", error_message=f"{name} has no started runs", status_code=404)
+    return api_response(data=pipeline_engine.describe_run(run))
+
+
 @api_v1_bp.route("/pipelines/<name>/runs/<int:run_id>", methods=["GET"])
 @api_key_required
 def pipeline_runs_get(name, run_id):

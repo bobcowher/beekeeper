@@ -224,3 +224,14 @@ def test_step_log_path_confined(client, app):
     r = client.get("/api/v1/pipelines/t/runs/1/steps/s/log")
     assert r.status_code == 404
     assert marker not in r.get_data(as_text=True)
+
+
+def test_latest_run_skips_runs_that_never_started(client, app):
+    make_project_dir(app, "p")
+    post_yaml(client, "/api/v1/pipelines", YAML)
+    assert client.get("/api/v1/pipelines/fac/runs/latest").status_code == 404
+    client.post("/api/v1/pipelines/fac/runs")
+    client.post("/api/v1/pipelines/fac/runs")
+    client.post("/api/v1/pipelines/fac/runs/2/cancel")       # removed while queued
+    latest = client.get("/api/v1/pipelines/fac/runs/latest").get_json()["data"]
+    assert latest["run_id"] == 1 and latest["status"] == "running"

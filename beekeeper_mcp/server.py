@@ -453,10 +453,11 @@ def start_pipeline(name: str, branches: dict[str, str] | None = None) -> dict:
 
 @mcp.tool()
 def pipeline_status(name: str, run_id: int | None = None) -> dict:
-    """Status of a pipeline run (latest if run_id is omitted), with per-step status,
-    training run refs, wait reasons and errors."""
+    """Status of a pipeline run, with per-step status, training run refs, wait reasons
+    and errors. Without run_id: the latest run that started (queued runs are skipped;
+    list_pipeline_runs shows the queue)."""
     if run_id is None:
-        return _get(f"/pipelines/{name}/runs?limit=1")
+        return _get(f"/pipelines/{name}/runs/latest")
     return _get(f"/pipelines/{name}/runs/{run_id}")
 
 
