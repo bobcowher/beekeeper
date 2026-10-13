@@ -7,7 +7,7 @@
     const $ = id => document.getElementById(id);
 
     let runs = [];           // newest first, queued runs included
-    let started = [];        // runs that have left the queue, newest first
+    let started = [];        // runs that actually started (not queued or removed from the queue), newest first
     let queued = [];         // waiting runs, oldest (next to start) first
     const branchLists = new Map();  // project -> Promise of {branches, current} or {error}
     let selectedRun = null;  // run_id being viewed; null = latest
@@ -460,7 +460,7 @@
         if (!list.success) throw new Error(errorMessage(list, 'Could not load pipeline runs'));
         definition = def.data.pipeline;
         runs = list.data.runs;
-        started = runs.filter(run => run.status !== 'queued');
+        started = runs.filter(run => run.started);
         queued = runs.filter(run => run.status === 'queued').reverse();
         if (selectedRun && !runs.some(run => run.run_id === selectedRun)) selectedRun = null;
         clearPageError('refresh');

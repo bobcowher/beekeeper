@@ -473,6 +473,7 @@ def test_pipeline_step_log_survives_periodic_refresh(live_server):
         requests = {"runs": 0}
         run = {
             "run_id": 1,
+            "started": True,
             "status": "running",
             "current_step": 0,
             "error": "",
@@ -540,6 +541,7 @@ def test_pipeline_history_labels_running_and_stopped_steps(live_server):
         def run(run_id, status, current_step):
             return {
                 "run_id": run_id,
+                "started": True,
                 "status": status,
                 "current_step": current_step,
                 "error": "",
@@ -753,7 +755,7 @@ def test_pipeline_dynamic_content_is_text_and_controls_are_accessible(live_serve
             "steps": [{"name": payload, "type": "task", "command": "true"}],
         }
         run = {
-            "run_id": 1, "run_ref": "xss-pipe#1", "status": "running", "current_step": 0,
+            "run_id": 1, "run_ref": "xss-pipe#1", "status": "running", "current_step": 0, "started": True,
             "error": payload, "started_at": "2026-10-10T12:00:00", "ended_at": None,
             "steps": [{
                 "name": payload, "type": "task", "status": "running", "attempt": 1,
@@ -846,10 +848,10 @@ def test_pipeline_run_view_opens_steps_on_click_and_switches_runs(live_server):
                 "has_log": has_log, "error": "exit code 1" if status == "failed" else None}
 
     runs = [
-        {"run_id": 2, "run_ref": "fail-pipe#2", "status": "failed", "current_step": 1,
+        {"run_id": 2, "run_ref": "fail-pipe#2", "status": "failed", "current_step": 1, "started": True,
          "error": "step 'second': exit code 1", "started_at": "2026-10-10T12:00:00",
          "ended_at": "2026-10-10T12:00:10", "steps": [step("first", "succeeded"), step("second", "failed")]},
-        {"run_id": 1, "run_ref": "fail-pipe#1", "status": "succeeded", "current_step": 1,
+        {"run_id": 1, "run_ref": "fail-pipe#1", "status": "succeeded", "current_step": 1, "started": True,
          "error": None, "started_at": "2026-10-09T12:00:00",
          "ended_at": "2026-10-09T12:00:10", "steps": [step("first", "succeeded"), step("second", "succeeded")]},
     ]
@@ -1163,7 +1165,7 @@ def test_pipeline_failed_run_pauses_queue_until_skipped(live_server):
     def run(n, status, dismissed=False):
         return {"run_id": n, "run_ref": f"paused-pipe#{n}", "pipeline": "paused-pipe", "status": status,
                 "current_step": 0, "error": "step 'a': boom" if status == "failed" else None,
-                "overrides": {}, "dismissed": dismissed,
+                "overrides": {}, "dismissed": dismissed, "started": status != "queued",
                 "started_at": "2026-10-12T10:00:00", "ended_at": None,
                 "steps": [{"index": 0, "name": "a", "type": "task", "status":
                            "failed" if status == "failed" else "pending", "attempt": 1, "error": None,
@@ -1209,12 +1211,13 @@ def test_pipeline_step_panel_reruns_from_step(live_server):
                 "exit_code": 0, "started_at": None, "ended_at": None, "run_dir": None, "has_log": False}
 
     def run(n, status, current, statuses):
-        return {"run_id": n, "run_ref": f"rerun-pipe#{n}", "pipeline": "rerun-pipe", "status": status,
+        return {"run_id": n, "run_ref": f"rerun-pipe#{n}", "pipeline": "rerun-pipe", "status": status, "started": True,
                 "current_step": current, "error": None, "overrides": {}, "dismissed": False,
                 "started_at": "2026-10-12T10:00:00", "ended_at": "2026-10-12T10:05:00",
                 "steps": [step(i, nm, st) for i, (nm, st) in enumerate(zip(["a", "b", "c"], statuses))]}
 
-    runs = [run(2, "failed", 1, ["succeeded", "failed", "skipped"]),
+    removed = dict(run(3, "cancelled", 0, ["pending", "pending", "pending"]), started=False)
+    runs = [removed, run(2, "failed", 1, ["succeeded", "failed", "skipped"]),
             run(1, "succeeded", 2, ["succeeded", "succeeded", "succeeded"])]
     posted = []
 

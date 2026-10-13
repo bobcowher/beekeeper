@@ -329,8 +329,9 @@ def describe_run(run) -> dict:
     return {
         "run_id": run["run_number"], "run_ref": pipeline_ref(run["pipeline_name"], run["run_number"]),
         "pipeline": run["pipeline_name"], "status": run["status"], "current_step": run["current_step"],
-        "error": run["error"], "overrides": run["overrides"], "dismissed": run["dismissed"], "started_at": run["started_at"],
-        "ended_at": run["ended_at"], "steps": steps,
+        "error": run["error"], "overrides": run["overrides"], "dismissed": run["dismissed"],
+        "started": bool(by_index),   # false for queued runs and runs removed from the queue
+        "started_at": run["started_at"], "ended_at": run["ended_at"], "steps": steps,
     }
 
 

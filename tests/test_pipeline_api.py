@@ -259,3 +259,13 @@ def test_latest_run_skips_runs_that_never_started(client, app):
     client.post("/api/v1/pipelines/fac/runs/2/cancel")       # removed while queued
     latest = client.get("/api/v1/pipelines/fac/runs/latest").get_json()["data"]
     assert latest["run_id"] == 1 and latest["status"] == "running"
+
+
+def test_runs_report_whether_they_ever_started(client, app):
+    make_project_dir(app, "p")
+    post_yaml(client, "/api/v1/pipelines", YAML)
+    client.post("/api/v1/pipelines/fac/runs")
+    client.post("/api/v1/pipelines/fac/runs")
+    client.post("/api/v1/pipelines/fac/runs/2/cancel")       # removed while queued
+    runs = client.get("/api/v1/pipelines/fac/runs").get_json()["data"]["runs"]
+    assert [(r["run_id"], r["status"], r["started"]) for r in runs] == [(2, "cancelled", False), (1, "running", True)]
