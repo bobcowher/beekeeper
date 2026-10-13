@@ -439,10 +439,16 @@ def delete_pipeline(name: str) -> dict:
 
 
 @mcp.tool()
-def start_pipeline(name: str) -> dict:
-    """Start a pipeline run. Returns run_id and run_ref (e.g. "chess-factory#3").
-    Train steps are queued on their projects and wait behind any runs already there."""
-    return _post(f"/pipelines/{name}/runs")
+def start_pipeline(name: str, branches: dict[str, str] | None = None) -> dict:
+    """Start or queue a pipeline run. Returns run_id, run_ref and status.
+
+    branches optionally maps each train step name to the branch it should use. Omit a
+    step (or give it an empty string) for Default: the YAML branch, then the project's
+    branch. If this pipeline is already active, the new run waits in its FIFO queue.
+    """
+    if branches is None:
+        return _post(f"/pipelines/{name}/runs")
+    return _post(f"/pipelines/{name}/runs", {"branches": branches})
 
 
 @mcp.tool()

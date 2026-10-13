@@ -716,8 +716,18 @@ def pipelines_delete(name):
 @api_key_required
 def pipeline_runs_start(name):
     _require_pipeline(name)
+    body = request.get_json(silent=True)
+    if body is None:
+        body = {}
+    branches = body.get("branches") if isinstance(body, dict) else body
+    if branches is not None and (not isinstance(branches, dict) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in branches.items())):
+        return api_response(error_code="INVALID_OVERRIDE",
+                            error_message="branches must map step names to branch names",
+                            status_code=400)
     try:
-        result = pipeline_engine.start_pipeline_run(current_app.config["PROJECTS_DIR"], _pipelines_dir(), name)
+        result = pipeline_engine.start_pipeline_run(
+            current_app.config["PROJECTS_DIR"], _pipelines_dir(), name, branches=branches)
     except pipeline_engine.PipelineError as e:
         return _pipeline_error(e)
     except PipelineValidationError as e:

@@ -1,5 +1,7 @@
 import time
 
+import pytest
+
 from services import pipeline_engine as eng
 from services import pipeline_store as store
 from services.db_service import get_db
@@ -90,13 +92,38 @@ def test_runs_lifecycle(client, app):
     post_yaml(client, "/api/v1/pipelines", YAML)
     r = client.post("/api/v1/pipelines/fac/runs")
     assert r.status_code == 201 and r.get_json()["data"]["run_ref"] == "fac#1"
-    assert client.post("/api/v1/pipelines/fac/runs").get_json()["error"]["code"] == "PIPELINE_ACTIVE"
+    queued = client.post("/api/v1/pipelines/fac/runs")
+    assert queued.status_code == 201
+    assert queued.get_json()["data"] == {
+        "run_id": 2, "run_ref": "fac#2", "status": "queued", "position": 1,
+    }
     assert client.delete("/api/v1/pipelines/fac").status_code == 409
     one = client.get("/api/v1/pipelines/fac/runs/1").get_json()["data"]
-    assert one["steps"][0]["name"] == "a"
+    assert one["steps"][0]["name"] == "a" and one["overrides"] == {}
+    runs = client.get("/api/v1/pipelines/fac/runs").get_json()["data"]["runs"]
+    assert [(run["run_id"], run["status"]) for run in runs] == [(2, "queued"), (1, "running")]
+    assert client.post("/api/v1/pipelines/fac/runs/2/cancel").get_json()["data"]["status"] == "cancelled"
     assert client.post("/api/v1/pipelines/fac/runs/1/cancel").status_code == 200
-    assert client.get("/api/v1/pipelines/fac/runs").get_json()["data"]["runs"][0]["status"] == "cancelled"
     assert client.post("/api/v1/pipelines/fac/runs/1/resume").status_code == 200
+
+
+def test_start_run_accepts_branch_overrides(client, app):
+    make_project_dir(app, "p")
+    post_yaml(client, "/api/v1/pipelines", YAML)
+    r = client.post("/api/v1/pipelines/fac/runs", json={"branches": {"a": "feat/x"}})
+    assert r.status_code == 201
+    run = client.get("/api/v1/pipelines/fac/runs/1").get_json()["data"]
+    assert run["overrides"] == {"a": "feat/x"}
+    assert run["steps"][0]["branch"] == "feat/x"
+
+
+@pytest.mark.parametrize("branches", [[], {"a": 3}])
+def test_start_run_rejects_invalid_branch_overrides(client, app, branches):
+    make_project_dir(app, "p")
+    post_yaml(client, "/api/v1/pipelines", YAML)
+    r = client.post("/api/v1/pipelines/fac/runs", json={"branches": branches})
+    assert r.status_code == 400
+    assert r.get_json()["error"]["code"] == "INVALID_OVERRIDE"
 
 
 def test_start_missing_project_400(client):

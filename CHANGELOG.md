@@ -16,6 +16,8 @@
 - **Pipelines:** YAML definitions compose queued training steps and optional host task steps;
   handoff environment variables expose prior outputs, failed/cancelled runs can be resumed,
   and administrators can disable inline tasks.
+- **Pipeline experiments:** choose a branch for each train step when starting a run, and
+  queue additional runs of the same pipeline in FIFO order.
 
 ### Changed
 - **Breaking:** `/api/v1/busy` now also reports `running_tasks`; MCP >= 0.4.0 is required.

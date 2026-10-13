@@ -128,6 +128,8 @@ def test_pipeline_definition_tools(calls):
 def test_pipeline_run_tools(calls):
     server.start_pipeline("p")
     assert calls[-1] == ("_post", "/pipelines/p/runs", None)
+    server.start_pipeline("p", branches={"train": "feat/x"})
+    assert calls[-1] == ("_post", "/pipelines/p/runs", {"branches": {"train": "feat/x"}})
     server.pipeline_status("p")
     assert calls[-1] == ("_get", "/pipelines/p/runs?limit=1", None)
     server.pipeline_status("p", run_id=3)

@@ -424,6 +424,24 @@ def test_dashboard_activity_reports_live_training_and_pipeline_step(client, app)
     assert any(item["run_ref"] == "fac#1" and item["current_step"] == "deploy" for item in running)
 
 
+def test_dashboard_activity_excludes_queued_pipeline_runs(client, app):
+    from services.db_service import get_db
+
+    definition = {
+        "name": "fac", "folder": "", "description": "",
+        "steps": [{"name": "deploy", "type": "task", "command": "true", "timeout_s": 10}],
+    }
+    first, _, _ = get_db().create_pipeline_run("fac", definition)
+    get_db().create_pipeline_run("fac", definition)
+    get_db().update_pipeline_run(first, status="succeeded", ended_at="2026-10-12T10:00:00")
+
+    data = client.get("/dashboard/activity").get_json()
+
+    assert all(item["run_ref"] != "fac#2" for item in data["running"])
+    assert all(item["run_ref"] != "fac#2" for item in data["recent"])
+    assert any(item["run_ref"] == "fac#1" for item in data["recent"])
+
+
 def test_new_pipeline_creates_template_and_redirects(client, app):
     r = client.post("/pipelines/new", data={"name": "fresh", "folder": "x"})
     assert r.status_code == 302 and r.headers["Location"].endswith("/pipelines/fresh/edit")
