@@ -213,6 +213,13 @@
         }
     }
 
+    // Only the latest started run can re-run, from a step that has already run, once it has stopped.
+    function canRerunFrom(run, step) {
+        return Boolean(run) && run.run_id === started[0]?.run_id
+            && ['failed', 'cancelled', 'succeeded'].includes(run.status)
+            && step.index <= run.current_step;
+    }
+
     function renderPanel(run) {
         const panel = $('step-panel');
         const body = $('step-panel-body');
@@ -230,6 +237,7 @@
             return;
         }
         panel.hidden = false;
+        $('btn-step-rerun').hidden = !canRerunFrom(run, step);
         const def = stepDefinition(step.name);
         $('step-panel-title').textContent = step.name;
         $('step-panel-note').textContent = panelNote(step, def);
@@ -591,6 +599,15 @@
         if (run) void action(`${API}/runs/${run.run_id}/dismiss`, 'continue the queue', event.currentTarget);
     });
     $('btn-show-latest').addEventListener('click', () => selectRun(started[0] ? started[0].run_id : null));
+    $('btn-step-rerun').addEventListener('click', event => {
+        const run = viewedRun();
+        const step = run?.steps.find(s => s.name === selectedStep?.name);
+        if (!step || !canRerunFrom(run, step)) return;
+        const later = run.steps.length - step.index - 1;
+        const tail = later ? ` and the ${later} step${later === 1 ? '' : 's'} after it` : '';
+        if (!confirm(`Re-run ${run.run_ref} from ${step.name}? ${step.name}${tail} run again; earlier steps' outputs are reused.`)) return;
+        void action(`${API}/runs/${run.run_id}/resume`, 're-run pipeline', event.currentTarget, { from_step: step.name });
+    });
     $('btn-step-close').addEventListener('click', () => {
         selectedStep = null;
         void render();

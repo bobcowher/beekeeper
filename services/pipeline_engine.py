@@ -353,6 +353,7 @@ def _live_step_run(db, pipeline_run_pk, step_index):
     step_run = db.current_step_run(pipeline_run_pk, step_index)
     return None if step_run and step_run["status"] == "superseded" else step_run
 
+
 def _stop_training_run(projects_dir, run_pk):
     tr = get_db().get_training_run(run_pk)
     if tr:

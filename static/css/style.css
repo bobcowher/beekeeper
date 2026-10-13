@@ -1946,6 +1946,8 @@ label {
 }
 .step-hint { font-size: 0.85rem; margin: 0; }
 .step-panel-close { margin-left: auto; }
+.step-panel-rerun { margin-left: auto; }
+.step-panel-rerun:not([hidden]) + .step-panel-close { margin-left: 0.5rem; }
 .definition-dirty { font-size: 0.7rem; text-transform: none; letter-spacing: 0; color: var(--accent-dim); margin-left: 0.5rem; font-weight: 400; }
 .field-reference-table { font-size: 0.85rem; }
 .step-card { display: block; width: 100%; text-align: left; background: none; border: 0; color: inherit; font: inherit; padding: 0.6rem 0.8rem; cursor: pointer; border-radius: 4px; }

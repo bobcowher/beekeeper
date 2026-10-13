@@ -1197,3 +1197,57 @@ def test_pipeline_failed_run_pauses_queue_until_skipped(live_server):
         page.wait_for_selector("#queue-paused", state="hidden")
         assert errors == []
         browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_step_panel_reruns_from_step(live_server):
+    import json as _json
+    from playwright.sync_api import sync_playwright
+
+    def step(i, name, status):
+        return {"index": i, "name": name, "type": "task", "status": status, "attempt": 1, "error": None,
+                "exit_code": 0, "started_at": None, "ended_at": None, "run_dir": None, "has_log": False}
+
+    def run(n, status, current, statuses):
+        return {"run_id": n, "run_ref": f"rerun-pipe#{n}", "pipeline": "rerun-pipe", "status": status,
+                "current_step": current, "error": None, "overrides": {}, "dismissed": False,
+                "started_at": "2026-10-12T10:00:00", "ended_at": "2026-10-12T10:05:00",
+                "steps": [step(i, nm, st) for i, (nm, st) in enumerate(zip(["a", "b", "c"], statuses))]}
+
+    runs = [run(2, "failed", 1, ["succeeded", "failed", "skipped"]),
+            run(1, "succeeded", 2, ["succeeded", "succeeded", "succeeded"])]
+    posted = []
+
+    def resume(route):
+        posted.append(_json.loads(route.request.post_data or "{}"))
+        route.fulfill(json={"success": True, "data": {"run_id": 2, "run_ref": "rerun-pipe#2", "status": "running"}})
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        page.on("dialog", lambda dialog: dialog.accept())
+        _create_pipeline(page, live_server, "name: rerun-pipe\nsteps:\n"
+                         "  - {name: a, type: task, command: 'true'}\n  - {name: b, type: task, command: 'true'}\n"
+                         "  - {name: c, type: task, command: 'true'}\n")
+        page.route("**/api/v1/pipelines/rerun-pipe/runs?limit=50",
+                   lambda route: route.fulfill(json={"success": True, "data": {"runs": runs}}))
+        page.route("**/api/v1/pipelines/rerun-pipe/runs/2/resume", resume)
+        page.goto(live_server + "/pipelines/rerun-pipe")
+        page.locator("#step-chain .step-node").nth(2).wait_for()
+
+        page.click('#step-chain .step-node:nth-child(3) .step-card')      # c never ran
+        assert page.locator("#btn-step-rerun").is_hidden()
+        page.click('#step-chain .step-node:nth-child(1) .step-card')      # a ran
+        assert page.locator("#btn-step-rerun").is_visible()
+        page.screenshot(path="/tmp/beekeeper-pipeline-rerun.png", full_page=True)
+        page.click("#btn-step-rerun")
+        page.wait_for_function("document.getElementById('step-panel').hidden")
+        assert posted == [{"from_step": "a"}]
+
+        page.click('#pipeline-runs tbody tr[data-run="1"]')               # an older run cannot re-run
+        page.click('#step-chain .step-node:nth-child(1) .step-card')
+        assert page.locator("#btn-step-rerun").is_hidden()
+        assert errors == []
+        browser.close()
