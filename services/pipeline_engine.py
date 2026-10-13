@@ -3,6 +3,7 @@
 Talks to the core only through the run queue, run records, process_manager.is_run_live
 and process_manager.stop_training, so the same contract can later target a remote host.
 """
+import copy
 import datetime
 import logging
 import os
@@ -12,7 +13,7 @@ import time
 from services import pipeline_tasks, process_manager
 from services.config_service import get_config_bool
 from services.db_service import get_db
-from services.pipeline_schema import PROJECT_NAME_RE, step_dir_var
+from services.pipeline_schema import PROJECT_NAME_RE, step_dir_var, valid_branch_name
 from services.pipeline_store import delete_pipeline_files, load_pipeline, pipeline_exists, pipeline_run_dir
 from services.run_refs import run_ref
 from services.run_storage_service import persistent_runs_root
@@ -73,21 +74,46 @@ def _get_run(name, run_number) -> dict:
 
 # --- Public operations -----------------------------------------------------------
 
-def start_pipeline_run(projects_dir, pipelines_dir, name) -> dict:
+def _apply_branch_overrides(defn, branches):
+    if branches is None:
+        branches = {}
+    if not isinstance(branches, dict) or not all(
+            isinstance(k, str) and isinstance(v, str) for k, v in branches.items()):
+        raise PipelineError("INVALID_OVERRIDE", "branches must map step names to branch names")
+    steps = {step["name"]: step for step in defn["steps"]}
+    overrides = {}
+    for step_name, branch in branches.items():
+        step = steps.get(step_name)
+        if step is None or step["type"] != "train":
+            raise PipelineError("INVALID_OVERRIDE",
+                                f"'{step_name}' is not a train step in this pipeline")
+        if not branch:
+            continue
+        if not valid_branch_name(branch):
+            raise PipelineError("INVALID_BRANCH", f"'{branch}' is not a valid branch name")
+        step["branch"] = branch
+        overrides[step_name] = branch
+    return overrides
+
+
+def start_pipeline_run(projects_dir, pipelines_dir, name, branches=None) -> dict:
     with _engine_lock:
         try:
             defn, _ = load_pipeline(pipelines_dir, name)
         except FileNotFoundError:
             raise PipelineError("NOT_FOUND", f"Pipeline '{name}' not found", 404)
+        defn = copy.deepcopy(defn)
+        overrides = _apply_branch_overrides(defn, branches)
         _check_runnable(projects_dir, defn["steps"])
-        created = get_db().create_pipeline_run(name, defn)
-        if created is None:
-            raise PipelineError("PIPELINE_ACTIVE", f"Pipeline '{name}' already has a running run", 409)
-        _, n = created
+        pk, n, status = get_db().create_pipeline_run(name, defn, overrides)
         os.makedirs(pipeline_run_dir(pipelines_dir, name, n), exist_ok=True)
-    log.info("Pipeline %s started", pipeline_ref(name, n))
+        result = {"run_id": n, "run_ref": pipeline_ref(name, n), "status": status}
+        if status == "queued":
+            result["position"] = next(
+                i for i, run in enumerate(get_db().queued_pipeline_runs(name), 1) if run["id"] == pk)
+    log.info("Pipeline %s %s", pipeline_ref(name, n), status)
     _wake_dispatcher()
-    return {"run_id": n, "run_ref": pipeline_ref(name, n), "status": "running"}
+    return result
 
 
 def delete_pipeline(pipelines_dir, name) -> None:
@@ -95,10 +121,8 @@ def delete_pipeline(pipelines_dir, name) -> None:
     with _engine_lock:
         if not pipeline_exists(pipelines_dir, name):
             raise PipelineError("NOT_FOUND", f"Pipeline '{name}' not found", 404)
-        latest = get_db().latest_pipeline_run(name)
-        if latest and latest["status"] == "running":
-            raise PipelineError("PIPELINE_ACTIVE",
-                                f"Cancel {latest['pipeline_name']}#{latest['run_number']} first", 409)
+        if get_db().has_active_pipeline_run(name):
+            raise PipelineError("PIPELINE_ACTIVE", f"Cancel active runs of pipeline '{name}' first", 409)
         delete_pipeline_files(pipelines_dir, name)
         get_db().delete_pipeline_records(name)
 
@@ -107,6 +131,13 @@ def cancel_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:
     db = get_db()
     with _engine_lock:
         run = _get_run(name, run_number)
+        if run["status"] == "queued":
+            db.update_pipeline_run(run["id"], status="cancelled", error="cancelled by user",
+                                   ended_at=_now())
+            final = "cancelled"
+            _wake_dispatcher()
+            return {"run_id": run_number, "run_ref": pipeline_ref(name, run_number),
+                    "status": final}
         if run["status"] != "running":
             raise PipelineError("NOT_RUNNING", f"{pipeline_ref(name, run_number)} is {run['status']}", 409)
         sr = db.current_step_run(run["id"], run["current_step"])
@@ -136,6 +167,8 @@ def resume_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:
         run = _get_run(name, run_number)
         if run["status"] not in ("failed", "cancelled"):
             raise PipelineError("NOT_RESUMABLE", f"{pipeline_ref(name, run_number)} is {run['status']}", 409)
+        if any(r["pipeline_name"] == name for r in db.running_pipeline_runs()):
+            raise PipelineError("PIPELINE_ACTIVE", f"Pipeline '{name}' already has a running run", 409)
         latest = db.latest_pipeline_run(name)
         if latest is None or latest["id"] != run["id"]:
             raise PipelineError("NOT_LATEST", "Only the latest run of a pipeline can be resumed", 409)
@@ -163,6 +196,19 @@ def _progress_key(run):
 
 
 def tick(projects_dir, pipelines_dir) -> None:
+    db = get_db()
+    for name in db.pipelines_with_queued_runs():
+        try:
+            with _engine_lock:
+                promoted = db.promote_pipeline_run(name)
+                if promoted:
+                    try:
+                        _check_runnable(projects_dir, promoted["definition"]["steps"])
+                    except PipelineError as e:
+                        sr = db.current_step_run(promoted["id"], 0)
+                        _finish_step(promoted, sr, "failed", error=e.message)
+        except Exception:
+            log.exception("Queued pipeline %s failed to promote", name)
     for run in get_db().running_pipeline_runs():
         try:
             with _engine_lock:
@@ -217,6 +263,7 @@ def describe_run(run) -> dict:
         }
         if step["type"] == "train":
             view["project"] = step["project"]
+            view["branch"] = step.get("branch")
             if s and s["run_pk"]:
                 tr = db.get_training_run(s["run_pk"])
                 if tr:
@@ -231,7 +278,8 @@ def describe_run(run) -> dict:
     return {
         "run_id": run["run_number"], "run_ref": pipeline_ref(run["pipeline_name"], run["run_number"]),
         "pipeline": run["pipeline_name"], "status": run["status"], "current_step": run["current_step"],
-        "error": run["error"], "started_at": run["started_at"], "ended_at": run["ended_at"], "steps": steps,
+        "error": run["error"], "overrides": run["overrides"], "started_at": run["started_at"],
+        "ended_at": run["ended_at"], "steps": steps,
     }
 
 

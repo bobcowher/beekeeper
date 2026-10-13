@@ -77,11 +77,69 @@ def test_happy_path_hands_off_dirs(env):
     assert get_db().get_pipeline_run("fac", 1)["status"] == "succeeded"
 
 
-def test_second_start_refused_while_running(env):
+def test_second_start_queues_while_running(env):
     eng.start_pipeline_run(env["pd"], env["pl"], "fac")
-    with pytest.raises(eng.PipelineError) as e:
-        eng.start_pipeline_run(env["pd"], env["pl"], "fac")
-    assert e.value.code == "PIPELINE_ACTIVE"
+    queued = eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    assert queued == {"run_id": 2, "run_ref": "fac#2", "status": "queued", "position": 1}
+    assert get_db().current_step_run(get_db().get_pipeline_run("fac", 2)["id"], 0) is None
+
+
+def test_simultaneous_starts_create_one_running_and_one_queued(env):
+    barrier = threading.Barrier(3)
+    results = []
+
+    def start():
+        barrier.wait()
+        results.append(eng.start_pipeline_run(env["pd"], env["pl"], "fac"))
+
+    threads = [threading.Thread(target=start) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    barrier.wait()
+    for thread in threads:
+        thread.join(2)
+
+    assert sorted(r["status"] for r in results) == ["queued", "running"]
+    assert len(get_db().running_pipeline_runs()) == 1
+    assert len(get_db().queued_pipeline_runs("fac")) == 1
+
+
+def test_branch_overrides_apply_to_running_and_queued_snapshots(env):
+    first = eng.start_pipeline_run(env["pd"], env["pl"], "fac",
+                                   branches={"pretrain": "feat/pre"})
+    second = eng.start_pipeline_run(env["pd"], env["pl"], "fac",
+                                    branches={"fine-tune": "feat/ft"})
+    assert first["status"] == "running" and second["status"] == "queued"
+    run1 = get_db().get_pipeline_run("fac", 1)
+    run2 = get_db().get_pipeline_run("fac", 2)
+    assert run1["overrides"] == {"pretrain": "feat/pre"}
+    assert run1["definition"]["steps"][0]["branch"] == "feat/pre"
+    assert run2["overrides"] == {"fine-tune": "feat/ft"}
+    assert run2["definition"]["steps"][1]["branch"] == "feat/ft"
+    tick(env)
+    assert get_db().list_queue("pre")[0]["branch"] == "feat/pre"
+
+
+@pytest.mark.parametrize("branches", [
+    [], {"pretrain": 3}, {3: "main"}, {"missing": "main"}, {"deploy": "main"},
+])
+def test_invalid_branch_override_shape_or_step(env, branches):
+    with pytest.raises(eng.PipelineError) as exc:
+        eng.start_pipeline_run(env["pd"], env["pl"], "fac", branches=branches)
+    assert exc.value.code == "INVALID_OVERRIDE"
+
+
+def test_invalid_branch_override_name(env):
+    with pytest.raises(eng.PipelineError) as exc:
+        eng.start_pipeline_run(env["pd"], env["pl"], "fac", branches={"pretrain": "a..b"})
+    assert exc.value.code == "INVALID_BRANCH"
+
+
+def test_empty_branch_override_means_default(env):
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac", branches={"pretrain": ""})
+    run = get_db().get_pipeline_run("fac", 1)
+    assert run["overrides"] == {}
+    assert "branch" not in run["definition"]["steps"][0]
 
 
 def test_delete_serializes_with_simultaneous_start(env, monkeypatch):
@@ -138,7 +196,7 @@ def test_dispatcher_rejects_unsafe_project_in_persisted_snapshot(env):
     definition = {"name": "legacy", "steps": [
         {"name": "train", "type": "train", "project": "../outside", "env_vars": {}},
     ]}
-    pk, _ = get_db().create_pipeline_run("legacy", definition)
+    pk, _, _ = get_db().create_pipeline_run("legacy", definition)
 
     tick(env)
 
@@ -231,6 +289,22 @@ def test_resume_reuses_earlier_outputs(env):
     assert entry["env_vars"]["BEEKEEPER_STEP_PRETRAIN_DIR"] == step(1, 0)["run_dir"]
 
 
+def test_resume_failed_run_while_later_run_is_queued(env):
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    run1 = get_db().get_pipeline_run("fac", 1)
+    s0 = get_db().current_step_run(run1["id"], 0)
+    get_db().update_step_run(s0["id"], status="failed", error="boom")
+    get_db().update_pipeline_run(run1["id"], status="failed", error="boom", ended_at=eng._now())
+
+    resumed = eng.resume_pipeline_run(env["pd"], env["pl"], "fac", 1)
+
+    assert resumed["status"] == "running"
+    assert get_db().get_pipeline_run("fac", 2)["status"] == "queued"
+    tick(env)
+    assert get_db().get_pipeline_run("fac", 2)["status"] == "queued"
+
+
 def test_resume_refused_when_artifacts_missing(env):
     eng.start_pipeline_run(env["pd"], env["pl"], "fac")
     tick(env)
@@ -261,6 +335,52 @@ def test_cancel_while_queued(env):
     assert [s["status"] for s in get_db().list_step_runs(run["id"])] == ["cancelled", "skipped", "skipped"]
 
 
+def test_cancel_pipeline_queue_entry_then_promote_next(env):
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    cancelled = eng.cancel_pipeline_run(env["pd"], env["pl"], "fac", 2)
+    assert cancelled["status"] == "cancelled"
+    assert get_db().list_step_runs(get_db().get_pipeline_run("fac", 2)["id"]) == []
+    run1 = get_db().get_pipeline_run("fac", 1)
+    get_db().update_pipeline_run(run1["id"], status="succeeded", ended_at=eng._now())
+
+    tick(env)
+
+    assert get_db().get_pipeline_run("fac", 2)["status"] == "cancelled"
+    assert get_db().get_pipeline_run("fac", 3)["status"] == "running"
+
+
+def test_queued_run_missing_project_fails_and_queue_continues(env, app):
+    import shutil
+
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    run1 = get_db().get_pipeline_run("fac", 1)
+    get_db().update_pipeline_run(run1["id"], status="succeeded", ended_at=eng._now())
+    shutil.rmtree(os.path.join(env["pd"], "ft"))
+
+    tick(env)
+
+    failed = get_db().get_pipeline_run("fac", 2)
+    assert failed["status"] == "failed" and "missing project" in failed["error"]
+    assert get_db().get_pipeline_run("fac", 3)["status"] == "queued"
+    make_project_dir(app, "ft")
+    tick(env)
+    assert get_db().get_pipeline_run("fac", 3)["status"] == "running"
+
+
+def test_delete_refused_with_queued_run(env):
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    run1 = get_db().get_pipeline_run("fac", 1)
+    get_db().update_pipeline_run(run1["id"], status="succeeded", ended_at=eng._now())
+    with pytest.raises(eng.PipelineError) as exc:
+        eng.delete_pipeline(env["pl"], "fac")
+    assert exc.value.code == "PIPELINE_ACTIVE"
+
+
 def test_cancel_when_queue_entry_already_started_stops_run(env):
     eng.start_pipeline_run(env["pd"], env["pl"], "fac")
     tick(env)
@@ -287,13 +407,15 @@ def test_snapshot_isolated_from_edits(env):
 
 
 def test_describe_run(env):
-    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac", branches={"pretrain": "feat/pre"})
     tick(env)
     get_db().set_queue_wait_reason(get_db().list_queue("pre")[0]["id"], "At capacity")
     d = eng.describe_run(get_db().get_pipeline_run("fac", 1))
     assert d["run_ref"] == "fac#1"
+    assert d["overrides"] == {"pretrain": "feat/pre"}
     assert [s["status"] for s in d["steps"]] == ["queued", "pending", "pending"]
     assert d["steps"][0]["wait_reason"] == "At capacity" and d["steps"][0]["project"] == "pre"
+    assert [s.get("branch") for s in d["steps"] if s["type"] == "train"] == ["feat/pre", None]
 
 
 def test_started_entry_with_deleted_run_record_fails_step(env):
