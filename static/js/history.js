@@ -36,11 +36,12 @@
             allRuns = data.runs || [];
             // Keep checked state only for runs that still exist
             const existingIds = new Set(allRuns.map(r => r.run_id));
-            for (const id of [...checkedIds]) {
+            for (const id of checkedIds) {
                 if (!existingIds.has(id)) checkedIds.delete(id);
             }
             renderAll();
         } catch (e) {
+            console.warn('Error loading run history:', e);
             listEl.innerHTML = '<p class="muted">Error loading run history.</p>';
         }
     }
@@ -169,7 +170,7 @@
         // Star buttons
         listEl.querySelectorAll('.star-btn').forEach(btn => {
             btn.addEventListener('click', async () => {
-                const runId = parseInt(btn.dataset.runId);
+                const runId = Number.parseInt(btn.dataset.runId);
                 const run = allRuns.find(r => r.run_id === runId);
                 if (!run) return;
                 run.notable = run.notable ? 0 : 1;
@@ -181,7 +182,7 @@
         // Compare checkboxes
         listEl.querySelectorAll('.compare-checkbox').forEach(cb => {
             cb.addEventListener('change', () => {
-                const runId = parseInt(cb.dataset.runId);
+                const runId = Number.parseInt(cb.dataset.runId);
                 if (cb.checked) {
                     if (checkedIds.size >= 2) { cb.checked = false; return; }
                     checkedIds.add(runId);
@@ -208,7 +209,7 @@
         // Notes toggle buttons
         listEl.querySelectorAll('.notes-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                const runId = parseInt(btn.dataset.runId);
+                const runId = Number.parseInt(btn.dataset.runId);
                 const notesRow = listEl.querySelector(`.notes-row[data-run-id="${runId}"]`);
                 if (!notesRow) return;
                 const open = notesRow.style.display !== 'none';
@@ -225,7 +226,7 @@
         // Notes editors — save on blur
         listEl.querySelectorAll('.notes-editor').forEach(ta => {
             ta.addEventListener('blur', async () => {
-                const runId = parseInt(ta.dataset.runId);
+                const runId = Number.parseInt(ta.dataset.runId);
                 const run = allRuns.find(r => r.run_id === runId);
                 if (!run) return;
                 if (ta.value === (run.notes || '')) return;
@@ -240,7 +241,7 @@
         // Tag add buttons
         listEl.querySelectorAll('.tag-add-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                const runId = parseInt(btn.dataset.runId);
+                const runId = Number.parseInt(btn.dataset.runId);
                 const run = allRuns.find(r => r.run_id === runId);
                 if (!run) return;
                 const cell = listEl.querySelector(`.tags-cell[data-run-id="${runId}"]`);
@@ -251,7 +252,7 @@
         // Artifacts buttons
         listEl.querySelectorAll('.artifacts-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                const runId = parseInt(btn.dataset.runId);
+                const runId = Number.parseInt(btn.dataset.runId);
                 openArtifacts(runId);
             });
         });
@@ -282,7 +283,7 @@
         document.body.appendChild(overlay);
         document.getElementById('close-artifacts-btn')?.addEventListener('click', () => overlay.remove());
 
-        loadArtifacts(runId, '');
+        void loadArtifacts(runId, '');
     }
 
     async function loadArtifacts(runId, subpath) {
@@ -309,6 +310,7 @@
             renderArtifactBreadcrumbs(runId, data.path);
             renderArtifactListing(runId, data);
         } catch (e) {
+            console.warn('Error loading run artifacts:', e);
             body.innerHTML = '<p class="muted">Error loading artifacts.</p>';
         }
     }
@@ -332,7 +334,7 @@
         crumbs.querySelectorAll('.fb-crumb').forEach(el => {
             el.addEventListener('click', e => {
                 e.preventDefault();
-                loadArtifacts(runId, el.dataset.path);
+                void loadArtifacts(runId, el.dataset.path);
             });
         });
     }
@@ -367,7 +369,7 @@
         body.querySelectorAll('.artifact-dir-link').forEach(el => {
             el.addEventListener('click', e => {
                 e.preventDefault();
-                loadArtifacts(runId, el.dataset.path);
+                void loadArtifacts(runId, el.dataset.path);
             });
         });
     }
@@ -386,9 +388,14 @@
             renderAll();
         };
 
-        input.addEventListener('blur', save);
+        input.addEventListener('blur', () => {
+            void save().catch(error => console.warn('Error saving run tags:', error));
+        });
         input.addEventListener('keydown', e => {
-            if (e.key === 'Enter') { e.preventDefault(); save(); }
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                void save().catch(error => console.warn('Error saving run tags:', error));
+            }
             if (e.key === 'Escape') { renderAll(); }
         });
     }
@@ -408,6 +415,7 @@
             const diffData = await resp.json();
             showCompareModal(run1, run2, diffData, false);
         } catch (e) {
+            console.warn('Error comparing runs:', e);
             showCompareModal(run1, run2, {error: 'Failed to fetch diff'}, false);
         }
     }
@@ -507,6 +515,7 @@
                     alert('Failed to clear history');
                 }
             } catch (e) {
+                console.warn('Error clearing run history:', e);
                 alert('Error clearing history');
             }
         });
@@ -530,19 +539,19 @@
     function escHtml(str) {
         if (!str) return '';
         return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;');
     }
 
     // ---------- Init ----------
 
-    loadHistory();
+    void loadHistory();
 
     const historySection = document.getElementById('history-section');
     const historyHeader = historySection?.querySelector('.collapsible-header');
     if (historyHeader) {
-        historyHeader.addEventListener('click', () => setTimeout(loadHistory, 100));
+        historyHeader.addEventListener('click', () => setTimeout(() => void loadHistory(), 100));
     }
 })();

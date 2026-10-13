@@ -1,7 +1,7 @@
 // Beekeeper — Parallel run list for the project page
 
 const runListEl = document.getElementById('run-list');
-const PROJECT_NAME = runListEl ? runListEl.dataset.name : (window.TRAINING_CONFIG && window.TRAINING_CONFIG.name);
+const PROJECT_NAME = runListEl?.dataset.name ?? window.TRAINING_CONFIG?.name;
 const PARALLEL_ENABLED = runListEl ? runListEl.dataset.parallel === 'true' : false;
 const DEFAULT_BRANCH = runListEl ? (runListEl.dataset.defaultBranch || 'main') : 'main';
 
@@ -17,7 +17,7 @@ function apiFetch(url, opts = {}) {
 }
 
 function escHtml(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 }
 
 // ============================================================
@@ -53,13 +53,13 @@ if (cancelStartBtn) {
     cancelStartBtn.addEventListener('click', () => {
         pickerManuallyOpen = false;
         if (branchPicker) branchPicker.classList.remove('open');
-        if (cancelStartBtn) cancelStartBtn.style.display = 'none';
+        cancelStartBtn.style.display = 'none';
         if (runListActions) runListActions.style.display = '';
     });
 }
 if (confirmStartBtn) {
     confirmStartBtn.addEventListener('click', () => {
-        if (runBranchSelect) startRun(runBranchSelect.value);
+        if (runBranchSelect) void startRun(runBranchSelect.value);
     });
 }
 
@@ -72,7 +72,7 @@ let queuePolling = true;
 
 if (confirmQueueBtn) {
     confirmQueueBtn.addEventListener('click', () => {
-        if (runBranchSelect) queueRun(runBranchSelect.value);
+        if (runBranchSelect) void queueRun(runBranchSelect.value);
     });
 }
 
@@ -90,7 +90,7 @@ async function queueRun(branch) {
             alert(`Could not queue run: ${data.error?.message || 'unknown error'}`);
             return;
         }
-        refreshQueue();
+        void refreshQueue();
     } catch (e) {
         alert(`Could not queue run: ${e}`);
     }
@@ -116,7 +116,7 @@ async function refreshQueueOnce() {
             <span class="muted">${escHtml(formatAge(e.created_at))}</span>
             ${e.wait_reason ? `<span class="queue-wait">waiting: ${escHtml(e.wait_reason)}</span>` : ''}
             <button class="btn btn-secondary btn-sm" data-queue-id="${e.queue_id}">Cancel</button>`;
-        li.querySelector('button').addEventListener('click', () => cancelQueued(e.queue_id));
+        li.querySelector('button').addEventListener('click', () => void cancelQueued(e.queue_id));
         queueListEl.appendChild(li);
     });
 }
@@ -133,7 +133,7 @@ function refreshQueue() {
             queueRefreshInFlight = null;
             if (queueRefreshAgain && queuePolling && !document.hidden) {
                 queueRefreshAgain = false;
-                refreshQueue();
+                void refreshQueue();
             }
         });
     return queueRefreshInFlight;
@@ -168,7 +168,7 @@ document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
         clearQueuePoll();
     } else {
-        refreshQueue().finally(scheduleQueuePoll);
+        void refreshQueue().finally(scheduleQueuePoll);
     }
 });
 window.addEventListener('pagehide', () => {
@@ -178,11 +178,11 @@ window.addEventListener('pagehide', () => {
 window.addEventListener('pageshow', event => {
     if (event.persisted) {
         queuePolling = true;
-        refreshQueue().finally(scheduleQueuePoll);
+        void refreshQueue().finally(scheduleQueuePoll);
     }
 });
 
-refreshQueue().finally(scheduleQueuePoll);
+void refreshQueue().finally(scheduleQueuePoll); // NOSONAR - classic script, no top-level await
 
 async function refreshCanStart() {
     if (!confirmStartBtn || !confirmQueueBtn || !PROJECT_NAME) return;
@@ -279,27 +279,33 @@ function formatElapsed(seconds) {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
-    return h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
 }
 
-function renderRunRow(run) {
+function runRowMarkup(run) {
     const { run_id, branch, status, pid, elapsed, tb_port } = run;
-    const div = document.createElement('div');
-    div.className = `run-row ${status === 'running' || status === 'starting' ? 'run-active' : ''}`;
-    div.id = `run-row-${run_id}`;
-    const host = (window.TRAINING_CONFIG && window.TRAINING_CONFIG.host) || location.hostname;
-    const sBranch = escHtml(branch);
-    const sStatus = escHtml(status);
-    div.innerHTML = `
+    const statusStyle = status === 'starting' ? 'running' : escHtml(status);
+    const pidHtml = pid ? `<span class="muted" style="font-size:0.75rem;">PID ${pid}</span>` : '';
+    const elapsedText = elapsed ? formatElapsed(elapsed) : '';
+    const host = window.TRAINING_CONFIG?.host || location.hostname;
+    const tensorboardHtml = tb_port
+        ? `<a href="http://${escHtml(host)}:${tb_port}" target="_blank" class="btn btn-secondary btn-sm">Tensorboard</a>`
+        : '';
+    const stopHtml = status === 'starting'
+        ? ''
+        : `<button class="btn btn-danger btn-sm" id="btn-stop-${run_id}">■ Stop</button>`;
+    return `
         <div class="run-row-header">
-            <span class="status-badge status-${status === 'starting' ? 'running' : sStatus}">${sStatus}</span>
-            <span class="run-branch">${sBranch}</span>
+            <span class="status-badge status-${statusStyle}">${escHtml(status)}</span>
+            <span class="run-branch">${escHtml(branch)}</span>
             <span class="run-id">#${run_id}</span>
-            ${pid ? `<span class="muted" style="font-size:0.75rem;">PID ${pid}</span>` : ''}
-            <span class="run-elapsed" id="elapsed-${run_id}">${elapsed ? formatElapsed(elapsed) : ''}</span>
-            ${tb_port ? `<a href="http://${escHtml(host)}:${tb_port}" target="_blank" class="btn btn-secondary btn-sm">Tensorboard</a>` : ''}
+            ${pidHtml}
+            <span class="run-elapsed" id="elapsed-${run_id}">${elapsedText}</span>
+            ${tensorboardHtml}
             <button class="btn btn-secondary btn-sm" id="btn-logs-${run_id}">▶ Logs</button>
-            ${status !== 'starting' ? `<button class="btn btn-danger btn-sm" id="btn-stop-${run_id}">■ Stop</button>` : ''}
+            ${stopHtml}
         </div>
         <div class="run-log-panel" id="log-panel-${run_id}" style="display:none">
             <div class="run-log-controls">
@@ -307,25 +313,33 @@ function renderRunRow(run) {
                 <a href="/projects/${PROJECT_NAME}/logs/download?run_id=${run_id}" class="btn btn-secondary btn-sm">Download</a>
             </div>
             <pre class="run-log-terminal" id="log-terminal-${run_id}"></pre>
-        </div>
-    `;
+        </div>`;
+}
 
+function bindRunRow(div, run) {
+    const { run_id, status } = run;
     const logsBtn = div.querySelector(`#btn-logs-${run_id}`);
     const logPanel = div.querySelector(`#log-panel-${run_id}`);
     const logTerminal = div.querySelector(`#log-terminal-${run_id}`);
     const stopBtn = div.querySelector(`#btn-stop-${run_id}`);
     const clearBtn = div.querySelector(`#btn-clear-log-${run_id}`);
-
     logsBtn.addEventListener('click', () => toggleLogs(run_id, logPanel, logTerminal, logsBtn, status));
-    if (stopBtn) stopBtn.addEventListener('click', () => stopRun(run_id));
+    if (stopBtn) stopBtn.addEventListener('click', () => void stopRun(run_id));
     if (clearBtn) clearBtn.addEventListener('click', () => { logTerminal.textContent = ''; });
-
     if (status === 'running') {
         logPanel.style.display = '';
         logsBtn.textContent = '▼ Logs';
         startLogStream(run_id, logTerminal);
     }
+}
 
+function renderRunRow(run) {
+    const { status, run_id } = run;
+    const div = document.createElement('div');
+    div.className = `run-row ${status === 'running' || status === 'starting' ? 'run-active' : ''}`;
+    div.id = `run-row-${run_id}`;
+    div.innerHTML = runRowMarkup(run);
+    bindRunRow(div, run);
     return div;
 }
 
@@ -341,7 +355,7 @@ function toggleLogs(runId, logPanel, logTerminal, logsBtn, status) {
         if (status === 'running' || status === 'starting') {
             startLogStream(runId, logTerminal);
         } else {
-            loadHistoricalLog(runId, logTerminal);
+            void loadHistoricalLog(runId, logTerminal);
         }
     }
 }
@@ -351,7 +365,7 @@ function toggleLogs(runId, logPanel, logTerminal, logsBtn, status) {
 // ============================================================
 function startLogStream(runId, terminalEl) {
     const state = activeRuns.get(runId);
-    if (state && state.sseSource) return;
+    if (state?.sseSource) return;
     const src = new EventSource(`/projects/${PROJECT_NAME}/logs/stream?run_id=${runId}&tail=500`);
     src.onmessage = (e) => {
         if (e.data) {
@@ -376,7 +390,7 @@ function startLogStream(runId, terminalEl) {
 
 function stopLogStream(runId) {
     const state = activeRuns.get(runId);
-    if (state && state.sseSource) {
+    if (state?.sseSource) {
         state.sseSource.close();
         state.sseSource = null;
     }
@@ -415,49 +429,54 @@ async function refreshRuns() {
         const runs = data?.data?.runs || [];
         reconcileRunList(runs);
         updateStartButton(runs);
-        refreshCanStart();
+        void refreshCanStart();
         syncTbPort(data?.data);
     } catch (e) {
         console.warn('Could not refresh runs:', e);
     }
 }
 
+function removeInactiveRunRows(currentIds) {
+    for (const [runId] of activeRuns) {
+        if (currentIds.has(runId)) continue;
+        stopLogStream(runId);
+        activeRuns.delete(runId);
+        document.getElementById(`run-row-${runId}`)?.remove();
+    }
+}
+
+function addRunRow(run) {
+    activeRuns.set(run.run_id, {
+        branch: run.branch,
+        startedAt: Date.now() - (run.elapsed || 0) * 1000,
+        sseSource: null,
+        status: run.status,
+    });
+    runListEl.appendChild(renderRunRow(run));
+}
+
+function updateRunRow(run, state) {
+    if (state.status !== run.status) {
+        stopLogStream(run.run_id);
+        state.status = run.status;
+        if (run.elapsed) state.startedAt = Date.now() - run.elapsed * 1000;
+        const oldRow = document.getElementById(`run-row-${run.run_id}`);
+        const newRow = renderRunRow(run);
+        if (oldRow) oldRow.replaceWith(newRow);
+        return;
+    }
+    const elapsedEl = document.getElementById(`elapsed-${run.run_id}`);
+    if (elapsedEl && run.elapsed) elapsedEl.textContent = formatElapsed(run.elapsed);
+}
+
 function reconcileRunList(runs) {
     if (!runListEl) return;
     const currentIds = new Set(runs.map(r => r.run_id));
-
-    for (const [runId] of activeRuns) {
-        if (!currentIds.has(runId)) {
-            stopLogStream(runId);
-            activeRuns.delete(runId);
-            const row = document.getElementById(`run-row-${runId}`);
-            if (row) row.remove();
-        }
-    }
-
+    removeInactiveRunRows(currentIds);
     for (const run of runs) {
         const state = activeRuns.get(run.run_id);
-        if (!state) {
-            activeRuns.set(run.run_id, {
-                branch: run.branch,
-                startedAt: Date.now() - (run.elapsed || 0) * 1000,
-                sseSource: null,
-                status: run.status,
-            });
-            const row = renderRunRow(run);
-            runListEl.appendChild(row);
-        } else if (state.status !== run.status) {
-            // Re-render the row on status change (e.g. starting → running)
-            stopLogStream(run.run_id);
-            state.status = run.status;
-            if (run.elapsed) state.startedAt = Date.now() - run.elapsed * 1000;
-            const oldRow = document.getElementById(`run-row-${run.run_id}`);
-            const newRow = renderRunRow(run);
-            if (oldRow) oldRow.replaceWith(newRow);
-        } else {
-            const elapsedEl = document.getElementById(`elapsed-${run.run_id}`);
-            if (elapsedEl && run.elapsed) elapsedEl.textContent = formatElapsed(run.elapsed);
-        }
+        if (state) updateRunRow(run, state);
+        else addRunRow(run);
     }
 
     const idleMsg = document.getElementById('run-idle-msg');
@@ -563,6 +582,7 @@ async function switchProjectBranch(newBranch) {
             projectBranchSelect.disabled = false;
         }
     } catch (e) {
+        console.warn('Error switching project branch:', e);
         alert('Network error switching branch');
         projectBranchSelect.value = oldBranch;
         projectBranchSelect.disabled = false;
@@ -573,10 +593,10 @@ if (projectBranchSelect) {
     projectBranchSelect.dataset.originalValue = projectBranchSelect.value;
     projectBranchSelect.addEventListener('change', (e) => {
         if (e.target.value !== projectBranchSelect.dataset.originalValue) {
-            switchProjectBranch(e.target.value);
+            void switchProjectBranch(e.target.value);
         }
     });
-    loadProjectBranches();
+    void loadProjectBranches(); // NOSONAR - classic script, no top-level await
 }
 
 // ============================================================
@@ -591,7 +611,7 @@ document.querySelectorAll('.collapsible-header').forEach(header => {
         setTimeout(() => {
             if (wasHidden) {
                 if (targetId === 'tb-body') activateTb();
-                if (targetId === 'files-body' && window.loadFiles) window.loadFiles();
+        if (targetId === 'files-body' && window.loadFiles) void window.loadFiles();
             }
         }, 0);
     });
@@ -654,7 +674,10 @@ async function launchTb() {
 async function stopTb() {
     try {
         await fetch(`/projects/${PROJECT_NAME}/tensorboard/stop`, { method: 'POST' });
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+        // The launcher is reset locally even if the already-stopped server is unreachable.
+        console.warn('Could not stop Tensorboard:', e);
+    }
     tbConfig.tbPort = null;
     renderTbLauncher();
 }
@@ -674,22 +697,22 @@ function bindTbExpand() {
 
 function bindTbStop() {
     const btn = document.getElementById('btn-tb-stop');
-    if (btn) btn.addEventListener('click', stopTb);
+    if (btn) btn.addEventListener('click', () => void stopTb());
 }
 
 function bindTbLaunch() {
     const btn = document.getElementById('btn-tb-launch');
-    if (btn) btn.addEventListener('click', launchTb);
+    if (btn) btn.addEventListener('click', () => void launchTb());
 }
 
 function activateTb() {
     const iframe = document.getElementById('tensorboard-frame');
-    if (iframe && iframe.dataset.src && !iframe.src) {
+    if (iframe?.dataset.src && !iframe.src) {
         iframe.src = iframe.dataset.src;
     }
     if (!tbConfig.tbPort) {
         const launchBtn = document.getElementById('btn-tb-launch');
-        if (launchBtn) launchTb();
+        if (launchBtn) void launchTb();
     }
 }
 
@@ -702,8 +725,8 @@ bindTbLaunch();
 // Init
 // ============================================================
 if (runListEl) {
-    loadRunBranches();
-    refreshCanStart();
-    refreshRuns();
+    void loadRunBranches(); // NOSONAR - classic script, no top-level await
+    void refreshCanStart(); // NOSONAR - classic script, no top-level await
+    void refreshRuns(); // NOSONAR - classic script, no top-level await
     setInterval(refreshRuns, 10000);
 }

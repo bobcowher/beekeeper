@@ -16,7 +16,9 @@
         const h = Math.floor(value / 3600);
         const m = Math.floor((value % 3600) / 60);
         const s = value % 60;
-        return h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`;
+        if (h) return `${h}h ${m}m`;
+        if (m) return `${m}m ${s}s`;
+        return `${s}s`;
     }
 
     function text(tag, className, value) {
@@ -50,9 +52,11 @@
             empty(runningEl, 'Nothing is running.');
         } else {
             data.running.forEach(item => {
-                const detail = item.kind === 'pipeline'
-                    ? `${item.current_step ? `Step: ${item.current_step} · ` : ''}${duration(item.elapsed)}`
-                    : `${item.branch || 'default branch'} · ${duration(item.elapsed)}`;
+                let detail = `${item.branch || 'default branch'} · ${duration(item.elapsed)}`;
+                if (item.kind === 'pipeline') {
+                    const step = item.current_step ? `Step: ${item.current_step} · ` : '';
+                    detail = `${step}${duration(item.elapsed)}`;
+                }
                 runningEl.appendChild(activityRow(item, detail, item.status));
             });
         }
@@ -103,7 +107,7 @@
             window.clearTimeout(timer);
             timer = null;
         } else if (!document.hidden) {
-            refresh().finally(schedule);
+            void refresh().finally(schedule);
         }
     });
     window.addEventListener('pagehide', () => {
@@ -113,7 +117,7 @@
     window.addEventListener('pageshow', event => {
         if (event.persisted) {
             polling = true;
-            refresh().finally(schedule);
+            void refresh().finally(schedule);
         }
     });
 
