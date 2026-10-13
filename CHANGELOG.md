@@ -18,10 +18,28 @@
   and administrators can disable inline tasks.
 - **Pipeline experiments:** choose a branch for each train step when starting a run, and
   queue additional runs of the same pipeline in FIFO order. A failed run pauses the queue
-  until it is resumed or skipped.
+  until it is resumed or skipped (*Skip and continue*, `POST .../runs/<n>/dismiss`, MCP
+  `dismiss_pipeline_run`). `start_pipeline(name, branches={...})` sets branches from the API/MCP.
+- **Re-run from a step:** re-run the latest pipeline run from any step that already ran,
+  including on a succeeded run. Earlier steps' outputs are reused; that step and the ones
+  after it run again as new attempts. `POST .../runs/<n>/resume` with `{"from_step": "<name>"}`,
+  MCP `resume_pipeline(name, run_id, from_step=...)`.
+- **Pipeline editor:** edit a pipeline graphically (a numbered step timeline with
+  drag-to-reorder, insert and delete) or as YAML, in tabs. Switching tabs keeps
+  the definition; YAML comments are dropped with a warning when the graphical view rewrites it.
+- **Pipeline page:** laid out like the project page: info card with Edit, a Run card with
+  the step chain and step logs, the queue, and collapsible Run History with a Branches column.
+
+### Security
+- Cross-site state-changing requests are refused: a POST/PUT/DELETE whose `Origin` (or
+  `Referer`) names another host gets 403. Clients that send neither header (curl, the MCP
+  server, scripts) are unaffected. The session cookie is now `SameSite=Lax`.
 
 ### Changed
-- **Breaking:** `/api/v1/busy` now also reports `running_tasks`; MCP >= 0.4.0 is required.
+- **Breaking:** branch names are validated. Names starting with `-` or containing whitespace,
+  `..`, `~^:?*[\`, `@{`, or ending in `.lock` or `/` are rejected (`INVALID_BRANCH` from
+  `training/start`, a validation error in pipeline YAML).
+- **Breaking:** `/api/v1/busy` now also reports `running_tasks`; MCP >= 0.5.0 is required.
 - **Breaking:** deleting a project is refused while one of its runs is starting or running.
   The API returns error code `PROJECT_BUSY` (409), replacing `TRAINING_RUNNING`, and also
   covers runs that are still starting.
@@ -36,7 +54,12 @@
   if its `run_<n>` folder already belongs to another run.
 - Startup migration also re-points workspace TensorBoard/output symlinks to the renamed
   folders, and never blocks startup (failures are logged and retried on next start).
-- MCP server 0.4.0; the API now requires MCP >= 0.4.0.
+- MCP server 0.5.0 (pipeline, folder and queue tools); the API now requires MCP >= 0.5.0.
+- `GET /api/v1/pipelines/<name>/runs/latest` returns the latest run that started; MCP
+  `pipeline_status(name)` uses it, so queued runs no longer show up as "latest".
+- Dashboard Recent Activity shows one entry per project or pipeline (its latest finished
+  run); pipeline entries are marked in blue.
+- On the project page the branch picker and Start/Add to Queue sit above the running runs.
 - Default API rate limit raised from 100 to 600 requests per minute per IP, since the
   web UI's own polling counts against it. Existing installs keep their saved value; change
   it under Admin -> API rate limit.
