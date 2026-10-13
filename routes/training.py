@@ -128,9 +128,8 @@ def _generate_log_stream(name, run_id, log_path, tail):
             if not _training_run_is_active(name, run_id) and retries_without_data > 2:
                 yield "data: \n\nevent: done\ndata: finished\n\n"
                 return
-        except Exception:
-            # Streaming is best-effort; a transient file race is retried on the next poll.
-            retries_without_data += 1
+        except Exception:  # NOSONAR - keep the stream alive; errors don't count as idle polls
+            pass
         time.sleep(0.5)
 
 

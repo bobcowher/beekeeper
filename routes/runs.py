@@ -98,9 +98,9 @@ def list_runs(name):
     })
 
 
-def _run_file_entries(target, subpath, name, run_id):
+def _run_file_entries(target, items, subpath, name, run_id):
     entries = []
-    for item in sorted(os.listdir(target)):
+    for item in items:
         if item.startswith(".") or item == "__pycache__":
             continue
         full = os.path.join(target, item)
@@ -154,9 +154,10 @@ def run_files(name, run_id_str, subpath=""):
         return _zip_directory(target, label)
 
     try:
-        entries = _run_file_entries(target, subpath, name, run_id)
+        items = sorted(os.listdir(target))
     except PermissionError:
         abort(403)
+    entries = _run_file_entries(target, items, subpath, name, run_id)
 
     base = f"{request.host_url.rstrip('/')}/projects/{name}/runs/{run_id}/files"
     return jsonify({

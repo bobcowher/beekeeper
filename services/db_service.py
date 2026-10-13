@@ -190,7 +190,8 @@ class DatabaseService:
                     ('locked_until', 'TIMESTAMP'),
                 ] if column not in user_columns
             ]
-            _add_columns(conn, 'users', missing_user_columns)
+            for column, typedef in missing_user_columns:   # filtered above: a failure here is real
+                conn.execute(f'ALTER TABLE users ADD COLUMN {column} {typedef}')
             _metric_analysis_migrations(conn)
             _training_run_migrations(conn)
 

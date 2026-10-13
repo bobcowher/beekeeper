@@ -951,9 +951,8 @@ def _stream_log_events(name, run_id, log_path, tail):
             if not _requested_run_is_active(name, run_id) and retries_without_data > 2:
                 yield "data: \n\nevent: done\ndata: finished\n\n"
                 return
-        except Exception:
-            # Streaming is best-effort; a transient file race is retried on the next poll.
-            retries_without_data += 1
+        except Exception:  # NOSONAR - keep the stream alive; errors don't count as idle polls
+            pass
         time.sleep(0.5)
 
 
@@ -1019,10 +1018,10 @@ def _episode_quartiles(episodes):
 def _episode_trend(quartiles):
     if len(quartiles) < 2:
         return 'insufficient_data'
-    difference = quartiles[-1]['avg_reward'] - quartiles[0]['avg_reward']
-    if difference > 0.5:
+    first_avg, last_avg = quartiles[0]['avg_reward'], quartiles[-1]['avg_reward']
+    if last_avg > first_avg + 0.5:
         return 'improving'
-    if difference < -0.5:
+    if last_avg < first_avg - 0.5:
         return 'declining'
     return 'stable'
 
@@ -1105,9 +1104,9 @@ def analyze_logs(name):
 # Files
 # ---------------------------------------------------------------------------
 
-def _directory_entries(target, subpath):
+def _directory_entries(target, items, subpath):
     entries = []
-    for item in sorted(os.listdir(target)):
+    for item in items:
         if item.startswith(".") or item == "__pycache__":
             continue
         full = os.path.join(target, item)
@@ -1160,13 +1159,14 @@ def browse_files(name, subpath=""):
         return _zip_directory(target, subpath or name)
 
     try:
-        entries = _directory_entries(target, subpath)
+        items = sorted(os.listdir(target))
     except PermissionError:
         return api_response(
             error_code="FORBIDDEN",
             error_message="Permission denied",
             status_code=403
         )
+    entries = _directory_entries(target, items, subpath)
 
     return api_response(data={
         "path": subpath or "",
@@ -1480,13 +1480,14 @@ def run_files(name, run_id_str, subpath=""):
         return _zip_directory(target, label)
 
     try:
-        entries = _directory_entries(target, subpath)
+        items = sorted(os.listdir(target))
     except PermissionError:
         return api_response(
             error_code="FORBIDDEN",
             error_message="Permission denied",
             status_code=403
         )
+    entries = _directory_entries(target, items, subpath)
 
     return api_response(data={
         "run_id": run_id,

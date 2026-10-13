@@ -355,8 +355,9 @@
 
     function renderSummary(run) {
         const isLatest = !run || run.run_id === started[0]?.run_id;
-        const note = run?.status === 'queued' ? ' (queued)' : ' (older run)';
-        $('run-title').textContent = run ? `Run #${run.run_id}${isLatest ? '' : note}` : 'Run';
+        let note = '';
+        if (!isLatest) note = run.status === 'queued' ? ' (queued)' : ' (older run)';
+        $('run-title').textContent = run ? `Run #${run.run_id}${note}` : 'Run';
         $('btn-show-latest').hidden = !run || isLatest;
         const summary = $('run-summary');
         summary.replaceChildren();

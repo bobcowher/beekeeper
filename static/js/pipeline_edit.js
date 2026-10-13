@@ -168,8 +168,9 @@
             const data = await api('/api/v1/projects');
             if (data.success) projects = data.data.projects;
         } catch (error) {
-            // Project choices are optional; existing step values remain available without them.
-            projects = [];   // the dropdown still offers the step's current project
+            // Project choices are optional; the dropdown still offers each step's current project.
+            console.warn('Could not load projects for the step editor:', error);
+            projects = [];
         }
     }
 
@@ -704,6 +705,7 @@
     window.addEventListener('beforeunload', event => {
         if (unsaved) {
             event.preventDefault();
+            event.returnValue = '';   // NOSONAR - still needed by Chrome < 119 and some WebViews
         }
     });
 

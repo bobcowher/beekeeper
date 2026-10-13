@@ -108,11 +108,17 @@ def _workspace_link_plan(project_dir, rels, mapping, conflicts, name):
             except OSError as e:
                 conflicts.append(f"{name}: could not read link {link}: {e}")
                 continue
-            for old, new in mapping.items():
-                if target == old or target.startswith(old + os.sep):
-                    planned.append((link, new + target[len(old):]))
-                    break
+            new_target = _remapped_target(target, mapping)
+            if new_target is not None:
+                planned.append((link, new_target))
     return planned
+
+
+def _remapped_target(target, mapping):
+    for old, new in mapping.items():
+        if target == old or target.startswith(old + os.sep):
+            return new + target[len(old):]
+    return None
 
 
 def _repoint_planned_links(name, planned, conflicts):

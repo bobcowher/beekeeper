@@ -491,29 +491,47 @@ function updateStartButton(runs) {
 function applyStartAvailability() {
     if (!canStartState) return;
     const queueInstead = !canStartState.can_start && TRANSIENT_REFUSALS.has(canStartState.code);
+    applyStartButtons(queueInstead);
+    if (activeRunCount === 0 || queueInstead || !canStartState.can_start) {
+        showStartPicker();
+    } else if (PARALLEL_ENABLED) {
+        showRunListActions();
+    } else {
+        hideStartControls();
+    }
+}
+
+function applyStartButtons(queueInstead) {
     confirmStartBtn.hidden = queueInstead;
     confirmStartBtn.disabled = !canStartState.can_start && !queueInstead;
     confirmQueueBtn.hidden = !queueInstead;
     if (startReasonEl) {
         startReasonEl.textContent = canStartState.can_start ? '' : canStartState.message;
     }
+}
 
-    if (activeRunCount === 0 || queueInstead || !canStartState.can_start) {
-        if (runListActions) runListActions.style.display = 'none';
-        if (cancelStartBtn) cancelStartBtn.style.display = pickerManuallyOpen ? '' : 'none';
-        if (branchPicker && !branchPicker.classList.contains('open')) {
-            branchPicker.classList.add('open');
-        }
-    } else if (PARALLEL_ENABLED) {
-        if (!pickerManuallyOpen) {
-            if (runListActions) runListActions.style.display = '';
-            if (branchPicker) branchPicker.classList.remove('open');
-            if (cancelStartBtn) cancelStartBtn.style.display = 'none';
-        }
-    } else {
-        if (branchPicker) branchPicker.classList.remove('open');
-        if (runListActions) runListActions.style.display = 'none';
-    }
+function setDisplay(el, value) {
+    if (el) el.style.display = value;
+}
+
+// Nothing is running (or a start would be refused/queued): the branch picker is the only control.
+function showStartPicker() {
+    setDisplay(runListActions, 'none');
+    setDisplay(cancelStartBtn, pickerManuallyOpen ? '' : 'none');
+    branchPicker?.classList.add('open');
+}
+
+// Parallel runs: offer "start another" from the run list unless the picker was opened by hand.
+function showRunListActions() {
+    if (pickerManuallyOpen) return;
+    setDisplay(runListActions, '');
+    branchPicker?.classList.remove('open');
+    setDisplay(cancelStartBtn, 'none');
+}
+
+function hideStartControls() {
+    branchPicker?.classList.remove('open');
+    setDisplay(runListActions, 'none');
 }
 
 // Elapsed ticker
@@ -665,6 +683,7 @@ async function launchTb() {
             if (launchMsg) launchMsg.style.display = 'none';
         }
     } catch (e) {
+        console.error('Error launching Tensorboard:', e);
         alert('Network error');
         if (launchBtn) launchBtn.style.display = '';
         if (launchMsg) launchMsg.style.display = 'none';

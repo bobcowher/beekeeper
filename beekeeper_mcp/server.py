@@ -187,8 +187,8 @@ def create_project(
 
 
 @mcp.tool()
-def update_project(  # NOSONAR - MCP tool parameters are its public interface
-    project_name: str,
+def update_project(
+    project_name: str,  # NOSONAR - S107: MCP tool parameters are its public interface
     branch: str | None = None,
     train_file: str | None = None,
     tensorboard_log_dir: str | None = None,
