@@ -61,7 +61,8 @@ def _should_start_dispatcher(app):
 
 
 def create_app(test_config=None):
-    app = Flask(__name__)
+    # CSRF: cross-site writes are refused by middleware/csrf.py (Origin/Referer check).
+    app = Flask(__name__)  # NOSONAR
     app.secret_key = _get_secret_key()
     app.config["BEEKEEPER_HOME"] = BEEKEEPER_HOME
     app.config["PROJECTS_DIR"] = os.path.join(BEEKEEPER_HOME, "projects")
@@ -121,6 +122,8 @@ def create_app(test_config=None):
 
     # Register middleware
     from middleware.auth_middleware import register_middleware
+    from middleware.csrf import register_csrf_protection
+    register_csrf_protection(app)
     register_middleware(app)
 
     @app.context_processor
@@ -131,7 +134,7 @@ def create_app(test_config=None):
     @app.before_request
     def cleanup_sessions():
         # Run occasionally (1% of requests)
-        if random.random() < 0.01:
+        if random.random() < 0.01:  # NOSONAR - sampling, not security
             from services.db_service import get_db
             get_db().cleanup_expired_sessions()
 
