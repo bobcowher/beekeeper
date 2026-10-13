@@ -390,9 +390,10 @@ def test_pipeline_page_yaml_errors_and_run(live_server):
         page.locator("#step-chain .step-node").first.wait_for()
         assert not page.locator("#step-panel").is_visible()   # closed until a step is picked
         page.click("#btn-pipeline-start")
+        page.click("#btn-run-submit")   # train steps open the branch form first
         page.locator("#step-chain .step-pending, #step-chain .step-queued, #step-chain .step-failed, #step-chain .step-running").first.wait_for()
         page.wait_for_function("document.getElementById('pipeline-run-status').textContent === 'running'")
-        assert not page.locator("#btn-pipeline-start").is_visible()
+        assert page.locator("#btn-pipeline-start").inner_text() == "Queue Run"
         assert page.locator("#btn-pipeline-cancel").is_visible()
         page.screenshot(path="/tmp/beekeeper-pipeline.png", full_page=True)
         page.goto(live_server + "/pipelines")
@@ -1102,5 +1103,54 @@ def test_pipeline_editor_drag_reorders_steps(live_server):
         page.click("#tab-yaml")
         page.wait_for_function("document.getElementById('pipeline-yaml').value.indexOf('s4') < "
                                "document.getElementById('pipeline-yaml').value.indexOf('s2')")
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_run_form_overrides_branch_and_queues(live_server):
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        _create_pipeline(page, live_server,
+                         "name: branch-pipe\nsteps:\n  - {name: train, type: train, project: demo}\n"
+                         "  - {name: export, type: task, command: 'true'}\n")
+        page.route("**/api/v1/projects/demo/branches", lambda route: route.fulfill(
+            json={"success": True, "data": {"branches": ["feat-x", "main"], "current": "main"}}))
+        page.goto(live_server + "/pipelines/branch-pipe")
+        page.click("#btn-pipeline-start")
+        select = page.locator("#run-branch-train")
+        page.wait_for_function("document.getElementById('run-branch-train').options.length === 2")
+        assert select.locator("option").first.inner_text() == "Default (main)"
+        assert not page.locator("#btn-pipeline-start").is_visible()
+        select.select_option("feat-x")
+        page.screenshot(path="/tmp/beekeeper-pipeline-run-form.png", full_page=True)
+        page.click("#btn-run-submit")
+        page.wait_for_function("document.getElementById('pipeline-run-status').textContent === 'running'")
+        assert page.locator("#run-form").is_hidden()
+        assert "train → feat-x" in page.locator("#pipeline-runs tbody").inner_text()
+        assert "@ feat-x" in page.locator("#step-chain").inner_text()
+
+        page.click("#btn-pipeline-start")
+        assert page.locator("#btn-run-submit").inner_text() == "Add to Queue"
+        page.click("#btn-run-submit")
+        page.locator("#queued-list li").first.wait_for()
+        assert "default" in page.locator("#queued-list").inner_text()
+        assert page.locator("#pipeline-run-status").text_content() == "running"   # still shows the started run
+        page.screenshot(path="/tmp/beekeeper-pipeline-queued.png", full_page=True)
+        mobile = browser.new_page(viewport={"width": 390, "height": 844})
+        mobile.route("**/api/v1/projects/demo/branches", lambda route: route.fulfill(
+            json={"success": True, "data": {"branches": ["feat-x", "main"], "current": "main"}}))
+        mobile.goto(live_server + "/pipelines/branch-pipe")
+        mobile.click("#btn-pipeline-start")
+        mobile.wait_for_function("document.getElementById('run-branch-train').options.length === 2")
+        assert mobile.evaluate("document.documentElement.scrollWidth") <= 390
+        mobile.screenshot(path="/tmp/beekeeper-pipeline-run-form-390.png", full_page=True)
+        page.click("#queued-list li button:has-text('Remove')")
+        page.wait_for_function("document.getElementById('queued-runs').hidden")
         assert errors == []
         browser.close()

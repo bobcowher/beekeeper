@@ -44,6 +44,18 @@
         <button class="btn btn-danger btn-sm" id="btn-pipeline-cancel" hidden>Cancel Run</button>
         <span class="run-summary" id="run-summary"></span>
     </div>
+    <form class="run-form" id="run-form" hidden>
+        <p class="run-form-title">Branches for this run</p>
+        <div class="run-form-rows" id="run-form-rows"></div>
+        <div class="run-form-actions">
+            <button type="submit" class="btn btn-success btn-sm" id="btn-run-submit">Run</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-run-form-cancel">Cancel</button>
+        </div>
+    </form>
+    <div class="queued-runs" id="queued-runs" hidden>
+        <p class="queued-runs-title">Queued</p>
+        <ul id="queued-list"></ul>
+    </div>
     <p class="pipeline-error" id="pipeline-run-error" role="alert"></p>
     <ol id="step-chain" class="step-chain"></ol>
     <p class="muted step-hint" id="step-hint">Select a step to see its log or command.</p>
@@ -64,7 +76,7 @@
         <p class="muted" id="pipeline-runs-empty" hidden>No runs yet. <strong>Run Pipeline</strong> starts the first one.</p>
         <div class="table-scroll">
         <table class="run-history-table" id="pipeline-runs">
-            <thead><tr><th>Run</th><th>Status</th><th>Started</th><th>Duration</th><th>Progress</th></tr></thead>
+            <thead><tr><th>Run</th><th>Status</th><th>Started</th><th>Duration</th><th>Branches</th><th>Progress</th></tr></thead>
             <tbody></tbody>
         </table>
         </div>

@@ -6,7 +6,10 @@
     const API = `/api/v1/pipelines/${encodeURIComponent(NAME)}`;
     const $ = id => document.getElementById(id);
 
-    let runs = [];
+    let runs = [];           // newest first, queued runs included
+    let started = [];        // runs that have left the queue, newest first
+    let queued = [];         // waiting runs, oldest (next to start) first
+    const branchLists = new Map();  // project -> Promise of {branches, current} or {error}
     let selectedRun = null;  // run_id being viewed; null = latest
     // Step whose detail is shown; only ever set by a click, so the panel starts closed.
     let selectedStep = null; // {runId, name}
@@ -86,7 +89,21 @@
     }
 
     function viewedRun() {
-        return selectedRun ? runs.find(run => run.run_id === selectedRun) : runs[0];
+        return selectedRun ? runs.find(run => run.run_id === selectedRun) : started[0];
+    }
+
+    function isBusy() {
+        return Boolean((started[0] && started[0].status === 'running') || queued.length);
+    }
+
+    // A run's train steps carry their effective branch; the definition's are the defaults.
+    function stepBranch(step) {
+        return step.branch !== undefined ? step.branch : stepDefinition(step.name).branch;
+    }
+
+    function overridesText(overrides) {
+        const entries = Object.entries(overrides || {});
+        return entries.length ? entries.map(([step, branch]) => `${step} → ${branch}`).join(', ') : 'default';
     }
 
     // ── Step selection ──────────────────────────────────────────────────────
@@ -113,7 +130,7 @@
     function stepDetailLine(step) {
         const def = stepDefinition(step.name);
         if (step.type === 'train') {
-            const branch = def.branch ? ` @ ${def.branch}` : '';
+            const branch = stepBranch(step) ? ` @ ${stepBranch(step)}` : '';
             return textElement('div', 'step-detail', `${step.project || def.project || ''}${branch}`);
         }
         const line = textElement('div', 'step-detail', '');
@@ -210,7 +227,7 @@
             body.appendChild(textElement('p', '', `Waiting in ${step.project}'s queue` +
                 (step.wait_reason ? `: ${step.wait_reason}` : '.')));
         } else {
-            const branch = def.branch ? ` on branch ${def.branch}` : '';
+            const branch = stepBranch(step) ? ` on branch ${stepBranch(step)}` : '';
             body.appendChild(textElement('p', 'muted',
                 `${run ? 'Not started yet. ' : ''}Queues a training run on ${def.project || step.project}${branch}.`));
         }
@@ -256,15 +273,41 @@
     }
 
     function renderHeader(run) {
-        const latest = runs[0];
-        $('btn-pipeline-start').hidden = Boolean(latest && latest.status === 'running');
-        $('btn-pipeline-cancel').hidden = !(run && run.status === 'running');
-        $('btn-pipeline-resume').hidden = !(
+        const latest = started[0];
+        const formOpen = !$('run-form').hidden;
+        $('btn-pipeline-start').hidden = formOpen;
+        $('btn-pipeline-start').textContent = isBusy() ? 'Queue Run' : 'Run Pipeline';
+        $('btn-run-submit').textContent = isBusy() ? 'Add to Queue' : 'Run';
+        $('btn-pipeline-cancel').hidden = !(run && ['running', 'queued'].includes(run.status));
+        $('btn-pipeline-cancel').textContent = run && run.status === 'queued' ? 'Remove from Queue' : 'Cancel Run';
+        $('btn-pipeline-resume').hidden = formOpen || !(
             run && latest && run.run_id === latest.run_id && ['failed', 'cancelled'].includes(run.status)
         );
+        const shown = latest ? latest.status : (queued.length ? 'queued' : 'never run');
         const status = $('pipeline-run-status');
-        status.textContent = latest ? latest.status : 'never run';
-        status.className = `status-badge status-${statusClass(latest ? latest.status : 'notrun')}`;
+        status.textContent = shown;
+        status.className = `status-badge status-${statusClass(latest || queued.length ? shown : 'notrun')}`;
+    }
+
+    function renderQueue() {
+        const list = $('queued-list');
+        list.replaceChildren();
+        $('queued-runs').hidden = queued.length === 0;
+        queued.forEach(item => {
+            const li = document.createElement('li');
+            const link = textElement('button', 'run-history-link', `#${item.run_id}`);
+            link.type = 'button';
+            link.setAttribute('aria-label', `Show queued run #${item.run_id}`);
+            link.addEventListener('click', () => selectRun(item.run_id));
+            const cancel = textElement('button', 'btn btn-secondary btn-sm', 'Remove');
+            cancel.type = 'button';
+            cancel.setAttribute('aria-label', `Remove run #${item.run_id} from the queue`);
+            cancel.addEventListener('click', event => {
+                action(`${API}/runs/${item.run_id}/cancel`, 'remove queued run', event.currentTarget);
+            });
+            li.append(link, textElement('span', 'queued-run-branches', overridesText(item.overrides)), cancel);
+            list.appendChild(li);
+        });
     }
 
     function setInfo(id, text) {
@@ -287,8 +330,9 @@
     }
 
     function renderSummary(run) {
-        const isLatest = !run || run.run_id === runs[0].run_id;
-        $('run-title').textContent = run ? `Run #${run.run_id}${isLatest ? '' : ' (older run)'}` : 'Run';
+        const isLatest = !run || (started[0] && run.run_id === started[0].run_id);
+        const note = run && run.status === 'queued' ? ' (queued)' : ' (older run)';
+        $('run-title').textContent = run ? `Run #${run.run_id}${isLatest ? '' : note}` : 'Run';
         $('btn-show-latest').hidden = !run || isLatest;
         const summary = $('run-summary');
         summary.replaceChildren();
@@ -298,12 +342,21 @@
             $('pipeline-run-error').textContent = '';
             return;
         }
+        if (run.status === 'queued') {
+            const position = queued.findIndex(item => item.run_id === run.run_id) + 1;
+            summary.appendChild(textElement('span', '',
+                `waiting · ${position === 1 ? 'next to start' : `position ${position} in the queue`}` +
+                ` · branches: ${overridesText(run.overrides)}`));
+            $('pipeline-run-error').textContent = '';
+            return;
+        }
         const done = run.steps.filter(s => s.status === 'succeeded').length;
         const parts = [
             `started ${new Date(run.started_at).toLocaleString()}`,
             run.status === 'running' ? `running for ${duration(run.started_at)}` : duration(run.started_at, run.ended_at),
             `${done} of ${run.steps.length} steps succeeded`,
         ];
+        if (Object.keys(run.overrides || {}).length) parts.push(`branches: ${overridesText(run.overrides)}`);
         summary.appendChild(textElement('span', '', parts.join(' · ')));
         $('pipeline-run-error').textContent = run.error || '';
     }
@@ -319,6 +372,7 @@
             if (item.status === 'running' && stepName) progress = `Running: ${stepName}`;
             if (['failed', 'cancelled'].includes(item.status) && stepName) progress = `Stopped at ${stepName}`;
             if (item.status === 'succeeded') progress = `${item.steps.length}/${item.steps.length} steps`;
+            if (item.status === 'queued') progress = 'Waiting';
 
             const row = document.createElement('tr');
             row.dataset.run = item.run_id;
@@ -334,7 +388,9 @@
                 runCell,
                 statusCell,
                 textElement('td', '', new Date(item.started_at).toLocaleString()),
-                textElement('td', '', duration(item.started_at, item.ended_at)),
+                textElement('td', '', item.status === 'queued' ? '' : duration(item.started_at, item.ended_at)),
+                textElement('td', Object.keys(item.overrides || {}).length ? 'branch-override' : 'muted',
+                    overridesText(item.overrides)),
                 textElement('td', '', progress),
             ].forEach(cell => row.appendChild(cell));
             row.addEventListener('click', () => selectRun(item.run_id));
@@ -346,6 +402,7 @@
         const run = viewedRun();
         resolveSelectedStep(run);
         renderHeader(run);
+        renderQueue();
         renderInfo();
         renderSummary(run);
         renderChain(run);
@@ -355,7 +412,7 @@
     }
 
     function selectRun(runId) {
-        selectedRun = runs[0] && runId === runs[0].run_id ? null : runId;
+        selectedRun = started[0] && runId === started[0].run_id ? null : runId;
         selectedStep = null;
         render();
         $('run-card').scrollIntoView({ block: 'nearest' });
@@ -369,6 +426,8 @@
         if (!list.success) throw new Error(errorMessage(list, 'Could not load pipeline runs'));
         definition = def.data.pipeline;
         runs = list.data.runs;
+        started = runs.filter(run => run.status !== 'queued');
+        queued = runs.filter(run => run.status === 'queued').reverse();
         if (selectedRun && !runs.some(run => run.run_id === selectedRun)) selectedRun = null;
         clearPageError('refresh');
         await render();
@@ -391,36 +450,115 @@
         return refreshInFlight;
     }
 
-    async function action(url, label, button) {
+    async function action(url, label, button, body = null) {
         button.disabled = true;
         try {
-            const data = await api(url, { method: 'POST' });
+            const opts = { method: 'POST' };
+            if (body) {
+                opts.headers = { 'Content-Type': 'application/json' };
+                opts.body = JSON.stringify(body);
+            }
+            const data = await api(url, opts);
             if (!data.success) throw new Error(errorMessage(data, `Could not ${label}`));
             selectedRun = null;
             selectedStep = null;
             showPageError();
             await refresh();
+            return true;
         } catch (error) {
             showPageError(`Could not ${label}: ${error.message}`);
+            return false;
         } finally {
             button.disabled = false;
         }
     }
 
+    // ── Run form ────────────────────────────────────────────────────────────
+
+    function loadBranches(project) {
+        if (!branchLists.has(project)) {
+            branchLists.set(project, api(`/api/v1/projects/${encodeURIComponent(project)}/branches`)
+                .then(data => data.success ? data.data
+                    : { error: errorMessage(data, 'Could not list branches') })
+                .catch(error => ({ error: error.message })));
+        }
+        return branchLists.get(project);
+    }
+
+    function fillBranchSelect(select, note, step, info) {
+        const fallback = step.branch || info.current || '';
+        select.options[0].textContent = fallback ? `Default (${fallback})` : 'Default';
+        if (info.error) {
+            note.textContent = `Branches unavailable: ${info.error}`;
+            note.hidden = false;
+            return;
+        }
+        (info.branches || []).filter(branch => branch !== fallback).forEach(branch => {
+            const option = document.createElement('option');
+            option.value = branch;
+            option.textContent = branch;
+            select.appendChild(option);
+        });
+    }
+
+    function openRunForm() {
+        const trains = (definition.steps || []).filter(step => step.type === 'train');
+        const rows = $('run-form-rows');
+        rows.replaceChildren();
+        trains.forEach(step => {
+            const row = textElement('div', 'run-form-row', '');
+            const id = `run-branch-${step.name}`;
+            const label = textElement('label', 'run-form-step', step.name);
+            label.htmlFor = id;
+            const select = document.createElement('select');
+            select.id = id;
+            select.dataset.step = step.name;
+            select.appendChild(textElement('option', '', 'Default (loading…)'));
+            select.options[0].value = '';
+            select.addEventListener('change', () => select.classList.toggle('overridden', Boolean(select.value)));
+            const note = textElement('p', 'muted run-form-note', '');
+            note.hidden = true;
+            row.append(label, textElement('span', 'run-form-project', step.project), select, note);
+            rows.appendChild(row);
+            loadBranches(step.project).then(info => fillBranchSelect(select, note, step, info));
+        });
+        $('run-form').hidden = false;
+        renderHeader(viewedRun());
+        const first = rows.querySelector('select');
+        if (first) first.focus();
+    }
+
+    function closeRunForm() {
+        $('run-form').hidden = true;
+        renderHeader(viewedRun());
+        $('btn-pipeline-start').focus();
+    }
+
     $('btn-pipeline-start').addEventListener('click', event => {
-        action(`${API}/runs`, 'start pipeline', event.currentTarget);
+        if ((definition.steps || []).some(step => step.type === 'train')) openRunForm();
+        else action(`${API}/runs`, 'start pipeline', event.currentTarget);
+    });
+    $('btn-run-form-cancel').addEventListener('click', closeRunForm);
+    $('run-form').addEventListener('submit', async event => {
+        event.preventDefault();
+        const branches = {};
+        $('run-form-rows').querySelectorAll('select').forEach(select => {
+            if (select.value) branches[select.dataset.step] = select.value;
+        });
+        if (await action(`${API}/runs`, 'start pipeline', $('btn-run-submit'), { branches })) closeRunForm();
     });
     $('btn-pipeline-cancel').addEventListener('click', event => {
         const run = viewedRun();
-        if (run && confirm(`Cancel ${run.run_ref}?`)) {
+        const verb = run && run.status === 'queued' ? 'Remove from the queue:' : 'Cancel';
+        if (run && confirm(`${verb} ${run.run_ref}?`)) {
             action(`${API}/runs/${run.run_id}/cancel`, 'cancel pipeline', event.currentTarget);
         }
     });
     $('btn-pipeline-resume').addEventListener('click', event => {
-        const run = runs[0];
+        const run = started[0];
         if (run) action(`${API}/runs/${run.run_id}/resume`, 'resume pipeline', event.currentTarget);
     });
-    $('btn-show-latest').addEventListener('click', () => selectRun(runs[0].run_id));
+    $('btn-show-latest').addEventListener('click', () => selectRun(started[0] ? started[0].run_id : null));
     $('btn-step-close').addEventListener('click', () => {
         selectedStep = null;
         render();
@@ -450,7 +588,7 @@
     function schedulePoll() {
         clearPoll();
         if (!polling || document.hidden) return;
-        const live = runs[0] && runs[0].status === 'running';
+        const live = isBusy();
         pollTimer = window.setTimeout(async () => {
             await refresh();
             schedulePoll();
