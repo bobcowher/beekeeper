@@ -53,6 +53,27 @@ def _folder_options():
     return list_folders(current_app.config["PROJECTS_DIR"], current_app.config.get("PIPELINES_DIR"))
 
 
+def _form_env_vars():
+    env_vars = {}
+    for key, value in zip(request.form.getlist("env_key"), request.form.getlist("env_val")):
+        key = key.strip()
+        if key:
+            env_vars[key] = value
+    return env_vars
+
+
+def _validate_form_data_directory(enabled, remote, redirect_route, **route_values):
+    if not enabled:
+        return None
+    if not remote:
+        flash("System data path is required when data directory is enabled.", "error")
+        return redirect(url_for(redirect_route, **route_values))
+    if not os.path.isdir(remote):
+        flash(f"System data path '{remote}' does not exist or is not a directory.", "error")
+        return redirect(url_for(redirect_route, **route_values))
+    return None
+
+
 @project_bp.route("", methods=["GET"])
 def index():
     projects = []
@@ -117,13 +138,9 @@ def create():
     data_dir_local = request.form.get("data_dir_local", "data").strip() or "data"
     data_dir_remote = request.form.get("data_dir_remote", "").strip()
 
-    if data_dir_enabled:
-        if not data_dir_remote:
-            flash("System data path is required when data directory is enabled.", "error")
-            return redirect(url_for(_NEW_ROUTE))
-        if not os.path.isdir(data_dir_remote):
-            flash(f"System data path '{data_dir_remote}' does not exist or is not a directory.", "error")
-            return redirect(url_for(_NEW_ROUTE))
+    error = _validate_form_data_directory(data_dir_enabled, data_dir_remote, _NEW_ROUTE)
+    if error is not None:
+        return error
 
     tensorboard_log_dir = request.form.get("tensorboard_log_dir", "runs").strip() or "runs"
     try:
@@ -135,13 +152,7 @@ def create():
         flash(str(e), "error")
         return redirect(url_for(_NEW_ROUTE))
 
-    env_keys = request.form.getlist("env_key")
-    env_vals = request.form.getlist("env_val")
-    env_vars = {}
-    for k, v in zip(env_keys, env_vals):
-        k = k.strip()
-        if k:
-            env_vars[k] = v
+    env_vars = _form_env_vars()
 
     data = {
         "name": name,
@@ -216,6 +227,45 @@ def edit(name):
     return render_template("edit_project.html", project=project, folders=_folder_options())
 
 
+def _sync_form_data_directory(projects_dir, name, enabled, local, remote):
+    error = _validate_form_data_directory(enabled, remote, _EDIT_ROUTE, name=name)
+    if error is not None or not enabled:
+        return error
+    workspace_dir = os.path.join(projects_dir, name, "workspace")
+    if not os.path.isdir(workspace_dir):
+        return None
+    local_path = os.path.join(workspace_dir, local)
+    if os.path.islink(local_path):
+        if os.readlink(local_path) != remote:
+            os.unlink(local_path)
+            os.symlink(remote, local_path)
+        return None
+    if os.path.exists(local_path):
+        flash(
+            f"'{local}' already exists in the repository and is not a symlink. "
+            f"Remove it first, then save again.",
+            "error",
+        )
+        return redirect(url_for(_EDIT_ROUTE, name=name))
+    os.symlink(remote, local_path)
+    return None
+
+
+def _integer_form_value(field, default, minimum):
+    try:
+        return max(minimum, int(request.form.get(field) or default))
+    except (ValueError, TypeError):
+        return default
+
+
+def _apply_resource_settings(project_data):
+    project_data["parallel_runs_enabled"] = bool(request.form.get("parallel_runs_enabled"))
+    project_data["max_parallel_runs"] = _integer_form_value("max_parallel_runs", 2, 2)
+    project_data["gpu_enabled"] = bool(request.form.get("gpu_enabled"))
+    project_data["gpu_memory_minimum"] = _integer_form_value("gpu_memory_minimum", 0, 0)
+    project_data["gpu_memory_preferred"] = _integer_form_value("gpu_memory_preferred", 0, 0)
+
+
 @project_bp.route("/<name>/edit", methods=["POST"])
 def update(name):
     projects_dir = current_app.config["PROJECTS_DIR"]
@@ -244,29 +294,10 @@ def update(name):
     data_dir_local = request.form.get("data_dir_local", project_data.get("data_dir_local", "data")).strip() or "data"
     data_dir_remote = request.form.get("data_dir_remote", project_data.get("data_dir_remote", "")).strip()
 
-    if data_dir_enabled:
-        if not data_dir_remote:
-            flash("System data path is required when data directory is enabled.", "error")
-            return redirect(url_for(_EDIT_ROUTE, name=name))
-        if not os.path.isdir(data_dir_remote):
-            flash(f"System data path '{data_dir_remote}' does not exist or is not a directory.", "error")
-            return redirect(url_for(_EDIT_ROUTE, name=name))
-        workspace_dir = os.path.join(projects_dir, name, "workspace")
-        if os.path.isdir(workspace_dir):
-            local_path = os.path.join(workspace_dir, data_dir_local)
-            if os.path.islink(local_path):
-                if os.readlink(local_path) != data_dir_remote:
-                    os.unlink(local_path)
-                    os.symlink(data_dir_remote, local_path)
-            elif os.path.exists(local_path):
-                flash(
-                    f"'{data_dir_local}' already exists in the repository and is not a symlink. "
-                    f"Remove it first, then save again.",
-                    "error",
-                )
-                return redirect(url_for(_EDIT_ROUTE, name=name))
-            else:
-                os.symlink(data_dir_remote, local_path)
+    error = _sync_form_data_directory(
+        projects_dir, name, data_dir_enabled, data_dir_local, data_dir_remote)
+    if error is not None:
+        return error
 
     project_data["data_dir_enabled"] = data_dir_enabled
     project_data["data_dir_local"] = data_dir_local
@@ -282,32 +313,8 @@ def update(name):
         return redirect(url_for(_EDIT_ROUTE, name=name))
 
     # Parse environment variables from the form
-    env_keys = request.form.getlist("env_key")
-    env_vals = request.form.getlist("env_val")
-    env_vars = {}
-    for k, v in zip(env_keys, env_vals):
-        k = k.strip()
-        if k:
-            env_vars[k] = v
-    project_data["env_vars"] = env_vars
-
-    # Handle parallel runs settings
-    project_data["parallel_runs_enabled"] = bool(request.form.get("parallel_runs_enabled"))
-    try:
-        project_data["max_parallel_runs"] = max(2, int(request.form.get("max_parallel_runs", 2)))
-    except (ValueError, TypeError):
-        project_data["max_parallel_runs"] = 2
-
-    # GPU memory management
-    project_data["gpu_enabled"] = bool(request.form.get("gpu_enabled"))
-    try:
-        project_data["gpu_memory_minimum"] = max(0, int(request.form.get("gpu_memory_minimum") or 0))
-    except (ValueError, TypeError):
-        project_data["gpu_memory_minimum"] = 0
-    try:
-        project_data["gpu_memory_preferred"] = max(0, int(request.form.get("gpu_memory_preferred") or 0))
-    except (ValueError, TypeError):
-        project_data["gpu_memory_preferred"] = 0
+    project_data["env_vars"] = _form_env_vars()
+    _apply_resource_settings(project_data)
 
     from models.project import Project
     project = Project(**project_data)

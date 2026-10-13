@@ -9,6 +9,7 @@ from services.folder_service import list_folders
 from services.pipeline_schema import NAME_RE
 
 pipelines_bp = Blueprint("pipelines", __name__, url_prefix="/pipelines")
+_NEW_ROUTE = "pipelines.new"
 
 # A new pipeline opens in the graphical editor; one runnable step shows what a step looks like.
 _STARTER_STEP = {"name": "prepare", "type": "task",
@@ -50,15 +51,15 @@ def create():
     name = request.form.get("name", "").strip()
     if not NAME_RE.match(name):
         flash("Pipeline names use lowercase letters, digits, '_' or '-'.", "error")
-        return redirect(url_for("pipelines.new"))
+        return redirect(url_for(_NEW_ROUTE))
     if pipeline_store.pipeline_exists(pipelines_dir, name):
         flash(f"Pipeline '{name}' already exists.", "error")
-        return redirect(url_for("pipelines.new"))
+        return redirect(url_for(_NEW_ROUTE))
     try:
         folder = normalize_folder(request.form.get("folder", ""))
     except ValueError as e:
         flash(str(e), "error")
-        return redirect(url_for("pipelines.new"))
+        return redirect(url_for(_NEW_ROUTE))
     pipeline_store.save_pipeline(pipelines_dir, {"name": name, "folder": folder, "steps": [_STARTER_STEP]})
     return redirect(url_for("pipelines.edit", name=name))
 

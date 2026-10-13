@@ -20,6 +20,10 @@ from services.db_service import DatabaseService
 from services.config_service import ConfigService
 from services.auth_service import hash_password
 
+AUTH_ENABLED_KEY = 'auth.enabled'
+EMAIL_HELP = 'User email address'
+SKIP_CONFIRMATION_HELP = 'Skip confirmation'
+
 
 def init_services():
     """Initialize database and config services."""
@@ -277,11 +281,11 @@ def enable_auth(args):
     """Enable authentication."""
     _, config = init_services()
 
-    if config.get_bool('auth.enabled', False):
+    if config.get_bool(AUTH_ENABLED_KEY, False):
         print("Authentication is already enabled")
         return
 
-    config.set('auth.enabled', 'true')
+    config.set(AUTH_ENABLED_KEY, 'true')
     config.save()
     print("✓ Authentication enabled")
 
@@ -290,7 +294,7 @@ def disable_auth(args):
     """Disable authentication."""
     _, config = init_services()
 
-    if not config.get_bool('auth.enabled', False):
+    if not config.get_bool(AUTH_ENABLED_KEY, False):
         print("Authentication is already disabled")
         return
 
@@ -302,7 +306,7 @@ def disable_auth(args):
             print("Cancelled")
             return
 
-    config.set('auth.enabled', 'false')
+    config.set(AUTH_ENABLED_KEY, 'false')
     config.save()
     print("✓ Authentication disabled")
 
@@ -321,7 +325,7 @@ def show_config(args):
 
     print("\nCurrent Configuration:")
     print("-" * 50)
-    print(f"Authentication enabled: {config.get_bool('auth.enabled', False)}")
+    print(f"Authentication enabled: {config.get_bool(AUTH_ENABLED_KEY, False)}")
     print(f"Session lifetime (days): {config.get_int('session.lifetime_days', 7)}")
     print(f"Min password length: {config.get_int('password.min_length', 8)}")
     print(f"API rate limit (req/min): {config.get_int('api.rate_limit_per_minute', 600)}")
@@ -378,7 +382,7 @@ Examples:
 
     # create-user
     parser_create = subparsers.add_parser('create-user', help='Create a new user')
-    parser_create.add_argument('--email', help='User email address')
+    parser_create.add_argument('--email', help=EMAIL_HELP)
     parser_create.add_argument('--name', help='User full name')
     parser_create.add_argument('--password', help='User password (will prompt if not provided)')
     parser_create.add_argument('--admin', action='store_true', help='Grant admin privileges')
@@ -386,41 +390,41 @@ Examples:
 
     # reset-password
     parser_reset = subparsers.add_parser('reset-password', help='Reset user password')
-    parser_reset.add_argument('email', help='User email address')
+    parser_reset.add_argument('email', help=EMAIL_HELP)
     parser_reset.add_argument('--password', help='New password (will prompt if not provided)')
     parser_reset.set_defaults(func=reset_password)
 
     # promote
     parser_promote = subparsers.add_parser('promote', help='Promote user to admin')
-    parser_promote.add_argument('email', help='User email address')
+    parser_promote.add_argument('email', help=EMAIL_HELP)
     parser_promote.set_defaults(func=promote_user)
 
     # demote
     parser_demote = subparsers.add_parser('demote', help='Demote admin to regular user')
-    parser_demote.add_argument('email', help='User email address')
+    parser_demote.add_argument('email', help=EMAIL_HELP)
     parser_demote.set_defaults(func=demote_user)
 
     # delete-user
     parser_delete = subparsers.add_parser('delete-user', help='Delete a user')
-    parser_delete.add_argument('email', help='User email address')
-    parser_delete.add_argument('-y', '--yes', action='store_true', help='Skip confirmation')
+    parser_delete.add_argument('email', help=EMAIL_HELP)
+    parser_delete.add_argument('-y', '--yes', action='store_true', help=SKIP_CONFIRMATION_HELP)
     parser_delete.set_defaults(func=delete_user)
 
     # unlock-account
     parser_unlock = subparsers.add_parser('unlock-account', help='Unlock a locked user account')
-    parser_unlock.add_argument('email', help='User email address')
+    parser_unlock.add_argument('email', help=EMAIL_HELP)
     parser_unlock.set_defaults(func=unlock_account)
 
     # list-api-keys
     parser_list_keys = subparsers.add_parser('list-api-keys', help='List API keys for a user')
-    parser_list_keys.add_argument('email', help='User email address')
+    parser_list_keys.add_argument('email', help=EMAIL_HELP)
     parser_list_keys.set_defaults(func=list_api_keys)
 
     # revoke-api-key
     parser_revoke = subparsers.add_parser('revoke-api-key', help='Revoke an API key')
-    parser_revoke.add_argument('email', help='User email address')
+    parser_revoke.add_argument('email', help=EMAIL_HELP)
     parser_revoke.add_argument('name', help='API key name')
-    parser_revoke.add_argument('-y', '--yes', action='store_true', help='Skip confirmation')
+    parser_revoke.add_argument('-y', '--yes', action='store_true', help=SKIP_CONFIRMATION_HELP)
     parser_revoke.set_defaults(func=revoke_api_key)
 
     # enable-auth
@@ -429,7 +433,7 @@ Examples:
 
     # disable-auth
     parser_disable = subparsers.add_parser('disable-auth', help='Disable authentication')
-    parser_disable.add_argument('-y', '--yes', action='store_true', help='Skip confirmation')
+    parser_disable.add_argument('-y', '--yes', action='store_true', help=SKIP_CONFIRMATION_HELP)
     parser_disable.set_defaults(func=disable_auth)
 
     # clean-sessions

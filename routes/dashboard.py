@@ -18,22 +18,25 @@ def _seconds_between(start, end=None):
     return max(0, int((ended - started).total_seconds()))
 
 
-def _activity_data():
-    db = get_db()
+def _running_training(projects_dir):
     running = []
-    projects_dir = current_app.config["PROJECTS_DIR"]
-    if os.path.isdir(projects_dir):
-        for name in sorted(os.listdir(projects_dir)):
-            if not os.path.isfile(os.path.join(projects_dir, name, "project.json")):
-                continue
-            for run in get_runs_for_project(name):
-                running.append({
-                    "kind": "training", "name": name, "run_id": run["run_id"],
-                    "run_ref": run["run_ref"], "branch": run.get("branch") or "",
-                    "elapsed": run.get("elapsed"), "status": run.get("status", "running"),
-                    "url": f"/projects/{name}",
-                })
+    if not os.path.isdir(projects_dir):
+        return running
+    for name in sorted(os.listdir(projects_dir)):
+        if not os.path.isfile(os.path.join(projects_dir, name, "project.json")):
+            continue
+        for run in get_runs_for_project(name):
+            running.append({
+                "kind": "training", "name": name, "run_id": run["run_id"],
+                "run_ref": run["run_ref"], "branch": run.get("branch") or "",
+                "elapsed": run.get("elapsed"), "status": run.get("status", "running"),
+                "url": f"/projects/{name}",
+            })
+    return running
 
+
+def _running_pipelines(db):
+    running = []
     for row in db.running_pipeline_runs():
         run = pipeline_engine.describe_run(row)
         index = run.get("current_step", 0)
@@ -44,6 +47,38 @@ def _activity_data():
             "elapsed": _seconds_between(run.get("started_at")), "status": "running",
             "url": f"/pipelines/{run['pipeline']}",
         })
+    return running
+
+
+def _recent_activity(db, active):
+    recent = []
+    for run in db.recent_finished_training_runs(limit=20):
+        if ("training", run["project_name"]) not in active:
+            recent.append({
+                "kind": "training", "name": run["project_name"], "run_id": run["run_number"],
+                "run_ref": f"{run['project_name']}-{run['run_number']}", "status": run["status"],
+                "duration": run.get("duration_seconds"),
+                "timestamp": run.get("ended_at") or run["started_at"],
+                "url": f"/projects/{run['project_name']}/history/{run['run_number']}/log",
+            })
+    for run in db.recent_finished_pipeline_runs(limit=20):
+        if ("pipeline", run["pipeline_name"]) not in active:
+            recent.append({
+                "kind": "pipeline", "name": run["pipeline_name"], "run_id": run["run_number"],
+                "run_ref": f"{run['pipeline_name']}#{run['run_number']}",
+                "status": "completed" if run["status"] == "succeeded" else run["status"],
+                "duration": _seconds_between(run["started_at"], run.get("ended_at")),
+                "timestamp": run.get("ended_at") or run["started_at"],
+                "url": f"/pipelines/{run['pipeline_name']}",
+            })
+    recent.sort(key=lambda item: item["timestamp"] or "", reverse=True)
+    return recent[:20]
+
+
+def _activity_data():
+    db = get_db()
+    projects_dir = current_app.config["PROJECTS_DIR"]
+    running = _running_training(projects_dir) + _running_pipelines(db)
 
     queued = [{
         "project": entry["project_name"], "branch": entry.get("branch") or "",
@@ -53,34 +88,7 @@ def _activity_data():
     # One entry per project or pipeline: its latest finished run, unless it's running now
     # (then the Running list already shows it).
     active = {(item["kind"], item["name"]) for item in running}
-    recent = []
-    for run in db.recent_finished_training_runs(limit=20):
-        if ("training", run["project_name"]) in active:
-            continue
-        recent.append({
-            "kind": "training", "name": run["project_name"],
-            "run_id": run["run_number"],
-            "run_ref": f"{run['project_name']}-{run['run_number']}",
-            "status": run["status"], "duration": run.get("duration_seconds"),
-            "timestamp": run.get("ended_at") or run["started_at"],
-            "url": f"/projects/{run['project_name']}/history/{run['run_number']}/log",
-        })
-    for run in db.recent_finished_pipeline_runs(limit=20):
-        if ("pipeline", run["pipeline_name"]) in active:
-            continue
-        status = "completed" if run["status"] == "succeeded" else run["status"]
-        recent.append({
-            "kind": "pipeline", "name": run["pipeline_name"],
-            "run_id": run["run_number"],
-            "run_ref": f"{run['pipeline_name']}#{run['run_number']}",
-            "status": status,
-            "duration": _seconds_between(run["started_at"], run.get("ended_at")),
-            "timestamp": run.get("ended_at") or run["started_at"],
-            "url": f"/pipelines/{run['pipeline_name']}",
-        })
-    recent.sort(key=lambda item: item["timestamp"] or "", reverse=True)
-
-    return {"running": running, "queued": queued, "recent": recent[:20]}
+    return {"running": running, "queued": queued, "recent": _recent_activity(db, active)}
 
 
 @dashboard_bp.route("/", methods=["GET"])

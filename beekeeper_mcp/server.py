@@ -187,7 +187,7 @@ def create_project(
 
 
 @mcp.tool()
-def update_project(
+def update_project(  # NOSONAR - MCP tool parameters are its public interface
     project_name: str,
     branch: str | None = None,
     train_file: str | None = None,

@@ -92,6 +92,48 @@ def _tail_offset(filepath, lines):
     return offset
 
 
+def _read_stream_chunk(log_path, offset):
+    if not os.path.isfile(log_path):
+        return offset, ""
+    size = os.path.getsize(log_path)
+    if size < offset:
+        offset = 0
+    if size <= offset:
+        return offset, ""
+    with open(log_path, "r") as log_file:
+        log_file.seek(offset)
+        chunk = log_file.read()
+        return log_file.tell(), chunk
+
+
+def _training_run_is_active(name, run_id):
+    runs = get_runs_for_project(name)
+    if run_id is None:
+        return bool(runs)
+    return any(run["run_id"] == run_id for run in runs)
+
+
+def _generate_log_stream(name, run_id, log_path, tail):
+    offset = _tail_offset(log_path, tail) if tail and os.path.isfile(log_path) else 0
+    retries_without_data = 0
+    while retries_without_data <= 300:
+        try:
+            offset, chunk = _read_stream_chunk(log_path, offset)
+            if chunk:
+                for line in chunk.splitlines(True):
+                    yield f"data: {line.rstrip()}\n\n"
+                retries_without_data = 0
+                continue
+            retries_without_data += 1
+            if not _training_run_is_active(name, run_id) and retries_without_data > 2:
+                yield "data: \n\nevent: done\ndata: finished\n\n"
+                return
+        except Exception:
+            # Streaming is best-effort; a transient file race is retried on the next poll.
+            retries_without_data += 1
+        time.sleep(0.5)
+
+
 @training_bp.route("/<name>/logs/stream", methods=["GET"])
 def logs_stream(name):
     projects_dir = current_app.config["PROJECTS_DIR"]
@@ -99,50 +141,7 @@ def logs_stream(name):
     run_id = request.args.get("run_id", type=int)
     log_path = get_run_log_path(projects_dir, name, run_id=run_id)
 
-    def generate():
-        if tail and os.path.isfile(log_path):
-            offset = _tail_offset(log_path, tail)
-        else:
-            offset = 0
-
-        retries_without_data = 0
-        max_idle = 300
-
-        while True:
-            try:
-                if os.path.isfile(log_path):
-                    size = os.path.getsize(log_path)
-                    if size < offset:
-                        offset = 0
-                    if size > offset:
-                        with open(log_path, "r") as f:
-                            f.seek(offset)
-                            chunk = f.read()
-                            offset = f.tell()
-                        if chunk:
-                            for line in chunk.splitlines(True):
-                                yield f"data: {line.rstrip()}\n\n"
-                            retries_without_data = 0
-                            continue
-
-                retries_without_data += 1
-                runs = get_runs_for_project(name)
-                if run_id is not None:
-                    run_active = any(r["run_id"] == run_id for r in runs)
-                else:
-                    run_active = len(runs) > 0
-                if not run_active and retries_without_data > 2:
-                    yield "data: \n\nevent: done\ndata: finished\n\n"
-                    return
-                if retries_without_data > max_idle:
-                    return
-
-            except Exception:  # NOSONAR — swallow file read errors to keep SSE stream alive
-                pass
-
-            time.sleep(0.5)
-
-    return Response(generate(), mimetype="text/event-stream",
+    return Response(_generate_log_stream(name, run_id, log_path, tail), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 

@@ -7,6 +7,7 @@ All endpoints return JSON with a consistent envelope:
 """
 
 import os
+import re
 import subprocess
 import time
 from typing import NoReturn
@@ -18,7 +19,7 @@ from services.process_manager import can_start_training, start_training, stop_tr
 from services.stats_service import get_all_stats, get_cpu_stats, get_memory_stats, get_gpu_stats, get_gpu_platform_info
 from services.db_service import get_db
 from services.auth_service import api_key_required
-from services.project_service import validate_output_paths
+from services.project_service import ensure_data_dir_symlink, validate_output_paths
 from services.git_utils import git_env
 from services.run_storage_service import delete_run_storage
 
@@ -38,6 +39,13 @@ SERVER_VERSION = "1.1.0"
 MIN_MCP_VERSION = "0.5.0"
 PROJECT_FILE = "project.json"
 MCP_SERVER_FILE = "mcp_server.py"
+PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+EPISODE_PATTERN = re.compile(
+    r'Episode\s+(\d+)\s*\|\s*reward:\s*([-\d.]+)'
+    r'(?:\s*\|\s*epsilon:\s*([\d.]+))?'
+    r'(?:\s*\|\s*steps:\s*(\d+))?',
+    re.IGNORECASE,
+)
 
 # ---------------------------------------------------------------------------
 # Response helpers
@@ -70,6 +78,47 @@ def load_project(name) -> Project:
         return Project.load(config_path)
     except Exception as e:
         _abort_json(500, "LOAD_ERROR", f"Failed to load project: {e}")
+
+
+def _project_creation_fields(data, projects_dir):
+    name = data.get("name", "").strip()
+    if not name:
+        return None, api_response(error_code="MISSING_NAME", error_message="Project name is required", status_code=400)
+    if not PROJECT_NAME_RE.match(name):
+        return None, api_response(
+            error_code="INVALID_NAME",
+            error_message="Invalid project name. Use only letters, numbers, hyphens, underscores.",
+            status_code=400,
+        )
+    git_url = data.get("git_url", "").strip()
+    if not git_url:
+        return None, api_response(error_code="MISSING_GIT_URL", error_message="Git URL is required", status_code=400)
+    try:
+        folder = normalize_folder(data.get("folder", ""))
+    except ValueError as e:
+        return None, api_response(error_code="INVALID_FOLDER", error_message=str(e), status_code=400)
+    if os.path.exists(os.path.join(projects_dir, name)):
+        return None, api_response(
+            error_code="DUPLICATE_NAME", error_message=f"Project '{name}' already exists", status_code=409)
+    return {"name": name, "git_url": git_url, "folder": folder}, None
+
+
+def _validate_data_directory(data):
+    enabled = data.get("data_dir_enabled", False)
+    remote = data.get("data_dir_remote", "").strip()
+    if enabled and not remote:
+        return api_response(
+            error_code="MISSING_DATA_DIR",
+            error_message="System data path is required when data directory is enabled",
+            status_code=400,
+        )
+    if enabled and not os.path.isdir(remote):
+        return api_response(
+            error_code="INVALID_DATA_DIR",
+            error_message=f"System data path '{remote}' does not exist or is not a directory",
+            status_code=400,
+        )
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -115,66 +164,18 @@ def list_projects():
 @api_key_required
 def create_project():
     """Create a new project from a git repository."""
-    import re
     from services.project_service import create_project as create_project_service
 
     data = request.get_json() or {}
-
-    # Validate required fields
-    name = data.get("name", "").strip()
-    if not name:
-        return api_response(
-            error_code="MISSING_NAME",
-            error_message="Project name is required",
-            status_code=400
-        )
-
-    if not re.match(r"^[a-zA-Z0-9_-]+$", name):
-        return api_response(
-            error_code="INVALID_NAME",
-            error_message="Invalid project name. Use only letters, numbers, hyphens, underscores.",
-            status_code=400
-        )
-
-    git_url = data.get("git_url", "").strip()
-    if not git_url:
-        return api_response(
-            error_code="MISSING_GIT_URL",
-            error_message="Git URL is required",
-            status_code=400
-        )
-
-    try:
-        folder = normalize_folder(data.get("folder", ""))
-    except ValueError as e:
-        return api_response(error_code="INVALID_FOLDER", error_message=str(e), status_code=400)
-
     projects_dir = current_app.config["PROJECTS_DIR"]
-
-    # Check for duplicate
-    if os.path.exists(os.path.join(projects_dir, name)):
-        return api_response(
-            error_code="DUPLICATE_NAME",
-            error_message=f"Project '{name}' already exists",
-            status_code=409
-        )
-
-    # Validate data_dir if enabled
+    fields, error = _project_creation_fields(data, projects_dir)
+    if error is not None:
+        return error
+    name, git_url, folder = fields["name"], fields["git_url"], fields["folder"]
     data_dir_enabled = data.get("data_dir_enabled", False)
-    if data_dir_enabled:
-        data_dir_remote = data.get("data_dir_remote", "").strip()
-        if not data_dir_remote:
-            return api_response(
-                error_code="MISSING_DATA_DIR",
-                error_message="System data path is required when data directory is enabled",
-                status_code=400
-            )
-        if not os.path.isdir(data_dir_remote):
-            return api_response(
-                error_code="INVALID_DATA_DIR",
-                error_message=f"System data path '{data_dir_remote}' does not exist or is not a directory",
-                status_code=400
-            )
+    error = _validate_data_directory(data)
+    if error is not None:
+        return error
 
     tensorboard_log_dir = data.get("tensorboard_log_dir", "runs").strip() or "runs"
     try:
@@ -245,7 +246,6 @@ def get_project(name):
 @api_key_required
 def clone_project(name):
     """Clone an existing project with a new name."""
-    import re
     from services.project_service import create_project as create_project_service
 
     # Load the source project
@@ -262,7 +262,7 @@ def clone_project(name):
             status_code=400
         )
 
-    if not re.match(r"^[a-zA-Z0-9_-]+$", new_name):
+    if not PROJECT_NAME_RE.match(new_name):
         return api_response(
             error_code="INVALID_NAME",
             error_message="Invalid project name. Use only letters, numbers, hyphens, underscores.",
@@ -376,7 +376,6 @@ def rename_project_api(name):
     Body: {"new_name": "my-new-name"}
     Cannot rename while setup or training is active.
     """
-    import re
     import json
 
     load_project(name)
@@ -403,7 +402,7 @@ def rename_project_api(name):
 
     body = request.get_json() or {}
     new_name = body.get("new_name", "").strip()
-    if not new_name or not re.match(r"^[a-zA-Z0-9_-]+$", new_name):
+    if not new_name or not PROJECT_NAME_RE.match(new_name):
         return api_response(
             error_code="INVALID_NAME",
             error_message="Invalid project name — use only letters, numbers, hyphens, underscores",
@@ -432,51 +431,15 @@ def rename_project_api(name):
     })
 
 
-@api_v1_bp.route("/projects/<name>", methods=["PATCH"])
-@api_key_required
-def update_project_api(name):
-    """
-    Update editable project settings. Only the fields you include are changed.
-    Folder-only updates are allowed during training; other updates require training to stop.
-
-    Editable fields: branch, train_file, tensorboard_log_dir, requirements_file,
-    setup_script, env_vars (dict), tb_logs_max_runs (int), run_history_max_runs (int),
-    data_dir_enabled (bool), data_dir_local (str), data_dir_remote (str), folder (str).
-    """
-    from services.project_service import ensure_data_dir_symlink
-
-    project = load_project(name)
-    data = request.get_json() or {}
-    if not data:
-        return api_response(
-            error_code="NO_FIELDS",
-            error_message="No fields to update",
-            status_code=400,
-        )
-
-    status = get_training_status(name)
-    cosmetic_only = set(data) <= {"folder"}
-    if status["status"] == "running" and not cosmetic_only:
-        return api_response(
-            error_code="TRAINING_RUNNING",
-            error_message="Cannot update project while training is running — stop training first",
-            status_code=409
-        )
-
+def _apply_text_project_updates(project, data):
     if "folder" in data:
         try:
             project.folder = normalize_folder(data["folder"])
         except ValueError as e:
             return api_response(error_code="INVALID_FOLDER", error_message=str(e), status_code=400)
-
-    if "branch" in data:
-        project.branch = data["branch"].strip() or project.branch
-    if "train_file" in data:
-        project.train_file = data["train_file"].strip() or project.train_file
-    if "tensorboard_log_dir" in data:
-        project.tensorboard_log_dir = data["tensorboard_log_dir"].strip() or project.tensorboard_log_dir
-    if "requirements_file" in data:
-        project.requirements_file = data["requirements_file"].strip() or project.requirements_file
+    for field in ("branch", "train_file", "tensorboard_log_dir", "requirements_file"):
+        if field in data:
+            setattr(project, field, data[field].strip() or getattr(project, field))
     if "setup_script" in data:
         project.setup_script = data["setup_script"].strip()
     if "env_vars" in data:
@@ -487,77 +450,90 @@ def update_project_api(name):
                 status_code=400
             )
         project.env_vars = data["env_vars"]
-    if "tb_logs_max_runs" in data:
-        try:
-            project.tb_logs_max_runs = max(1, int(data["tb_logs_max_runs"]))
-        except (ValueError, TypeError):
-            return api_response(
-                error_code="INVALID_TB_LOGS_MAX_RUNS",
-                error_message="tb_logs_max_runs must be an integer",
-                status_code=400
-            )
-    if "run_history_max_runs" in data:
-        try:
-            project.run_history_max_runs = max(1, int(data["run_history_max_runs"]))
-        except (ValueError, TypeError):
-            return api_response(
-                error_code="INVALID_RUN_HISTORY_MAX_RUNS",
-                error_message="run_history_max_runs must be an integer",
-                status_code=400
-            )
+    return None
+
+
+def _set_integer_project_setting(project, data, field, minimum, error_code, error_message):
+    if field not in data:
+        return None
+    try:
+        setattr(project, field, max(minimum, int(data[field])))
+    except (ValueError, TypeError):
+        return api_response(error_code=error_code, error_message=error_message, status_code=400)
+    return None
+
+
+def _apply_numeric_project_updates(project, data):
+    settings = [
+        ("tb_logs_max_runs", 1, "INVALID_TB_LOGS_MAX_RUNS", "tb_logs_max_runs must be an integer"),
+        ("run_history_max_runs", 1, "INVALID_RUN_HISTORY_MAX_RUNS", "run_history_max_runs must be an integer"),
+        ("gpu_memory_minimum", 0, "INVALID_GPU_MEMORY_MINIMUM",
+         "gpu_memory_minimum must be a non-negative integer (MB)"),
+        ("gpu_memory_preferred", 0, "INVALID_GPU_MEMORY_PREFERRED",
+         "gpu_memory_preferred must be a non-negative integer (MB)"),
+    ]
+    for field, minimum, code, message in settings:
+        error = _set_integer_project_setting(project, data, field, minimum, code, message)
+        if error is not None:
+            return error
     if "gpu_enabled" in data:
         project.gpu_enabled = bool(data["gpu_enabled"])
-    if "gpu_memory_minimum" in data:
-        try:
-            project.gpu_memory_minimum = max(0, int(data["gpu_memory_minimum"]))
-        except (ValueError, TypeError):
-            return api_response(
-                error_code="INVALID_GPU_MEMORY_MINIMUM",
-                error_message="gpu_memory_minimum must be a non-negative integer (MB)",
-                status_code=400
-            )
-    if "gpu_memory_preferred" in data:
-        try:
-            project.gpu_memory_preferred = max(0, int(data["gpu_memory_preferred"]))
-        except (ValueError, TypeError):
-            return api_response(
-                error_code="INVALID_GPU_MEMORY_PREFERRED",
-                error_message="gpu_memory_preferred must be a non-negative integer (MB)",
-                status_code=400
-            )
+    return None
 
+
+def _apply_data_directory_update(project, data, projects_dir, name):
+    data_dir_fields = {"data_dir_enabled", "data_dir_local", "data_dir_remote"}
+    if not data_dir_fields.intersection(data):
+        return None
+    enabled = data.get("data_dir_enabled", project.data_dir_enabled)
+    local = (data.get("data_dir_local", project.data_dir_local) or "").strip() or "data"
+    remote = (data.get("data_dir_remote", project.data_dir_remote) or "").strip()
+    if enabled and not remote:
+        return api_response(
+            error_code="MISSING_DATA_DIR",
+            error_message="data_dir_remote is required when data_dir_enabled is true",
+            status_code=400,
+        )
+    if enabled and not os.path.isdir(remote):
+        return api_response(
+            error_code="INVALID_DATA_DIR",
+            error_message=f"System data path '{remote}' does not exist or is not a directory",
+            status_code=400,
+        )
+    workspace_dir = os.path.join(projects_dir, name, "workspace")
+    if enabled and os.path.isdir(workspace_dir):
+        error = ensure_data_dir_symlink(workspace_dir, local, remote)
+        if error:
+            return api_response(error_code="DATA_DIR_CONFLICT", error_message=error, status_code=409)
+    project.data_dir_enabled = bool(enabled)
+    project.data_dir_local = local
+    project.data_dir_remote = remote
+    return None
+
+
+@api_v1_bp.route("/projects/<name>", methods=["PATCH"])
+@api_key_required
+def update_project_api(name):
+    """Update editable project settings included in the request."""
+    project = load_project(name)
+    data = request.get_json() or {}
+    if not data:
+        return api_response(error_code="NO_FIELDS", error_message="No fields to update", status_code=400)
+    if get_training_status(name)["status"] == "running" and not set(data) <= {"folder"}:
+        return api_response(
+            error_code="TRAINING_RUNNING",
+            error_message="Cannot update project while training is running — stop training first",
+            status_code=409,
+        )
+    for updater in (_apply_text_project_updates, _apply_numeric_project_updates):
+        error = updater(project, data)
+        if error is not None:
+            return error
     projects_dir = current_app.config["PROJECTS_DIR"]
-
-    if "data_dir_enabled" in data or "data_dir_local" in data or "data_dir_remote" in data:
-        data_dir_enabled = data.get("data_dir_enabled", project.data_dir_enabled)
-        data_dir_local = (data.get("data_dir_local", project.data_dir_local) or "").strip() or "data"
-        data_dir_remote = (data.get("data_dir_remote", project.data_dir_remote) or "").strip()
-
-        if data_dir_enabled:
-            if not data_dir_remote:
-                return api_response(
-                    error_code="MISSING_DATA_DIR",
-                    error_message="data_dir_remote is required when data_dir_enabled is true",
-                    status_code=400
-                )
-            if not os.path.isdir(data_dir_remote):
-                return api_response(
-                    error_code="INVALID_DATA_DIR",
-                    error_message=f"System data path '{data_dir_remote}' does not exist or is not a directory",
-                    status_code=400
-                )
-            workspace_dir = os.path.join(projects_dir, name, "workspace")
-            if os.path.isdir(workspace_dir):
-                err = ensure_data_dir_symlink(workspace_dir, data_dir_local, data_dir_remote)
-                if err:
-                    return api_response(error_code="DATA_DIR_CONFLICT", error_message=err, status_code=409)
-
-        project.data_dir_enabled = bool(data_dir_enabled)
-        project.data_dir_local = data_dir_local
-        project.data_dir_remote = data_dir_remote
-
+    error = _apply_data_directory_update(project, data, projects_dir, name)
+    if error is not None:
+        return error
     project.save(projects_dir)
-
     return api_response(data={"project": project.to_dict()})
 
 
@@ -939,6 +915,48 @@ def get_logs(name):
         )
 
 
+def _read_log_chunk(log_path, offset):
+    if not os.path.isfile(log_path):
+        return offset, ""
+    size = os.path.getsize(log_path)
+    if size < offset:
+        offset = 0
+    if size <= offset:
+        return offset, ""
+    with open(log_path, "r") as log_file:
+        log_file.seek(offset)
+        chunk = log_file.read()
+        return log_file.tell(), chunk
+
+
+def _requested_run_is_active(name, run_id):
+    runs = get_runs_for_project(name)
+    if run_id is None:
+        return bool(runs)
+    return any(run["run_id"] == run_id for run in runs)
+
+
+def _stream_log_events(name, run_id, log_path, tail):
+    offset = _tail_offset(log_path, tail) if tail and os.path.isfile(log_path) else 0
+    retries_without_data = 0
+    while retries_without_data <= 300:
+        try:
+            offset, chunk = _read_log_chunk(log_path, offset)
+            if chunk:
+                for line in chunk.splitlines(True):
+                    yield f"data: {line.rstrip()}\n\n"
+                retries_without_data = 0
+                continue
+            retries_without_data += 1
+            if not _requested_run_is_active(name, run_id) and retries_without_data > 2:
+                yield "data: \n\nevent: done\ndata: finished\n\n"
+                return
+        except Exception:
+            # Streaming is best-effort; a transient file race is retried on the next poll.
+            retries_without_data += 1
+        time.sleep(0.5)
+
+
 @api_v1_bp.route("/projects/<name>/logs/stream", methods=["GET"])
 @api_key_required
 def stream_logs(name):
@@ -949,51 +967,88 @@ def stream_logs(name):
     run_id = request.args.get("run_id", type=int)
     log_path = get_run_log_path(projects_dir, name, run_id=run_id)
 
-    def generate():
-        if tail and os.path.isfile(log_path):
-            offset = _tail_offset(log_path, tail)
-        else:
-            offset = 0
-
-        retries_without_data = 0
-        max_idle = 300
-
-        while True:
-            try:
-                if os.path.isfile(log_path):
-                    size = os.path.getsize(log_path)
-                    if size < offset:
-                        offset = 0
-                    if size > offset:
-                        with open(log_path, "r") as f:
-                            f.seek(offset)
-                            chunk = f.read()
-                            offset = f.tell()
-                        if chunk:
-                            for line in chunk.splitlines(True):
-                                yield f"data: {line.rstrip()}\n\n"
-                            retries_without_data = 0
-                            continue
-
-                retries_without_data += 1
-                runs = get_runs_for_project(name)
-                if run_id is not None:
-                    run_active = any(r["run_id"] == run_id for r in runs)
-                else:
-                    run_active = len(runs) > 0
-                if not run_active and retries_without_data > 2:
-                    yield "data: \n\nevent: done\ndata: finished\n\n"
-                    return
-                if retries_without_data > max_idle:
-                    return
-
-            except Exception:
-                pass
-
-            time.sleep(0.5)
-
-    return Response(generate(), mimetype="text/event-stream",
+    return Response(_stream_log_events(name, run_id, log_path, tail), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+def _analysis_log_path(projects_dir, name, run_id):
+    if run_id is None:
+        return get_run_log_path(projects_dir, name), None
+    run = get_db().get_run(name, run_id)
+    if not run:
+        return None, api_response(
+            error_code="NOT_FOUND", error_message=f"Run {run_id} not found", status_code=404)
+    if run.get('log_file_path'):
+        return os.path.join(projects_dir, name, run['log_file_path']), None
+    return get_run_log_path(projects_dir, name, run_id=run_id), None
+
+
+def _parse_episodes(content):
+    episodes = []
+    for line in content.split('\n'):
+        match = EPISODE_PATTERN.search(line)
+        if match:
+            episodes.append({
+                'episode': int(match.group(1)),
+                'reward': float(match.group(2)),
+                'epsilon': float(match.group(3)) if match.group(3) else None,
+                'steps': int(match.group(4)) if match.group(4) else None,
+            })
+    return episodes
+
+
+def _episode_quartiles(episodes):
+    if len(episodes) < 4:
+        return []
+    size = len(episodes) // 4
+    quartiles = []
+    for index in range(4):
+        start = index * size
+        end = start + size if index < 3 else len(episodes)
+        group = episodes[start:end]
+        rewards = [episode['reward'] for episode in group]
+        quartiles.append({
+            'quartile': index + 1,
+            'episode_range': [group[0]['episode'], group[-1]['episode']],
+            'count': len(rewards), 'avg_reward': round(sum(rewards) / len(rewards), 2),
+            'min_reward': min(rewards), 'max_reward': max(rewards),
+        })
+    return quartiles
+
+
+def _episode_trend(quartiles):
+    if len(quartiles) < 2:
+        return 'insufficient_data'
+    difference = quartiles[-1]['avg_reward'] - quartiles[0]['avg_reward']
+    if difference > 0.5:
+        return 'improving'
+    if difference < -0.5:
+        return 'declining'
+    return 'stable'
+
+
+def _episode_analysis(episodes):
+    rewards = [episode['reward'] for episode in episodes]
+    recent = episodes[-20:] if len(episodes) >= 20 else episodes
+    recent_rewards = [episode['reward'] for episode in recent]
+    quartiles = _episode_quartiles(episodes)
+    return {
+        'parser': 'episode_pipe_v1',
+        'parser_warning': 'This endpoint uses a format-specific parser (Episode N | reward: X). For format-agnostic log access use GET /api/v1/projects/{name}/runs/{run_id}/logs',
+        'episode_range': [episodes[0]['episode'], episodes[-1]['episode']],
+        'total_episodes': len(rewards), 'trend': _episode_trend(quartiles),
+        'overall': {
+            'avg_reward': round(sum(rewards) / len(rewards), 2),
+            'min_reward': min(rewards), 'max_reward': max(rewards),
+        },
+        'recent': {
+            'episode_range': [recent[0]['episode'], recent[-1]['episode']],
+            'count': len(recent),
+            'avg_reward': round(sum(recent_rewards) / len(recent_rewards), 2),
+            'min_reward': min(recent_rewards), 'max_reward': max(recent_rewards),
+        },
+        'quartiles': quartiles, 'latest_episode': episodes[-1],
+    }
 
 
 @api_v1_bp.route("/projects/<name>/logs/analysis", methods=["GET"])
@@ -1010,30 +1065,12 @@ def analyze_logs(name):
       ?tail=N - Only analyze last N lines (default: 500)
       ?run_id=N - Analyze log for a specific historical run
     """
-    import re
-
     load_project(name)
-
     projects_dir = current_app.config["PROJECTS_DIR"]
     run_id = request.args.get("run_id", type=int)
-
-    if run_id is not None:
-        from services.db_service import get_db
-        run = get_db().get_run(name, run_id)
-        if not run:
-            return api_response(
-                error_code="NOT_FOUND",
-                error_message=f"Run {run_id} not found",
-                status_code=404
-            )
-        log_file_path = run.get('log_file_path')
-        if log_file_path:
-            log_path = os.path.join(projects_dir, name, log_file_path)
-        else:
-            log_path = get_run_log_path(projects_dir, name, run_id=run_id)
-    else:
-        log_path = get_run_log_path(projects_dir, name)
-
+    log_path, error = _analysis_log_path(projects_dir, name, run_id)
+    if error is not None:
+        return error
     if not os.path.isfile(log_path):
         return api_response(
             error_code="NO_LOGS",
@@ -1054,103 +1091,40 @@ def analyze_logs(name):
             error_message=f"Failed to read log file: {e}",
             status_code=500
         )
-
-    # Parse episode lines - flexible pattern to match common formats
-    # "Episode 123 | reward: 4.5 | epsilon: 0.3 | steps: 200"
-    episode_pattern = re.compile(
-        r'Episode\s+(\d+)\s*\|\s*reward:\s*([-\d.]+)'
-        r'(?:\s*\|\s*epsilon:\s*([\d.]+))?'
-        r'(?:\s*\|\s*steps:\s*(\d+))?',
-        re.IGNORECASE
-    )
-
-    episodes = []
-    for line in content.split('\n'):
-        match = episode_pattern.search(line)
-        if match:
-            ep_num = int(match.group(1))
-            reward = float(match.group(2))
-            epsilon = float(match.group(3)) if match.group(3) else None
-            steps = int(match.group(4)) if match.group(4) else None
-            episodes.append({
-                'episode': ep_num,
-                'reward': reward,
-                'epsilon': epsilon,
-                'steps': steps
-            })
-
+    episodes = _parse_episodes(content)
     if not episodes:
         return api_response(
             error_code="NO_EPISODES",
             error_message="No episode data found in logs",
             status_code=404
         )
-
-    # Compute statistics
-    rewards = [ep['reward'] for ep in episodes]
-    n = len(rewards)
-
-    # Quartile analysis for trend
-    q_size = n // 4 if n >= 4 else n
-    quartiles = []
-    if n >= 4:
-        for i in range(4):
-            start = i * q_size
-            end = start + q_size if i < 3 else n
-            q_rewards = rewards[start:end]
-            q_episodes = episodes[start:end]
-            quartiles.append({
-                'quartile': i + 1,
-                'episode_range': [q_episodes[0]['episode'], q_episodes[-1]['episode']],
-                'count': len(q_rewards),
-                'avg_reward': round(sum(q_rewards) / len(q_rewards), 2),
-                'min_reward': min(q_rewards),
-                'max_reward': max(q_rewards)
-            })
-
-    # Determine trend
-    if len(quartiles) >= 2:
-        first_avg = quartiles[0]['avg_reward']
-        last_avg = quartiles[-1]['avg_reward']
-        if last_avg > first_avg + 0.5:
-            trend = 'improving'
-        elif last_avg < first_avg - 0.5:
-            trend = 'declining'
-        else:
-            trend = 'stable'
-    else:
-        trend = 'insufficient_data'
-
-    # Recent window (last 20 episodes)
-    recent = episodes[-20:] if len(episodes) >= 20 else episodes
-    recent_rewards = [ep['reward'] for ep in recent]
-
-    return api_response(data={
-        'parser': 'episode_pipe_v1',
-        'parser_warning': 'This endpoint uses a format-specific parser (Episode N | reward: X). For format-agnostic log access use GET /api/v1/projects/{name}/runs/{run_id}/logs',
-        'episode_range': [episodes[0]['episode'], episodes[-1]['episode']],
-        'total_episodes': n,
-        'trend': trend,
-        'overall': {
-            'avg_reward': round(sum(rewards) / n, 2),
-            'min_reward': min(rewards),
-            'max_reward': max(rewards),
-        },
-        'recent': {
-            'episode_range': [recent[0]['episode'], recent[-1]['episode']],
-            'count': len(recent),
-            'avg_reward': round(sum(recent_rewards) / len(recent_rewards), 2),
-            'min_reward': min(recent_rewards),
-            'max_reward': max(recent_rewards),
-        },
-        'quartiles': quartiles,
-        'latest_episode': episodes[-1],
-    })
+    return api_response(data=_episode_analysis(episodes))
 
 
 # ---------------------------------------------------------------------------
 # Files
 # ---------------------------------------------------------------------------
+
+def _directory_entries(target, subpath):
+    entries = []
+    for item in sorted(os.listdir(target)):
+        if item.startswith(".") or item == "__pycache__":
+            continue
+        full = os.path.join(target, item)
+        relative = os.path.join(subpath, item) if subpath else item
+        stat = os.stat(full)
+        if os.path.isdir(full):
+            entries.append({
+                "name": item, "type": "dir", "path": relative,
+                "size": None, "size_h": None, "mtime": stat.st_mtime,
+            })
+        else:
+            entries.append({
+                "name": item, "type": "file", "path": relative,
+                "size": stat.st_size, "size_h": _fmt_size(stat.st_size), "mtime": stat.st_mtime,
+            })
+    entries.sort(key=lambda entry: (0 if entry["type"] == "dir" else 1, entry["name"].lower()))
+    return entries
 
 @api_v1_bp.route("/projects/<name>/files", methods=["GET"])
 @api_v1_bp.route("/projects/<name>/files/<path:subpath>", methods=["GET"])
@@ -1160,7 +1134,7 @@ def browse_files(name, subpath=""):
     load_project(name)
 
     projects_dir = current_app.config["PROJECTS_DIR"]
-    workspace_dir, target = _safe_path(projects_dir, name, subpath)
+    _, target = _safe_path(projects_dir, name, subpath)
 
     if target is None:
         return api_response(
@@ -1185,46 +1159,14 @@ def browse_files(name, subpath=""):
     if request.args.get("zip") == "1":
         return _zip_directory(target, subpath or name)
 
-    # List directory contents
-    entries = []
     try:
-        items = sorted(os.listdir(target))
+        entries = _directory_entries(target, subpath)
     except PermissionError:
         return api_response(
             error_code="FORBIDDEN",
             error_message="Permission denied",
             status_code=403
         )
-
-    for item in items:
-        # Skip hidden files and __pycache__
-        if item.startswith(".") or item == "__pycache__":
-            continue
-        full = os.path.join(target, item)
-        rel = os.path.join(subpath, item) if subpath else item
-        stat = os.stat(full)
-        if os.path.isdir(full):
-            entries.append({
-                "name": item,
-                "type": "dir",
-                "path": rel,
-                "size": None,
-                "size_h": None,
-                "mtime": stat.st_mtime,
-            })
-        else:
-            sz = os.path.getsize(full)
-            entries.append({
-                "name": item,
-                "type": "file",
-                "path": rel,
-                "size": sz,
-                "size_h": _fmt_size(sz),
-                "mtime": stat.st_mtime,
-            })
-
-    # Sort: dirs first, then files
-    entries.sort(key=lambda e: (0 if e["type"] == "dir" else 1, e["name"].lower()))
 
     return api_response(data={
         "path": subpath or "",
@@ -1275,17 +1217,11 @@ def check_busy():
 
     if os.path.isdir(projects_dir):
         for name in os.listdir(projects_dir):
-            config_path = os.path.join(projects_dir, name, PROJECT_FILE)
-            if os.path.isfile(config_path):
-                status = get_training_status(name)
-                if status.get("status") == "running":
-                    running_projects.append(name)
-                try:
-                    project = Project.load(config_path)
-                except Exception:
-                    continue
-                if project.setup_status in SETUP_ACTIVE_STATUSES:
-                    setting_up_projects.append(name)
+            running, setting_up = _project_activity(projects_dir, name)
+            if running:
+                running_projects.append(name)
+            if setting_up:
+                setting_up_projects.append(name)
 
     running_tasks = pipeline_engine.running_task_labels()
 
@@ -1295,6 +1231,18 @@ def check_busy():
         "setting_up_projects": setting_up_projects,
         "running_tasks": running_tasks,
     })
+
+
+def _project_activity(projects_dir, name):
+    config_path = os.path.join(projects_dir, name, PROJECT_FILE)
+    if not os.path.isfile(config_path):
+        return False, False
+    running = get_training_status(name).get("status") == "running"
+    try:
+        project = Project.load(config_path)
+    except Exception:
+        return running, False
+    return running, project.setup_status in SETUP_ACTIVE_STATUSES
 
 
 @api_v1_bp.route("/capacity", methods=["GET"])
@@ -1532,33 +1480,13 @@ def run_files(name, run_id_str, subpath=""):
         return _zip_directory(target, label)
 
     try:
-        items = sorted(os.listdir(target))
+        entries = _directory_entries(target, subpath)
     except PermissionError:
         return api_response(
             error_code="FORBIDDEN",
             error_message="Permission denied",
             status_code=403
         )
-
-    entries = []
-    for item in items:
-        if item.startswith(".") or item == "__pycache__":
-            continue
-        full = os.path.join(target, item)
-        rel = os.path.join(subpath, item) if subpath else item
-        if os.path.isdir(full):
-            entries.append({
-                "name": item, "type": "dir", "path": rel,
-                "size": None, "size_h": None, "mtime": os.path.getmtime(full),
-            })
-        else:
-            sz = os.path.getsize(full)
-            entries.append({
-                "name": item, "type": "file", "path": rel,
-                "size": sz, "size_h": _fmt_size(sz), "mtime": os.path.getmtime(full),
-            })
-
-    entries.sort(key=lambda e: (0 if e["type"] == "dir" else 1, e["name"].lower()))
 
     return api_response(data={
         "run_id": run_id,
@@ -1621,6 +1549,42 @@ def cleanup_orphaned_runs(name):
     })
 
 
+def _auto_metric_run(db, name):
+    runs = db.get_training_runs(name, limit=100)
+    if not runs:
+        return None, api_response(
+            error_code="NO_RUNS", error_message="No training runs found", status_code=404)
+    running = [run for run in runs if run['status'] == 'running']
+    if len(running) > 1:
+        ids = [run['run_number'] for run in running]
+        return None, api_response(
+            error_code="MULTIPLE_RUNS_ACTIVE",
+            error_message=f"Multiple runs are active (IDs: {ids}). Specify ?run_id=N to select one.",
+            status_code=409,
+        )
+    if running:
+        return running[0], None
+    for statuses in ({'completed'}, {'canceled', 'crashed'}):
+        matching = [run for run in runs if run['status'] in statuses]
+        if matching:
+            return matching[0], None
+    return None, api_response(
+        error_code="NO_USABLE_RUNS",
+        error_message="No training runs found with usable status",
+        status_code=404,
+    )
+
+
+def _metric_run(db, name, requested_run_id):
+    if requested_run_id is None:
+        return _auto_metric_run(db, name)
+    run = db.get_run(name, requested_run_id)
+    if run:
+        return run, None
+    return None, api_response(
+        error_code="NOT_FOUND", error_message=f"Run {requested_run_id} not found", status_code=404)
+
+
 @api_v1_bp.route("/projects/<name>/tensorboard/latest", methods=["GET"])
 @api_key_required
 def get_latest_metrics(name):
@@ -1654,55 +1618,10 @@ def get_latest_metrics(name):
     metric_filter = [m.strip() for m in metrics_param.split(',')] if metrics_param else None
 
     db = get_db()
-    requested_run_id = request.args.get('run_id', type=int)
-
-    if requested_run_id is not None:
-        # Fetch the specific run requested
-        target_run = db.get_run(name, requested_run_id)
-        if not target_run:
-            return api_response(
-                error_code="NOT_FOUND",
-                error_message=f"Run {requested_run_id} not found",
-                status_code=404
-            )
-        is_active = target_run['status'] == 'running'
-    else:
-        # Auto-select: running > completed > canceled/crashed
-        runs = db.get_training_runs(name, limit=100)
-
-        if not runs:
-            return api_response(
-                error_code="NO_RUNS",
-                error_message="No training runs found",
-                status_code=404
-            )
-
-        running_runs = [r for r in runs if r['status'] == 'running']
-        completed_runs = [r for r in runs if r['status'] == 'completed']
-        other_runs = [r for r in runs if r['status'] in ('canceled', 'crashed')]
-
-        if running_runs:
-            if len(running_runs) > 1:
-                ids = [r['run_number'] for r in running_runs]
-                return api_response(
-                    error_code="MULTIPLE_RUNS_ACTIVE",
-                    error_message=f"Multiple runs are active (IDs: {ids}). Specify ?run_id=N to select one.",
-                    status_code=409
-                )
-            target_run = running_runs[0]
-            is_active = True
-        elif completed_runs:
-            target_run = completed_runs[0]
-            is_active = False
-        elif other_runs:
-            target_run = other_runs[0]
-            is_active = False
-        else:
-            return api_response(
-                error_code="NO_USABLE_RUNS",
-                error_message="No training runs found with usable status",
-                status_code=404
-            )
+    target_run, error = _metric_run(db, name, request.args.get('run_id', type=int))
+    if error is not None:
+        return error
+    is_active = target_run['status'] == 'running'
 
     run_pk = target_run['id']
 
@@ -1837,6 +1756,38 @@ def download_mcp_server():
 # Agent Instructions
 # ---------------------------------------------------------------------------
 
+def _agent_instruction_projects(projects_dir):
+    projects = []
+    if not os.path.isdir(projects_dir):
+        return projects
+    for name in sorted(os.listdir(projects_dir)):
+        config_path = os.path.join(projects_dir, name, PROJECT_FILE)
+        if not os.path.isfile(config_path):
+            continue
+        try:
+            project = Project.load(config_path)
+            status = get_training_status(name)
+        except Exception:
+            continue
+        projects.append({
+            "name": project.name, "branch": project.branch,
+            "setup_status": project.setup_status, "train_status": status["status"],
+        })
+    return projects
+
+
+def _agent_project_table(projects):
+    if not projects:
+        return "(no projects found)"
+    lines = []
+    for project in projects:
+        indicator = "▶" if project["train_status"] == "running" else " "
+        lines.append(
+            f"{indicator} {project['name']:<30} setup={project['setup_status']:<8} "
+            f"train={project['train_status']:<10} branch={project['branch']}"
+        )
+    return "\n".join(lines)
+
 @api_v1_bp.route("/agent/instructions", methods=["GET"])
 @api_key_required
 def get_global_agent_instructions():
@@ -1846,35 +1797,8 @@ def get_global_agent_instructions():
     """
     host = request.host
 
-    # Fetch live project list to embed current state
     projects_dir = current_app.config["PROJECTS_DIR"]
-    projects = []
-    if os.path.isdir(projects_dir):
-        for pname in sorted(os.listdir(projects_dir)):
-            config_path = os.path.join(projects_dir, pname, PROJECT_FILE)
-            if os.path.isfile(config_path):
-                try:
-                    p = Project.load(config_path)
-                    status = get_training_status(pname)
-                    projects.append({
-                        "name": p.name,
-                        "branch": p.branch,
-                        "setup_status": p.setup_status,
-                        "train_status": status["status"],
-                    })
-                except Exception:
-                    continue
-
-    if projects:
-        project_lines = []
-        for p in projects:
-            indicator = "▶" if p["train_status"] == "running" else " "
-            project_lines.append(
-                f"{indicator} {p['name']:<30} setup={p['setup_status']:<8} train={p['train_status']:<10} branch={p['branch']}"
-            )
-        project_table = "\n".join(project_lines)
-    else:
-        project_table = "(no projects found)"
+    project_table = _agent_project_table(_agent_instruction_projects(projects_dir))
 
     content = f"""# Beekeeper — Agent Instructions
 

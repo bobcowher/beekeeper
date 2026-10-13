@@ -63,7 +63,7 @@ def _zip_directory(dir_path, zip_name):
                      download_name=f"{safe_name}.zip")
 
 
-@runs_bp.route("/<name>/runs/")
+@runs_bp.route("/<name>/runs/", methods=["GET"])
 def list_runs(name):
     """List all runs for a project with artifact availability."""
     projects_dir = current_app.config["PROJECTS_DIR"]
@@ -98,8 +98,33 @@ def list_runs(name):
     })
 
 
-@runs_bp.route("/<name>/runs/<run_id_str>/files/")
-@runs_bp.route("/<name>/runs/<run_id_str>/files/<path:subpath>")
+def _run_file_entries(target, subpath, name, run_id):
+    entries = []
+    for item in sorted(os.listdir(target)):
+        if item.startswith(".") or item == "__pycache__":
+            continue
+        full = os.path.join(target, item)
+        relative = os.path.join(subpath, item) if subpath else item
+        mtime = os.path.getmtime(full)
+        if os.path.isdir(full):
+            entries.append({
+                "name": item, "type": "dir", "path": relative,
+                "size": None, "size_h": None, "mtime": mtime,
+                "url": f"/projects/{name}/runs/{run_id}/files/{relative}/",
+            })
+        else:
+            size = os.path.getsize(full)
+            entries.append({
+                "name": item, "type": "file", "path": relative,
+                "size": size, "size_h": _fmt_size(size), "mtime": mtime,
+                "url": f"/projects/{name}/runs/{run_id}/files/{relative}",
+            })
+    entries.sort(key=lambda entry: (0 if entry["type"] == "dir" else 1, entry["name"].lower()))
+    return entries
+
+
+@runs_bp.route("/<name>/runs/<run_id_str>/files/", methods=["GET"])
+@runs_bp.route("/<name>/runs/<run_id_str>/files/<path:subpath>", methods=["GET"])
 def run_files(name, run_id_str, subpath=""):
     """Browse or download files from a specific run's persistent storage.
 
@@ -129,35 +154,11 @@ def run_files(name, run_id_str, subpath=""):
         return _zip_directory(target, label)
 
     try:
-        items = sorted(os.listdir(target))
+        entries = _run_file_entries(target, subpath, name, run_id)
     except PermissionError:
         abort(403)
 
-    entries = []
-    for item in items:
-        if item.startswith(".") or item == "__pycache__":
-            continue
-        full = os.path.join(target, item)
-        rel = os.path.join(subpath, item) if subpath else item
-        mtime = os.path.getmtime(full)
-        if os.path.isdir(full):
-            entries.append({
-                "name": item, "type": "dir", "path": rel,
-                "size": None, "size_h": None, "mtime": mtime,
-                "url": f"/projects/{name}/runs/{run_id}/files/{rel}/",
-            })
-        else:
-            sz = os.path.getsize(full)
-            entries.append({
-                "name": item, "type": "file", "path": rel,
-                "size": sz, "size_h": _fmt_size(sz), "mtime": mtime,
-                "url": f"/projects/{name}/runs/{run_id}/files/{rel}",
-            })
-
-    entries.sort(key=lambda e: (0 if e["type"] == "dir" else 1, e["name"].lower()))
-
-    host = request.host
-    base = f"http://{host}/projects/{name}/runs/{run_id}/files"
+    base = f"{request.host_url.rstrip('/')}/projects/{name}/runs/{run_id}/files"
     return jsonify({
         "project": name,
         "run_id": run_id,

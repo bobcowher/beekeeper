@@ -12,6 +12,23 @@ _PWD_MIN_LEN_KEY = 'password.min_length'
 _INDEX_ROUTE = 'admin.index'
 
 
+def _update_positive_setting(form_key, config_key, parse_error, minimum=1, below_error=None):
+    if form_key not in request.form:
+        return None
+    try:
+        value = int(request.form[form_key])
+    except ValueError:
+        flash(parse_error, 'error')
+        return redirect(url_for(_INDEX_ROUTE))
+    if value < minimum:
+        if below_error:
+            flash(below_error, 'error')
+            return redirect(url_for(_INDEX_ROUTE))
+        return None
+    set_config(config_key, str(value))
+    return None
+
+
 @admin_bp.route('/', methods=['GET'])
 @admin_required
 def index():
@@ -50,36 +67,16 @@ def update_settings():
         inline_tasks = request.form.get('inline_tasks_enabled') == 'true'
         set_config('pipelines.inline_tasks.enabled', 'true' if inline_tasks else 'false')
 
-    # Update other settings if provided
-    if 'session_lifetime_days' in request.form:
-        try:
-            days = int(request.form['session_lifetime_days'])
-            if days > 0:
-                set_config('session.lifetime_days', str(days))
-        except ValueError:
-            flash('Invalid session lifetime', 'error')
-            return redirect(url_for(_INDEX_ROUTE))
-
-    if 'password_min_length' in request.form:
-        try:
-            min_len = int(request.form['password_min_length'])
-            if min_len >= 6:
-                set_config(_PWD_MIN_LEN_KEY, str(min_len))
-        except ValueError:
-            flash('Invalid password minimum length', 'error')
-            return redirect(url_for(_INDEX_ROUTE))
-
-    if 'api_rate_limit' in request.form:
-        try:
-            rate_limit = int(request.form['api_rate_limit'])
-            if rate_limit > 0:
-                set_config('api.rate_limit_per_minute', str(rate_limit))
-            else:
-                flash('API rate limit must be greater than 0', 'error')
-                return redirect(url_for(_INDEX_ROUTE))
-        except ValueError:
-            flash('Invalid API rate limit', 'error')
-            return redirect(url_for(_INDEX_ROUTE))
+    settings = [
+        ('session_lifetime_days', 'session.lifetime_days', 'Invalid session lifetime', 1, None),
+        ('password_min_length', _PWD_MIN_LEN_KEY, 'Invalid password minimum length', 6, None),
+        ('api_rate_limit', 'api.rate_limit_per_minute', 'Invalid API rate limit', 1,
+         'API rate limit must be greater than 0'),
+    ]
+    for form_key, config_key, parse_error, minimum, below_error in settings:
+        error = _update_positive_setting(form_key, config_key, parse_error, minimum, below_error)
+        if error is not None:
+            return error
 
     save_config()
     flash('Settings updated successfully', 'success')
