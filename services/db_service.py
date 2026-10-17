@@ -556,6 +556,15 @@ class DatabaseService:
             ).fetchone()
             return dict(row) if row else None
 
+    def latest_run_number(self, project_name: str) -> int | None:
+        """Highest run number for a project, or None if it has never run."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                'SELECT MAX(run_number) FROM training_runs WHERE project_name = ?',
+                (project_name,)
+            ).fetchone()
+            return row[0] if row else None
+
     def delete_project_runs(self, project_name: str) -> int:
         """Delete a project's runs, their metric analyses, and its run counter."""
         with self._get_connection() as conn:

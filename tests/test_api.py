@@ -742,3 +742,27 @@ def test_tensorboard_latest_returns_public_run_id_and_ref(client, app, mocker):
         data = client.get(url, headers=_AUTH).get_json()["data"]
         assert data["run_id"] == n
         assert data["run_ref"] == f"a-{n}"
+
+
+# --- Logs without a run id: latest run ---
+
+def test_logs_without_run_id_return_latest_run(client, app):
+    import os
+    from conftest import make_project_dir
+    from services.db_service import get_db
+    make_project_dir(app, name="a")
+    project_dir = os.path.join(app.config["PROJECTS_DIR"], "a")
+    (_, pk1, _), (_, _, n2) = _seed_runs(["a", "a"])
+    os.makedirs(os.path.join(project_dir, "run_logs"))
+    with open(os.path.join(project_dir, "run_logs", "first.log"), "w") as f:
+        f.write("first run\n")
+    get_db().update_training_run(pk1, log_file_path="run_logs/first.log")
+    with open(os.path.join(project_dir, f"train-{n2}.log"), "w") as f:   # second run not archived yet
+        f.write("second run\n")
+    with open(os.path.join(project_dir, "train.log"), "w") as f:   # pre-per-run-log leftover
+        f.write("stale shared log\n")
+
+    data = client.get("/api/v1/projects/a/logs", headers=_AUTH).get_json()["data"]
+    assert data["content"] == "second run\n"
+    assert client.get("/api/v1/projects/a/logs?tail=5", headers=_AUTH).get_json()["data"]["content"] == "second run\n"
+    assert client.get("/projects/a/logs/download").data == b"second run\n"

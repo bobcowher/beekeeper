@@ -316,12 +316,14 @@ def _active_run_log_path(name, run_id):
 
 
 def get_run_log_path(projects_dir: str, name: str, run_id: int | None = None) -> str:
-    """Return the log file path for a run. For completed runs, resolves via DB."""
+    """Return the log file path for a run; no run_id means the latest run. Completed runs resolve via DB."""
     with _lock:
         active_path = _active_run_log_path(name, run_id)
         if active_path:
             return active_path
 
+    if run_id is None:
+        run_id = get_db().latest_run_number(name)
     if run_id is not None:
         run = get_db().get_run(name, run_id)
         if run and run.get("log_file_path"):
@@ -333,6 +335,7 @@ def get_run_log_path(projects_dir: str, name: str, run_id: int | None = None) ->
         # of truth; nothing writes the old shared "train.log" anymore.
         return os.path.join(projects_dir, name, f"train-{run_id}.log")
 
+    # Never run under per-run logs: only a pre-upgrade shared log can exist.
     return os.path.join(projects_dir, name, "train.log")
 
 

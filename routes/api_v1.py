@@ -1009,7 +1009,7 @@ def training_status(name):
 @api_v1_bp.route("/projects/<name>/logs", methods=["GET"])
 @api_key_required
 def get_logs(name):
-    """Get log content. Use ?tail=N for last N lines, ?run_id=N for a specific run."""
+    """Get log content. Use ?tail=N for last N lines, ?run_id=N for a specific run (default: latest)."""
     load_project(name)
 
     projects_dir = current_app.config["PROJECTS_DIR"]

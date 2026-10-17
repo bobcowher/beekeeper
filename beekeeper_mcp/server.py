@@ -581,8 +581,8 @@ def training_status(project_name: str) -> dict:
 @mcp.tool()
 def get_logs(project_name: str, run_id: int | None = None, tail: int = 100) -> str:
     """
-    Fetch the last N lines of training logs for a specific run.
-    Provide run_id when multiple runs are active — required to avoid ambiguity.
+    Fetch the last N lines of training logs for a run.
+    Omit run_id for the project's latest run; pass it to read an earlier one.
     Use tail=500 for more context, tail=50 for a quick check.
 
     run_id is the project's own run number (1, 2, 3, ... per project). When telling the
