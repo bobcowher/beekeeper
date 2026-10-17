@@ -60,7 +60,7 @@ def login_required(f):
 
         user = get_current_user()
         if not user:
-            return redirect(url_for('auth.login', next=request.url))
+            return redirect(url_for('auth.login', next=request.full_path.rstrip('?')))
 
         g.user = user
         return f(*args, **kwargs)

@@ -34,7 +34,7 @@ def register_middleware(app):
             # Allow access to login/register
             if request.path in ['/auth/login', '/auth/register']:
                 return None
-            return redirect(url_for('auth.login', next=request.url))
+            return redirect(url_for('auth.login', next=request.full_path.rstrip('?')))
 
         # Store user in g for templates
         g.user = user

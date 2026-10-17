@@ -107,6 +107,30 @@ def test_files_root_lists_directory(client, ready_project, app):
     assert any(e["name"] == "train.py" for e in data["entries"])
 
 
+def test_files_download_with_percent_encoded_name(client, ready_project, app):
+    """The browser percent-encodes file names in links; the route must decode them."""
+    import os
+    from urllib.parse import quote
+    src = os.path.join(app.config["PROJECTS_DIR"], "myproject", "workspace", "out dir")
+    os.makedirs(src)
+    with open(os.path.join(src, "a #1 'x'.txt"), "w") as f:
+        f.write("hello")
+
+    resp = client.get("/projects/myproject/files/" + quote("out dir/a #1 'x'.txt"))
+    assert resp.status_code == 200
+    assert resp.data == b"hello"
+
+
+def test_run_files_listing_urls_are_percent_encoded(client, ready_project, app):
+    from urllib.parse import quote
+    _, n = _make_run_dir(app, "myproject", {"a #1 \"x\".txt": "hello"})
+
+    entries = client.get(f"/projects/myproject/runs/{n}/files/").get_json()["entries"]
+    url = entries[0]["url"]
+    assert url.endswith("/" + quote('a #1 "x".txt'))
+    assert client.get(url).data == b"hello"
+
+
 def test_files_missing_src_returns_404(client, ready_project):
     """workspace/ directory does not exist — should 404."""
     resp = client.get("/projects/myproject/files/")

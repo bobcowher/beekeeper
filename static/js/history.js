@@ -326,7 +326,7 @@
             for (const part of parts) {
                 cumulative = cumulative ? cumulative + '/' + part : part;
                 html += ` <span class="fb-crumb-sep">/</span> `;
-                html += `<a href="#" class="fb-crumb" data-path="${cumulative}">${escHtml(part)}</a>`;
+                html += `<a href="#" class="fb-crumb" data-path="${escHtml(cumulative)}">${escHtml(part)}</a>`;
             }
         }
         crumbs.innerHTML = html;
@@ -354,12 +354,12 @@
         data.entries.forEach(entry => {
             html += '<tr class="fb-row">';
             if (entry.type === 'dir') {
-                html += `<td class="fb-col-name">&#128193; <a href="#" class="fb-link artifact-dir-link" data-path="${entry.path}">${escHtml(entry.name)}/</a></td>`;
+                html += `<td class="fb-col-name">&#128193; <a href="#" class="fb-link artifact-dir-link" data-path="${escHtml(entry.path)}">${escHtml(entry.name)}/</a></td>`;
                 html += `<td class="fb-col-size muted">&mdash;</td><td></td>`;
             } else {
                 html += `<td class="fb-col-name"><span class="fb-file">&#128196; ${escHtml(entry.name)}</span></td>`;
                 html += `<td class="fb-col-size muted">${entry.size_h}</td>`;
-                html += `<td style="text-align:right"><a href="${entry.url}" class="btn btn-secondary btn-sm">Download</a></td>`;
+                html += `<td style="text-align:right"><a href="${escHtml(entry.url)}" class="btn btn-secondary btn-sm">Download</a></td>`;
             }
             html += '</tr>';
         });

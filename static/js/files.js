@@ -10,6 +10,19 @@
     const listing = document.getElementById("files-listing");
     const breadcrumbs = document.getElementById("files-breadcrumbs");
 
+    // File names come from the workspace, which a cloned repo or a training run
+    // controls, so escape them for HTML and percent-encode them for URLs.
+    function esc(s) {
+        return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+    }
+    function encodePath(p) {
+        // encodeURIComponent leaves !'()* alone; encode them too so a path is safe
+        // inside a quoted shell command.
+        return p.split('/').map(seg => encodeURIComponent(seg)
+            .replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase())).join('/');
+    }
+
     let currentPath = "";
     let loaded = false;
     let currentEntries = [];
@@ -27,7 +40,7 @@
         currentPath = path;
         listing.innerHTML = '<p class="muted">Loading...</p>';
 
-        const url = path ? `${baseUrl}/${path}` : `${baseUrl}/`;
+        const url = path ? `${baseUrl}/${encodePath(path)}` : `${baseUrl}/`;
         try {
             const resp = await fetch(url);
             if (!resp.ok) {
@@ -51,7 +64,7 @@
             for (const part of parts) {
                 cumulative = cumulative ? cumulative + "/" + part : part;
                 html += ` <span class="fb-crumb-sep">/</span> `;
-                html += `<a href="#" class="fb-crumb" data-path="${cumulative}">${part}</a>`;
+                html += `<a href="#" class="fb-crumb" data-path="${esc(cumulative)}">${esc(part)}</a>`;
             }
         }
         breadcrumbs.innerHTML = html;
@@ -128,8 +141,8 @@
 
     function copyCurlCommand(filePath) {
         const host = window.location.host;
-        const url = `http://${host}${baseUrl}/${filePath}`;
-        const command = `curl -O ${url}`;
+        const url = `http://${host}${baseUrl}/${encodePath(filePath)}`;
+        const command = `curl -O '${url}'`;
         if (navigator.clipboard && window.isSecureContext) {
             navigator.clipboard.writeText(command);
         } else {
@@ -169,7 +182,7 @@
 
             if (entry.type === "dir") {
                 html += `<td class="fb-col-name">
-                    <a href="#" class="fb-link fb-dir" data-path="${entry.path}">${icon} ${entry.name}/</a>
+                    <a href="#" class="fb-link fb-dir" data-path="${esc(entry.path)}">${icon} ${esc(entry.name)}/</a>
                 </td>`;
                 html += `<td class="fb-col-size muted">&mdash;</td>`;
                 html += `<td class="fb-col-modified muted">${formatTime(entry.mtime)}</td>`;
@@ -177,7 +190,7 @@
                     <div class="fb-menu">
                         <button class="fb-menu-trigger" title="Actions">⋮</button>
                         <div class="fb-menu-dropdown">
-                            <a href="${baseUrl}/${entry.path}?zip=1" class="fb-menu-item">Download as zip</a>
+                            <a href="${baseUrl}/${esc(encodePath(entry.path))}?zip=1" class="fb-menu-item">Download as zip</a>
                         </div>
                     </div>
                 </td>`;
@@ -185,8 +198,8 @@
                 const viewable = isViewable(entry.name);
                 html += `<td class="fb-col-name">
                     ${viewable
-                        ? `<a href="#" class="fb-link fb-view" data-path="${entry.path}" data-name="${entry.name}">${icon} ${entry.name}</a>`
-                        : `<span class="fb-file">${icon} ${entry.name}</span>`
+                        ? `<a href="#" class="fb-link fb-view" data-path="${esc(entry.path)}" data-name="${esc(entry.name)}">${icon} ${esc(entry.name)}</a>`
+                        : `<span class="fb-file">${icon} ${esc(entry.name)}</span>`
                     }
                 </td>`;
                 html += `<td class="fb-col-size muted">${entry.size_h}</td>`;
@@ -195,9 +208,9 @@
                     <div class="fb-menu">
                         <button class="fb-menu-trigger" title="Actions">⋮</button>
                         <div class="fb-menu-dropdown">
-                            ${viewable ? `<button class="fb-menu-item fb-view" data-path="${entry.path}" data-name="${entry.name}">View</button>` : ""}
-                            <a href="${baseUrl}/${entry.path}" class="fb-menu-item">Download</a>
-                            <button class="fb-menu-item fb-copy-curl" data-path="${entry.path}">Copy curl download</button>
+                            ${viewable ? `<button class="fb-menu-item fb-view" data-path="${esc(entry.path)}" data-name="${esc(entry.name)}">View</button>` : ""}
+                            <a href="${baseUrl}/${esc(encodePath(entry.path))}" class="fb-menu-item">Download</a>
+                            <button class="fb-menu-item fb-copy-curl" data-path="${esc(entry.path)}">Copy curl download</button>
                         </div>
                     </div>
                 </td>`;
@@ -209,7 +222,7 @@
         html += '</tbody></table>';
 
         // Zip-all button for current directory
-        const zipUrl = dirPath ? `${baseUrl}/${dirPath}?zip=1` : `${baseUrl}/?zip=1`;
+        const zipUrl = dirPath ? `${baseUrl}/${esc(encodePath(dirPath))}?zip=1` : `${baseUrl}/?zip=1`;
         html += `<div class="fb-footer">
             <a href="${zipUrl}" class="btn btn-secondary btn-sm">Download this folder as zip</a>
         </div>`;
@@ -327,7 +340,7 @@
     }
 
     function showImage(filePath) {
-        const url = `${viewUrl}/${filePath}`;
+        const url = `${viewUrl}/${encodePath(filePath)}`;
         const img = document.createElement("img");
         img.className = "fv-image";
         img.src = url + "?t=" + Date.now();
@@ -343,7 +356,7 @@
     }
 
     async function showText(filePath) {
-        const url = `${viewUrl}/${filePath}`;
+        const url = `${viewUrl}/${encodePath(filePath)}`;
         try {
             const resp = await fetch(url);
             if (!resp.ok) {

@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from urllib.parse import urlsplit
 from flask import Blueprint, render_template, request, redirect, url_for, flash, make_response
 
 from services.auth_service import hash_password, verify_password, create_session_for_user, get_current_user
@@ -12,6 +13,22 @@ logger = logging.getLogger(__name__)
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
 _LOGIN_ROUTE = 'auth.login'
+
+
+def _safe_next(next_url: str) -> str | None:
+    """Return next_url if it's a path on this site, else None.
+
+    Browsers read '//host' and '/\\host' as another site, and they drop tabs and
+    newlines before parsing, so '/<tab>/host' does the same. Reject all of them.
+    """
+    if not next_url or not next_url.startswith('/'):
+        return None
+    if '\\' in next_url or any(ord(c) < 0x20 or ord(c) == 0x7f for c in next_url):
+        return None
+    parts = urlsplit(next_url)
+    if parts.scheme or parts.netloc or next_url.startswith('//'):
+        return None
+    return next_url
 
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
@@ -83,9 +100,7 @@ def login():
 
     # Create session
     session_id = create_session_for_user(user.id)
-    next_url = request.args.get('next', '')
-    if not (next_url and next_url.startswith('/') and not next_url.startswith('//')):  # NOSONAR
-        next_url = url_for('dashboard.index')
+    next_url = _safe_next(request.args.get('next', '')) or url_for('dashboard.index')
     response = make_response(redirect(next_url))
     response.set_cookie('session_id', session_id, httponly=True, max_age=60*60*24*7)
 

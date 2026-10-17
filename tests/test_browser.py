@@ -28,6 +28,9 @@ def _fresh_rate_limit():
     get_rate_limiter()._requests.clear()
 
 
+XSS_FILENAME = """<img src=x onerror="window.__xss=1">;touch pwned'.txt"""
+
+
 @pytest.fixture(scope="module")
 def live_server(tmp_path_factory):
     """Start Flask in a background thread with a real temp projects directory."""
@@ -62,6 +65,12 @@ def live_server(tmp_path_factory):
         "env_vars": {},
         "output_paths": [],
     }))
+
+    # A workspace file whose name is HTML and a shell command, to check the file
+    # browser shows it as text and quotes it in the copied curl command.
+    workspace = proj_dir / "workspace"
+    workspace.mkdir()
+    (workspace / XSS_FILENAME).write_text("hi")
 
     proj2 = projects_dir / "chessbot"
     proj2.mkdir()
@@ -253,6 +262,37 @@ def test_admin_sections_start_closed_and_reopen_after_save(live_server):
         page.wait_for_load_state("load")
         expect(page.locator("#api-config-body")).to_be_visible()
         expect(page.locator("#auth-body")).to_be_hidden()
+        browser.close()
+
+
+@pytest.mark.browser
+def test_file_browser_treats_file_names_as_text(live_server):
+    """A file name is shown as text, never run as HTML, and is quoted in the curl command."""
+    from playwright.sync_api import sync_playwright, expect
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.add_init_script("""
+            window.__copied = null;
+            Object.defineProperty(navigator, 'clipboard', {
+                value: {writeText: t => { window.__copied = t; return Promise.resolve(); }},
+            });
+        """)
+        page.goto(f"{live_server}/projects/demo")
+        page.locator('[data-target="files-body"]').click()
+        row = page.locator("#files-listing .fb-row", has_text="onerror")
+        expect(row).to_be_visible()
+        expect(row.locator(".fb-col-name")).to_contain_text(XSS_FILENAME)
+        assert page.evaluate("window.__xss") is None
+
+        row.locator(".fb-menu-trigger").click()
+        row.locator(".fb-copy-curl").click()
+        page.wait_for_function("window.__copied !== null")
+        command = page.evaluate("window.__copied")
+        url = command.removeprefix("curl -O '").removesuffix("'")
+        assert command == f"curl -O '{url}'"
+        assert not set(url) & set("'\"<>; "), command
         browser.close()
 
 

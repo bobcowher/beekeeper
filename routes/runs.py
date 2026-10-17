@@ -1,6 +1,7 @@
 import io
 import os
 import zipfile
+from urllib.parse import quote
 from flask import Blueprint, current_app, jsonify, request, send_file, abort
 
 from services.db_service import get_db
@@ -110,14 +111,14 @@ def _run_file_entries(target, items, subpath, name, run_id):
             entries.append({
                 "name": item, "type": "dir", "path": relative,
                 "size": None, "size_h": None, "mtime": mtime,
-                "url": f"/projects/{name}/runs/{run_id}/files/{relative}/",
+                "url": f"/projects/{name}/runs/{run_id}/files/{quote(relative)}/",
             })
         else:
             size = os.path.getsize(full)
             entries.append({
                 "name": item, "type": "file", "path": relative,
                 "size": size, "size_h": _fmt_size(size), "mtime": mtime,
-                "url": f"/projects/{name}/runs/{run_id}/files/{relative}",
+                "url": f"/projects/{name}/runs/{run_id}/files/{quote(relative)}",
             })
     entries.sort(key=lambda entry: (0 if entry["type"] == "dir" else 1, entry["name"].lower()))
     return entries

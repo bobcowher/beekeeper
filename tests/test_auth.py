@@ -1,3 +1,4 @@
+import pytest
 """
 Tests for routes/auth.py — specifically the redirect validation logic
 added to the login handler (lines 76-79 in auth.py).
@@ -115,6 +116,51 @@ def test_login_with_absolute_url_next_redirects_to_dashboard(client, mocker):
     location = resp.headers.get("Location", "")
     assert "evil.com" not in location, f"Open redirect not blocked! Location: {location!r}"
     assert location.endswith("/"), f"Expected dashboard (/) in Location, got {location!r}"
+
+
+@pytest.mark.parametrize("next_param", [
+    "/%5Cevil.com",          # /\evil.com: browsers treat a backslash like a slash
+    "/%5C%5Cevil.com",
+    "/%09/evil.com",         # browsers strip tabs and newlines from URLs
+    "/%0A/evil.com",
+    "%2F%2Fevil.com",
+])
+def test_login_next_bypasses_redirect_to_dashboard(client, mocker, next_param):
+    """Spellings that a browser resolves to another host must not be followed."""
+    user = _make_user()
+    _mock_db(mocker, user)
+    _enable_auth(mocker)
+
+    resp = _post_login(client, next_param=next_param)
+
+    assert resp.status_code == 302
+    location = resp.headers.get("Location", "")
+    assert "evil.com" not in location, f"Open redirect not blocked! Location: {location!r}"
+
+
+def test_login_next_keeps_query_string(client, mocker):
+    user = _make_user()
+    _mock_db(mocker, user)
+    _enable_auth(mocker)
+
+    resp = _post_login(client, next_param="/projects/foo%3Ftab%3Dhistory")
+
+    assert resp.headers.get("Location", "").endswith("/projects/foo?tab=history")
+
+
+def test_login_required_sends_path_not_full_url_as_next(client, mocker):
+    """The login redirect's next= must be a path, or the post-login check discards it."""
+    db = mocker.MagicMock()
+    db.get_user_count.return_value = 1
+    mocker.patch("middleware.auth_middleware.get_db", return_value=db)
+    mocker.patch("middleware.auth_middleware.get_current_user", return_value=None)
+    mocker.patch("middleware.auth_middleware.is_auth_enabled", return_value=True)
+
+    resp = client.get("/admin/", follow_redirects=False)
+
+    assert resp.status_code == 302
+    location = resp.headers["Location"]
+    assert location.endswith("next=/admin/"), location
 
 
 # ---------------------------------------------------------------------------
