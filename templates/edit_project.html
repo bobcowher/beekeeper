@@ -100,7 +100,7 @@
 
     <div class="form-group">
         <label class="checkbox-label">
-            <input type="checkbox" name="data_dir_enabled" value="1" id="data_dir_enabled"
+            <input type="checkbox" class="toggle" name="data_dir_enabled" value="1" id="data_dir_enabled"
                    {% if project.get('data_dir_enabled') %}checked{% endif %}>
             <span>Enable Static Data Directory</span>
             <span class="tooltip-icon" title="Creates a symlink inside the repository pointing to a persistent data volume on this server. Useful for large datasets that live outside the repo. The symlink is created before the setup script runs.">?</span>
@@ -151,7 +151,7 @@
 
     <div class="form-group">
         <label class="checkbox-label">
-            <input type="checkbox" name="parallel_runs_enabled" id="parallel-runs-toggle"
+            <input type="checkbox" class="toggle" name="parallel_runs_enabled" id="parallel-runs-toggle"
                    value="1" {{ 'checked' if project.parallel_runs_enabled }}>
             Enable parallel runs
             <span class="tooltip-icon" title="Allow multiple branches to run simultaneously on this project.">?</span>
@@ -183,7 +183,7 @@
 
     <div class="form-group">
         <label class="checkbox-label">
-            <input type="checkbox" name="gpu_enabled" id="gpu-enabled" value="1"
+            <input type="checkbox" class="toggle" name="gpu_enabled" id="gpu-enabled" value="1"
                    {% if project.get('gpu_enabled') %}checked{% endif %}>
             <span>Enable GPU memory management</span>
             <span class="tooltip-icon"
@@ -246,7 +246,7 @@
         </div>
         <div class="form-group">
             <label class="checkbox-label">
-                <input type="checkbox" name="data_dir_sync" value="1"
+                <input type="checkbox" class="toggle" name="data_dir_sync" value="1"
                        {% if project.get('data_dir_sync') %}checked{% endif %}>
                 <span>Sync data dir on startup</span>
                 <span class="tooltip-icon" title="Uploads the data dir to the pod before training. It counts against the upload limit, and the GPU bills while it uploads.">?</span>

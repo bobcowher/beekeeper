@@ -23,7 +23,7 @@ def test_everything_hidden_when_disabled(client, app, config_store):
     assert client.get("/nodes").status_code == 404
     assert client.get("/nodes/status").status_code == 404
     assert b'href="/nodes"' not in client.get("/").data
-    assert b"remote-compute-strip" not in client.get("/").data
+    assert b"remote-compute-card" not in client.get("/").data
     assert b"Where to Run" not in client.get("/projects/p/edit").data
     project = client.get("/api/v1/projects/p").get_json()["data"]["project"]
     assert "compute_target" not in project
@@ -70,7 +70,7 @@ def test_enabled_surfaces(client, app, config_store):
     config_store.update({"compute.runpod.enabled": "true", "compute.runpod.cap.daily.hard": "10"})
     make_project_dir(app, "p")
     assert b'href="/nodes"' in client.get("/").data
-    assert b"remote-compute-strip" in client.get("/").data
+    assert b"remote-compute-card" in client.get("/").data
     assert client.get("/nodes").status_code == 200
     status = client.get("/nodes/status").get_json()
     assert status["spend"]["daily"] == {"spent": 0.0, "soft": None, "hard": 10.0}

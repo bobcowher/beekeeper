@@ -13,7 +13,7 @@ _ADMIN_ANCHOR = "admin.index"
 
 
 def _admin_redirect():
-    return redirect(url_for(_ADMIN_ANCHOR) + "#compute-providers")
+    return redirect(url_for(_ADMIN_ANCHOR) + "#runpod")
 
 
 def _parse_number(form_key, label, minimum=0.0, allow_blank=False):

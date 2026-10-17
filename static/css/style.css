@@ -1204,6 +1204,55 @@ label {
     flex-shrink: 0;
 }
 
+/* Toggle switch: a checkbox drawn as a small on/off switch */
+input[type="checkbox"].toggle {
+    appearance: none;
+    -webkit-appearance: none;
+    position: relative;
+    width: 30px;
+    height: 16px;
+    padding: 0;
+    margin: 0;
+    flex-shrink: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-input);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+input[type="checkbox"].toggle::before {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--text-secondary);
+    transition: transform 0.15s, background 0.15s;
+}
+
+input[type="checkbox"].toggle:checked {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+input[type="checkbox"].toggle:checked::before {
+    transform: translateX(14px);
+    background: var(--bg-primary);
+}
+
+input[type="checkbox"].toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+input[type="checkbox"].toggle:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 /* Tooltip icon */
 .tooltip-icon {
     display: inline-flex;
@@ -2169,7 +2218,7 @@ input.invalid, select.invalid, textarea.invalid { border-color: var(--danger); }
     font-weight: normal;
 }
 
-.pods-table .mono, .remote-strip .mono { font-family: var(--font-mono); }
+.pods-table .mono { font-family: var(--font-mono); }
 .pods-table .small { font-size: 11px; }
 
 .phase-tag {
@@ -2212,22 +2261,48 @@ input.invalid, select.invalid, textarea.invalid { border-color: var(--danger); }
     color: var(--text-secondary);
 }
 
-.remote-strip {
-    display: block;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 8px 14px;
-    margin-bottom: 16px;
-    color: var(--text-primary);
-    text-decoration: none;
-    font-size: 13px;
+/* Dashboard: System Stats and Remote Compute side by side on wide screens */
+.dash-top.with-remote {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 16px;
+    align-items: start;
 }
 
-.remote-strip:hover { border-color: var(--accent-dim); }
-.remote-strip .strip-label { color: var(--accent); margin-right: 8px; }
-.remote-strip .strip-warn { color: #e8853a; }
-.remote-strip .strip-bad { color: var(--danger); }
+.dash-top.with-remote > .card {
+    margin-bottom: 16px;
+}
+
+@media (max-width: 1280px) {
+    .dash-top.with-remote {
+        display: block;
+    }
+}
+
+.card-title-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+}
+
+.card-link {
+    font-size: 12px;
+    font-weight: normal;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--text-secondary);
+    text-decoration: none;
+}
+
+.card-link:hover {
+    color: var(--accent);
+}
+
+.stat-val-wide {
+    width: auto;
+    flex: 1;
+}
+
 
 .status-runpod {
     background: rgba(74, 158, 255, 0.15);

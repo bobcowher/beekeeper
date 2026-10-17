@@ -210,6 +210,53 @@ def test_collapsible_history_section_toggles(live_server):
 
 
 @pytest.mark.browser
+def test_admin_sections_start_closed_and_reopen_after_save(live_server):
+    """Admin sections are closed until clicked; a hash link or a save reopens that one section."""
+    from playwright.sync_api import sync_playwright, expect
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(f"{live_server}/admin")
+
+        bodies = page.locator(".admin-section .collapsible-body")
+        assert bodies.count() >= 5
+        for i in range(bodies.count()):
+            expect(bodies.nth(i)).to_be_hidden()
+
+        # One click per header: app.js must only be loaded once on this page.
+        page.locator("#api-config .collapsible-header").click()
+        expect(page.locator("#api-config-body")).to_be_visible()
+        page.locator("#api-config .collapsible-header").click()
+        expect(page.locator("#api-config-body")).to_be_hidden()
+
+        page.goto(f"{live_server}/admin#ssh-key")
+        expect(page.locator("#ssh-key-body")).to_be_visible()
+        expect(page.locator("#auth-body")).to_be_hidden()
+
+        # Runpod is its own collapsed block inside Compute Providers.
+        page.goto(f"{live_server}/admin")
+        page.locator("#compute-providers .collapsible-header").first.click()
+        expect(page.locator("#runpod .collapsible-header")).to_be_visible()
+        expect(page.locator("#runpod-body")).to_be_hidden()
+        page.locator("#runpod .collapsible-header").click()
+        expect(page.locator("#runpod-body")).to_be_visible()
+
+        # A link to the nested block opens it and its parent.
+        page.goto(f"{live_server}/admin#runpod")
+        expect(page.locator("#compute-providers-body")).to_be_visible()
+        expect(page.locator("#runpod-body")).to_be_visible()
+
+        page.goto(f"{live_server}/admin")
+        page.locator("#api-config .collapsible-header").click()
+        page.locator("#api-config form button[type=submit]").first.click()
+        page.wait_for_load_state("load")
+        expect(page.locator("#api-config-body")).to_be_visible()
+        expect(page.locator("#auth-body")).to_be_hidden()
+        browser.close()
+
+
+@pytest.mark.browser
 def test_project_detail_no_console_errors(live_server):
     """No JavaScript console errors on the project detail page."""
     from playwright.sync_api import sync_playwright

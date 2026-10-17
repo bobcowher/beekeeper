@@ -19,21 +19,22 @@
 
 <div class="admin-container">
     <!-- Authentication Settings Section -->
-    <section class="admin-section">
-        <h2>Authentication Settings</h2>
+    <section class="admin-section" id="auth">
+        <h2 class="collapsible-header" data-target="auth-body">Authentication Settings <span class="collapse-icon">▶</span></h2>
+        <div class="collapsible-body" id="auth-body" style="display:none">
         <form method="POST" action="{{ url_for('admin.update_settings') }}" class="settings-form">
             <input type="hidden" name="security_section" value="1">
             <div class="form-group">
-                <label>
-                    <input type="checkbox" name="auth_enabled" value="true" {% if config.auth_enabled %}checked{% endif %}>
+                <label class="checkbox-label">
+                    <input type="checkbox" class="toggle" name="auth_enabled" value="true" {% if config.auth_enabled %}checked{% endif %}>
                     Enable Authentication
                 </label>
                 <p class="help-text">When disabled, all users can access Beekeeper without login</p>
             </div>
 
             <div class="form-group">
-                <label>
-                    <input type="checkbox" name="inline_tasks_enabled" value="true" {% if config.inline_tasks_enabled %}checked{% endif %}>
+                <label class="checkbox-label">
+                    <input type="checkbox" class="toggle" name="inline_tasks_enabled" value="true" {% if config.inline_tasks_enabled %}checked{% endif %}>
                     Allow inline task steps in pipelines
                 </label>
                 <p class="help-text">Task steps run shell commands as the Beekeeper user. Anyone with an API key can define them.</p>
@@ -55,11 +56,13 @@
 
             <button type="submit" class="btn btn-primary">Save Settings</button>
         </form>
+        </div>
     </section>
 
     <!-- API Configuration Section -->
-    <section class="admin-section">
-        <h2>API Configuration</h2>
+    <section class="admin-section" id="api-config">
+        <h2 class="collapsible-header" data-target="api-config-body">API Configuration <span class="collapse-icon">▶</span></h2>
+        <div class="collapsible-body" id="api-config-body" style="display:none">
         <form method="POST" action="{{ url_for('admin.update_settings') }}" class="settings-form">
             <div class="form-group">
                 <label for="api_rate_limit">Rate Limit (requests/minute)</label>
@@ -70,20 +73,33 @@
 
             <button type="submit" class="btn btn-primary">Save API Settings</button>
         </form>
+        </div>
     </section>
 
     <!-- Compute Providers Section -->
     <section class="admin-section" id="compute-providers">
-        <h2>Compute Providers</h2>
+        <h2 class="collapsible-header" data-target="compute-providers-body">Compute Providers <span class="collapse-icon">▶</span></h2>
+        <div class="collapsible-body" id="compute-providers-body" style="display:none">
         <p class="help-text">
-            Let projects run their training on a rented Runpod GPU instead of this server.
-            Projects opt in one at a time; nothing goes to Runpod unless its project says so.
-            While this is off, none of the Runpod options appear anywhere in Beekeeper.
+            Services that can run a project's training instead of this server. Each provider is off
+            until you enable it, and projects opt in one at a time.
+        </p>
+
+        <div class="admin-provider" id="runpod">
+        <h3 class="collapsible-header" data-target="runpod-body">
+            Runpod
+            <span class="provider-state{% if runpod.enabled %} on{% endif %}">{{ 'Enabled' if runpod.enabled else 'Off' }}</span>
+            <span class="collapse-icon">▶</span>
+        </h3>
+        <div class="collapsible-body" id="runpod-body" style="display:none">
+        <p class="help-text">
+            Rent a Runpod GPU for each run of a Runpod project. While this is off, none of the
+            Runpod options appear anywhere in Beekeeper.
         </p>
         <form method="POST" action="{{ url_for('compute.save_runpod') }}" class="settings-form" id="runpod-form">
             <div class="form-group">
-                <label>
-                    <input type="checkbox" name="enabled" value="true" id="runpod-enabled" {% if runpod.enabled %}checked{% endif %}>
+                <label class="checkbox-label">
+                    <input type="checkbox" class="toggle" name="enabled" value="true" id="runpod-enabled" {% if runpod.enabled %}checked{% endif %}>
                     Enable Runpod
                 </label>
             </div>
@@ -178,7 +194,7 @@
             </div>
             </div>
 
-            <button type="submit" class="btn btn-primary">Save Compute Settings</button>
+            <button type="submit" class="btn btn-primary">Save Runpod Settings</button>
         </form>
         {% if runpod.enabled %}
         <form method="POST" action="{{ url_for('compute.reset_runpod_total') }}" style="margin-top: 12px"
@@ -186,11 +202,15 @@
             <button type="submit" class="btn btn-secondary">Reset Total Spend</button>
         </form>
         {% endif %}
+        </div>
+        </div>
+        </div>
     </section>
 
     <!-- SSH Key Section -->
     <section class="admin-section" id="ssh-key">
-        <h2>SSH Key</h2>
+        <h2 class="collapsible-header" data-target="ssh-key-body">SSH Key <span class="collapse-icon">▶</span></h2>
+        <div class="collapsible-body" id="ssh-key-body" style="display:none">
         <p class="help-text">
             Beekeeper uses this key to clone and fetch git repositories over SSH.
             Add the public key below to GitHub under Settings &rarr; SSH and GPG keys,
@@ -206,11 +226,13 @@
               onsubmit="return confirm('This creates a new keypair and discards the old one. Any project relying on the old public key will fail to clone or fetch until you add the new one to GitHub. Continue?');">
             <button type="submit" class="btn btn-danger">Regenerate Key</button>
         </form>
+        </div>
     </section>
 
     <!-- Users Section -->
-    <section class="admin-section">
-        <h2>Users</h2>
+    <section class="admin-section" id="users">
+        <h2 class="collapsible-header" data-target="users-body">Users <span class="collapse-icon">▶</span></h2>
+        <div class="collapsible-body" id="users-body" style="display:none">
 
         <div class="collapsible-section">
             <button class="collapsible-toggle" data-target="create-user">
@@ -234,8 +256,8 @@
                     </div>
 
                     <div class="form-group">
-                        <label>
-                            <input type="checkbox" name="is_admin" value="true">
+                        <label class="checkbox-label">
+                            <input type="checkbox" class="toggle" name="is_admin" value="true">
                             Administrator
                         </label>
                     </div>
@@ -295,12 +317,14 @@
                 {% endfor %}
             </tbody>
         </table>
+        </div>
     </section>
 
     <!-- API Keys Section (only when logged in) -->
     {% if current_user %}
-    <section class="admin-section">
-        <h2>API Keys</h2>
+    <section class="admin-section" id="api-keys">
+        <h2 class="collapsible-header" data-target="api-keys-body">API Keys <span class="collapse-icon">▶</span></h2>
+        <div class="collapsible-body" id="api-keys-body" style="display:none">
         <p class="help-text">API keys allow programmatic access to Beekeeper when authentication is enabled.</p>
 
         <form method="POST" action="{{ url_for('admin.create_api_key') }}" class="create-key-form">
@@ -341,6 +365,7 @@
         {% else %}
         <p class="text-muted">No API keys created yet.</p>
         {% endif %}
+        </div>
     </section>
     {% endif %}
 </div>
@@ -363,6 +388,15 @@
     margin-bottom: 1rem;
     color: var(--text-primary);
 }
+
+.admin-section h2.collapsible-header {
+    margin-bottom: 0;
+}
+
+.admin-section .collapsible-body {
+    margin-top: 1rem;
+}
+
 
 .settings-form {
     display: flex;
@@ -594,6 +628,37 @@ code {
     font-size: 0.85rem;
 }
 
+.admin-provider {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    margin-top: 1rem;
+}
+
+.admin-provider > h3.collapsible-header {
+    margin: 0;
+    font-size: 1.05rem;
+    color: var(--text-bright);
+}
+
+.admin-provider > .collapsible-body {
+    margin-top: 0.75rem;
+}
+
+.provider-state {
+    font-size: 0.75rem;
+    font-weight: normal;
+    padding: 1px 8px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+}
+
+.provider-state.on {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
 .admin-subhead {
     font-size: 0.95rem;
     color: var(--text-bright);
@@ -640,8 +705,37 @@ code {
 }
 </style>
 
-<script src="{{ url_for('static', filename='js/app.js') }}"></script>
 <script>
+// Sections start closed. Reopen the one a form was just submitted from, or the
+// one named in the URL hash, so a save doesn't drop you back to a closed page.
+// A nested block (a provider under Compute Providers) opens along with its parents.
+(function () {
+    const KEY = 'admin-open-section';
+    const BLOCKS = '.admin-section, .admin-provider';
+    let open = location.hash.slice(1);
+    try {
+        open = sessionStorage.getItem(KEY) || open;
+        sessionStorage.removeItem(KEY);
+    } catch (e) { /* storage unavailable */ }
+    const target = open && document.getElementById(open);
+    if (target && target.matches(BLOCKS)) {
+        for (let block = target; block; block = block.parentElement.closest(BLOCKS)) {
+            const header = block.querySelector(':scope > .collapsible-header');
+            document.getElementById(header.dataset.target).style.display = 'block';
+            header.querySelector('.collapse-icon').textContent = '\u25BC';
+        }
+        target.scrollIntoView();
+    }
+    document.querySelectorAll('.admin-section form').forEach(form => {
+        form.addEventListener('submit', (event) => {
+            if (event.defaultPrevented) return;  // a confirm() was cancelled
+            try {
+                sessionStorage.setItem(KEY, form.closest(BLOCKS).id);
+            } catch (e) { /* storage unavailable */ }
+        });
+    });
+})();
+
 (function () {
     const enabled = document.getElementById('runpod-enabled');
     const fields = document.getElementById('runpod-fields');
