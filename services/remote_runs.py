@@ -21,6 +21,7 @@ import time
 from services import remote_store, runpod_config, spend_guard
 from services.node_transport import SshTransport
 from services.runpod_client import RunpodError, get_client
+from services.run_refs import run_ref
 
 log = logging.getLogger(__name__)
 
@@ -467,6 +468,8 @@ class RemoteProcess:
         env.update({
             "BEEKEEPER_RUN_DIR": "/bk/run", "BEEKEEPER_TENSORBOARD_DIR": "/bk/run",
             "TENSORBOARD_LOG_DIR": "/bk/run", "PYTHONUNBUFFERED": "1",
+            "BEEKEEPER_RUN_ID": str(self.ctx["run_id"]),
+            "BEEKEEPER_RUN_REF": run_ref(self.ctx["project_name"], self.ctx["run_id"]),
         })
         body = "".join(f"export {k}={shlex.quote(str(v))}\n" for k, v in sorted(env.items())
                        if k.replace("_", "").isalnum())

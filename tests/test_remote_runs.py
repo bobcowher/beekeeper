@@ -148,6 +148,8 @@ import os
 os.makedirs('outputs', exist_ok=True)
 open('outputs/model.pt', 'w').write('weights')
 open(os.path.join(os.environ['BEEKEEPER_RUN_DIR'], 'metrics.txt'), 'w').write(os.environ['MY_VAR'])
+open(os.path.join(os.environ['BEEKEEPER_RUN_DIR'], 'run_id.txt'), 'w').write(
+    os.environ.get('BEEKEEPER_RUN_ID', '') + ' ' + os.environ.get('BEEKEEPER_RUN_REF', ''))
 print('trained on', os.environ['BEEKEEPER_RUN_DIR'])
 """
 
@@ -163,6 +165,7 @@ def test_happy_path_results_land_in_run_folder_and_pod_is_terminated(runpod, tmp
     run_dir = os.path.join(app.config["PROJECTS_DIR"], "rp", "persistent", "runs", f"run_{r['run_id']}")
     assert open(os.path.join(run_dir, "outputs", "model.pt")).read() == "weights"
     assert open(os.path.join(run_dir, "metrics.txt")).read() == "42"
+    assert open(os.path.join(run_dir, "run_id.txt")).read() == f"{r['run_id']} rp-{r['run_id']}"
     text = _log(app, "rp", r["run_id"])
     assert "trained on /bk/run" not in text or "trained on" in text
     assert "Results synced and verified" in text
