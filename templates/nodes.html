@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Beekeeper - Nodes{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Nodes</h1></div>
+
+<section class="card node-card">
+    <div class="node-head">
+        <span class="node-name">local</span><span class="node-tag">this server</span>
+        <span class="node-summary muted" id="local-summary"></span>
+    </div>
+</section>
+
+<section class="card node-card" id="runpod-card">
+    <div class="node-head">
+        <span class="node-name">runpod</span><span class="node-tag">ephemeral</span>
+        <span class="node-summary muted" id="runpod-summary"></span>
+    </div>
+
+    <div class="spend-meters" id="spend-meters"></div>
+
+    <h3 class="node-subhead">Pods</h3>
+    <div id="pods"></div>
+
+    <div class="node-foot muted" id="pool-foot"></div>
+
+    <h3 class="node-subhead">Spend, last 30 days</h3>
+    <div id="daily-spend" class="daily-spend"></div>
+
+    <h3 class="node-subhead">Recent Runpod runs</h3>
+    <div id="recent-runs"></div>
+</section>
+
+<script id="initial-nodes" type="application/json">{{ initial | tojson }}</script>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/nodes.js') }}"></script>{% endblock %}

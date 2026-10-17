@@ -93,7 +93,15 @@ def create_app(test_config=None):
         # (run_<pk>, .migrating_<pk> or run_<number>), so a retry at next startup is safe.
         logging.getLogger(__name__).exception("Run folder migration failed; will retry on next startup")
 
+    from services import remote_runs
+    remote_runs.init(app.config["BEEKEEPER_HOME"])
+
     if _should_start_dispatcher(app):
+        from services import process_manager
+        try:
+            process_manager.adopt_remote_runs(app.config["PROJECTS_DIR"])
+        except Exception:
+            logging.getLogger(__name__).exception("Could not recover remote runs")
         from services.dispatcher import start_dispatcher
         start_dispatcher(app)
 
@@ -108,6 +116,7 @@ def create_app(test_config=None):
     from routes.auth import auth_bp
     from routes.admin import admin_bp
     from routes.pipelines import pipelines_bp
+    from routes.compute import compute_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(project_bp)
@@ -119,6 +128,7 @@ def create_app(test_config=None):
     app.register_blueprint(auth_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(pipelines_bp)
+    app.register_blueprint(compute_bp)
 
     # Register middleware
     from middleware.auth_middleware import register_middleware
@@ -128,7 +138,8 @@ def create_app(test_config=None):
 
     @app.context_processor
     def inject_deploy_version():
-        return {"deploy_version": app.config["DEPLOY_VERSION"]}
+        from services import runpod_config
+        return {"deploy_version": app.config["DEPLOY_VERSION"], "runpod_enabled": runpod_config.enabled()}
 
     # Periodic cleanup of expired sessions
     @app.before_request

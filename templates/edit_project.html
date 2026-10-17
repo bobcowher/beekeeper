@@ -218,6 +218,52 @@
         </p>
     </div>
 
+    {% if runpod_enabled %}
+    <h2 id="compute">Where to Run</h2>
+    <div class="form-group">
+        <label for="compute_target">
+            Run training on
+            <span class="tooltip-icon" title="Each Runpod run gets its own rented pod. The code goes up from this server's workspace, results sync back into the normal run folder, and the pod is terminated when the run ends.">?</span>
+        </label>
+        <select id="compute_target" name="compute_target" style="width:auto;min-width:220px">
+            <option value="local" {% if project.get('compute_target', 'local') != 'runpod' %}selected{% endif %}>This server</option>
+            <option value="runpod" {% if project.get('compute_target') == 'runpod' %}selected{% endif %}>Runpod</option>
+        </select>
+    </div>
+    <div id="runpod-project-fields"{% if project.get('compute_target') != 'runpod' %} hidden{% endif %}>
+        <div class="form-group">
+            <label for="runpod_gpu_types">
+                GPU list (optional, one per line, tried in order)
+                <span class="tooltip-icon" title="Empty uses the pool's list from Admin → Compute Providers, or the cheapest card in stock with at least Minimum VRAM (16 GB if unset).">?</span>
+            </label>
+            <textarea id="runpod_gpu_types" name="runpod_gpu_types" rows="2"
+                      placeholder="NVIDIA GeForce RTX 4090">{{ (project.get('runpod_gpu_types') or []) | join('\n') }}</textarea>
+        </div>
+        <div class="form-group">
+            <label for="runpod_image">Image (optional)</label>
+            <input type="text" id="runpod_image" name="runpod_image" value="{{ project.get('runpod_image', '') }}"
+                   placeholder="Pool default">
+        </div>
+        <div class="form-group">
+            <label class="checkbox-label">
+                <input type="checkbox" name="data_dir_sync" value="1"
+                       {% if project.get('data_dir_sync') %}checked{% endif %}>
+                <span>Sync data dir on startup</span>
+                <span class="tooltip-icon" title="Uploads the data dir to the pod before training. It counts against the upload limit, and the GPU bills while it uploads.">?</span>
+            </label>
+            {% if project.get('data_dir_enabled') and not project.get('data_dir_sync') %}
+            <p class="muted" style="font-size: 0.85em">This project has a data dir. Runpod runs will be refused until sync is on, since the pod has no other way to get the data.</p>
+            {% endif %}
+        </div>
+        <p class="muted" style="font-size: 0.85em">Minimum VRAM (under GPU Memory Management) sets the smallest card Runpod will rent; without it, 16 GB.</p>
+    </div>
+    <script>
+    document.getElementById('compute_target').addEventListener('change', (e) => {
+        document.getElementById('runpod-project-fields').hidden = e.target.value !== 'runpod';
+    });
+    </script>
+    {% endif %}
+
     <div class="form-actions">
         <button type="submit" class="btn btn-primary">Save Changes</button>
         <a href="{{ url_for('project.detail', name=project.name) }}" class="btn btn-cancel">Cancel</a>

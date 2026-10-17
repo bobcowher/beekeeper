@@ -48,9 +48,11 @@ def index():
     api_keys = db.list_user_api_keys(current_user.id) if current_user else []
     ssh_public_key = get_public_key(current_app.config['BEEKEEPER_HOME'])
 
+    from services import runpod_config
     return render_template(
         'admin.html', config=config, users=users, api_keys=api_keys,
         current_user=current_user, ssh_public_key=ssh_public_key,
+        runpod=runpod_config.load(),
     )
 
 

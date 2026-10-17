@@ -321,8 +321,21 @@ function formatElapsed(seconds) {
     return `${s}s`;
 }
 
+const NODE_PHASES = {provision: 'starting pod', upload: 'uploading', prepare: 'installing',
+                     train: 'training', finalize: 'syncing results', done: 'done'};
+
+function nodeText(node) {
+    if (!node) return '';
+    const phase = NODE_PHASES[node.phase] || node.phase || '';
+    const parts = ['Runpod', node.gpu_type, node.phase_detail && node.phase !== 'train' ? node.phase_detail : phase];
+    return parts.filter(Boolean).join(' · ');
+}
+
 function runRowMarkup(run) {
     const { run_id, branch, status, pid, elapsed, tb_port } = run;
+    const nodeHtml = run.node
+        ? `<span class="run-node muted" id="node-${run_id}" style="font-size:0.8rem;">${escHtml(nodeText(run.node))}</span>`
+        : '';
     const statusStyle = status === 'starting' ? 'running' : escHtml(status);
     const pidHtml = pid ? `<span class="muted" style="font-size:0.75rem;">PID ${pid}</span>` : '';
     const elapsedText = elapsed ? formatElapsed(elapsed) : '';
@@ -339,6 +352,7 @@ function runRowMarkup(run) {
             <span class="run-branch">${escHtml(branch)}</span>
             <span class="run-id">#${run_id}</span>
             ${pidHtml}
+            ${nodeHtml}
             <span class="run-elapsed" id="elapsed-${run_id}">${elapsedText}</span>
             ${tensorboardHtml}
             <button class="btn btn-secondary btn-sm" id="btn-logs-${run_id}">▶ Logs</button>
@@ -504,6 +518,8 @@ function updateRunRow(run, state) {
     }
     const elapsedEl = document.getElementById(`elapsed-${run.run_id}`);
     if (elapsedEl && run.elapsed) elapsedEl.textContent = formatElapsed(run.elapsed);
+    const nodeEl = document.getElementById(`node-${run.run_id}`);
+    if (nodeEl && run.node) nodeEl.textContent = nodeText(run.node);
 }
 
 function reconcileRunList(runs) {

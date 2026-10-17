@@ -11,6 +11,9 @@
     <span class="status-badge status-{{ display_status }}">
         {{ display_status | replace('_', ' ') }}
     </span>
+    {% if runpod_enabled and project.get('compute_target') == 'runpod' %}
+    <a href="/nodes" class="status-badge status-runpod" title="Training runs on a Runpod pod">runs on runpod</a>
+    {% endif %}
 </div>
 
 {% with messages = get_flashed_messages(with_categories=true) %}

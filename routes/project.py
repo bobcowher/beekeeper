@@ -258,6 +258,17 @@ def _integer_form_value(field, default, minimum):
         return default
 
 
+def _apply_compute_settings(project_data):
+    from services import runpod_config
+    if not runpod_config.enabled() or "compute_target" not in request.form:
+        return   # fields aren't on the form; leave whatever is saved alone
+    target = request.form.get("compute_target")
+    project_data["compute_target"] = "runpod" if target == "runpod" else "local"
+    project_data["runpod_gpu_types"] = runpod_config.parse_gpu_list(request.form.get("runpod_gpu_types", ""))
+    project_data["runpod_image"] = request.form.get("runpod_image", "").strip()
+    project_data["data_dir_sync"] = bool(request.form.get("data_dir_sync"))
+
+
 def _apply_resource_settings(project_data):
     project_data["parallel_runs_enabled"] = bool(request.form.get("parallel_runs_enabled"))
     project_data["max_parallel_runs"] = _integer_form_value("max_parallel_runs", 2, 2)
@@ -315,6 +326,7 @@ def update(name):
     # Parse environment variables from the form
     project_data["env_vars"] = _form_env_vars()
     _apply_resource_settings(project_data)
+    _apply_compute_settings(project_data)
 
     from models.project import Project
     project = Project(**project_data)

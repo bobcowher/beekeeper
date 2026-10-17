@@ -17,6 +17,7 @@ from services.run_refs import run_ref
 from services.run_folder_migration import archive_pk_named_log
 from services.run_storage_service import MARKER, delete_run_storage, persistent_runs_root
 from services.stats_service import get_gpu_stats
+from services import remote_runs
 
 log = logging.getLogger(__name__)
 
@@ -288,6 +289,7 @@ def get_runs_for_project(name: str) -> list:
                     "elapsed": now - info.get("started_at", now),
                     "tb_port": info.get("tb_port"),
                     "resources": resources,
+                    **({"node": proc.describe()} if getattr(proc, "is_remote", False) else {}),
                 })
     return result
 
@@ -590,7 +592,7 @@ def _training_request(projects_dir, name, extra_env=None):
     return project, python_bin, None
 
 
-def _training_admission(name, project):
+def _training_admission(name, project, remote=False):
     """Check live capacity while _lock is held. Returns (error, GPU assignment)."""
     active_runs = _get_runs_for_project(name)
     parallel_enabled = project.get("parallel_runs_enabled", False)
@@ -603,6 +605,10 @@ def _training_admission(name, project):
         }, None)
     if parallel_enabled and len(active_runs) >= max_runs:
         return ({"error": f"At capacity ({max_runs} parallel runs)", "code": "AT_CAPACITY"}, None)
+
+    if remote:
+        # The pod has its card to itself; only the pool-wide pod limit applies.
+        return remote_runs.pool_capacity_error(_running), None
 
     gpu_assignment = None
     if project.get("gpu_enabled", False):
@@ -627,9 +633,12 @@ def _training_admission(name, project):
 def can_start_training(projects_dir, name):
     """Side-effect-free result of the same preflight checks used by start_training."""
     project, _, error = _training_request(projects_dir, name)
+    remote = error is None and remote_runs.is_remote(project)
+    if remote:
+        error, _ = remote_runs.precheck(projects_dir, name, project)
     if error is None:
         with _lock:
-            error, _ = _training_admission(name, project)
+            error, _ = _training_admission(name, project, remote)
     if error:
         return {"can_start": False, "code": error["code"], "message": error["error"]}
     return {"can_start": True, "code": None, "message": "Ready to start"}
@@ -644,11 +653,18 @@ def start_training(projects_dir, name, branch=None, extra_env=None):  # NOSONAR 
     if branch is None:
         branch = project.get("branch", "main")
 
+    # A remote run's checks call Runpod, so they run before taking the lock.
+    remote_plan = None
+    if remote_runs.is_remote(project):
+        error, remote_plan = remote_runs.precheck(projects_dir, name, project, extra_env)
+        if error:
+            return error
+
     primary_ws = os.path.join(projects_dir, name, "workspace")
 
     with _lock:
         active_runs = _get_runs_for_project(name)
-        error, gpu_assignment = _training_admission(name, project)
+        error, gpu_assignment = _training_admission(name, project, remote_plan is not None)
         if error:
             return error
 
@@ -676,13 +692,15 @@ def start_training(projects_dir, name, branch=None, extra_env=None):  # NOSONAR 
             "run_id": run_id,
             "branch": branch,
             "workspace_dir": workspace_dir,
+            "remote": remote_plan is not None,
         }
 
     _update_project_json(projects_dir, name, train_status="starting")
 
     thread = threading.Thread(
         target=_execute_training,
-        args=(projects_dir, name, project, python_bin, run_pk, run_id, branch, workspace_dir, gpu_assignment, extra_env),
+        args=(projects_dir, name, project, python_bin, run_pk, run_id, branch, workspace_dir, gpu_assignment, extra_env)
+        + ((remote_plan,) if remote_plan is not None else ()),
         daemon=True,
     )
     thread.start()
@@ -705,8 +723,12 @@ def _archive_older_runs_pk_named_log(projects_dir: str, name: str, run_id: int, 
     get_db().update_training_run(old["id"], log_file_path=rel)
 
 
-def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, branch, workspace_dir, gpu_assignment=None, extra_env=None):  # NOSONAR — sequential pre-launch pipeline
-    """Run the full pre-launch sequence and start the training subprocess (runs in background thread)."""
+def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, branch, workspace_dir, gpu_assignment=None, extra_env=None, remote_plan=None):  # NOSONAR — sequential pre-launch pipeline
+    """Run the full pre-launch sequence and start the training subprocess (runs in background thread).
+
+    With remote_plan, the setup script, pip install and training run on a Runpod pod instead
+    (services/remote_runs.py); git sync, run storage, the log and TensorBoard stay here.
+    """
     is_parallel = workspace_dir != os.path.join(projects_dir, name, "workspace")
     log_path = os.path.join(projects_dir, name, f"train-{run_id}.log")
     _archive_older_runs_pk_named_log(projects_dir, name, run_id, log_path)
@@ -777,6 +799,8 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
 
     run_meta = _collect_run_metadata(workspace_dir, python_bin, branch)
     run_meta["gpu_assignment"] = gpu_assignment
+    if remote_plan is not None:   # this box's GPUs and Python say nothing about the pod
+        run_meta.update(hostname="runpod", python_version="(on the pod)", gpu_info=[])
 
     # Update the pre-created DB record with full metadata
     get_db().update_training_run(
@@ -790,7 +814,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
     )
 
     # Ensure data dir symlink (before setup script so it can use it)
-    if project.get("data_dir_enabled") and project.get("data_dir_remote"):
+    if remote_plan is None and project.get("data_dir_enabled") and project.get("data_dir_remote"):
         err = ensure_data_dir_symlink(
             workspace_dir,
             project.get("data_dir_local", "data"),
@@ -801,7 +825,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
 
     # Run setup script if configured
     setup_script = project.get("setup_script", "")
-    if setup_script:
+    if setup_script and remote_plan is None:
         script_path = os.path.join(workspace_dir, setup_script)
         if os.path.isfile(script_path):
             try:
@@ -832,7 +856,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
     # Install/update dependencies
     req_file = project.get("requirements_file", "requirements.txt")
     req_path = os.path.join(workspace_dir, req_file)
-    if os.path.isfile(req_path):
+    if remote_plan is None and os.path.isfile(req_path):
         try:
             result = subprocess.run(
                 [python_bin, "-m", "pip", "install", "--upgrade", "--upgrade-strategy", "only-if-needed", "-r", req_path, "--quiet"],
@@ -853,8 +877,6 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
     # Prepare persistent run storage before training starts. Fast scripts often
     # create SummaryWriter/log files immediately, so workspace redirects must
     # exist before Popen.
-    tb_process = None
-    tb_port = None
     prelaunch_warnings = []
 
     try:
@@ -970,6 +992,24 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
         proc_env["GPU_MEMORY_PREFERRED"] = str(preferred_mb)
         proc_env["GPU_OFFLOAD"] = "1" if (preferred_mb > 0 and free_mb < preferred_mb) else "0"
 
+    if remote_plan is not None:
+        os.close(log_fd)
+        with _lock:
+            still_wanted = run_pk in _running
+        if not still_wanted:   # stopped while git sync ran: never create a pod for it
+            return _abort("Stopped before the pod was requested")
+        proc = remote_runs.launch({
+            "run_pk": run_pk, "run_id": run_id, "project_name": name, "branch": branch,
+            "plan": remote_plan, "log_path": log_path, "workspace_dir": workspace_dir,
+            "persistent_run_dir": persistent_run_dir, "tb_rel": tb_log_rel, "output_paths": output_paths,
+            "data_dir": project.get("data_dir_remote") if project.get("data_dir_enabled") else "",
+            "data_dir_local": project.get("data_dir_local", "data"),
+            "setup_script": project.get("setup_script", ""), "requirements_file": req_file,
+            "train_file": train_file, "env": project_env,
+        })
+        return _register_launched(projects_dir, name, project, run_pk, run_id, branch, workspace_dir,
+                                  proc, log_path, remote=True)
+
     try:
         proc = subprocess.Popen(
             [python_bin, "-u", train_file],
@@ -984,6 +1024,17 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
         return _abort(f"Failed to start training: {e}")
 
     os.close(log_fd)
+    _register_launched(projects_dir, name, project, run_pk, run_id, branch, workspace_dir, proc, log_path)
+
+
+def _register_launched(projects_dir, name, project, run_pk, run_id, branch, workspace_dir, proc, log_path,
+                       remote=False, started_at=None):
+    """Start TensorBoard, track the launched run and start its monitor thread.
+
+    proc is a Popen, or a remote_runs.RemoteProcess for a run on a pod.
+    """
+    tb_process = None
+    tb_port = None
 
     # Kill any standalone TB for this project before starting a new one
     with _lock:
@@ -1014,12 +1065,13 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
             "log_path": log_path,
             "tb_process": tb_process,
             "tb_port": tb_port,
-            "started_at": time.time(),
+            "started_at": started_at or time.time(),
             "run_pk": run_pk,
             "run_id": run_id,
             "project_name": name,
             "branch": branch,
             "workspace_dir": workspace_dir,
+            "remote": remote,
         }
 
     _update_project_json(projects_dir, name,
@@ -1030,6 +1082,21 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
         target=_monitor_process, args=(projects_dir, name, run_pk), daemon=True
     )
     thread.start()
+
+
+def adopt_remote_runs(projects_dir):
+    """At startup: put unfinished Runpod runs back under tracking (they survive a restart; local runs don't)."""
+    def adopt(row, ctx, proc):
+        name = row["project_name"]
+        try:
+            with open(os.path.join(projects_dir, name, _PROJECT_FILE)) as f:  # NOSONAR
+                project = json.load(f)
+        except (OSError, ValueError):
+            project = {"name": name}
+        _register_launched(projects_dir, name, project, row["run_pk"], row["run_number"], ctx.get("branch"),
+                           ctx.get("workspace_dir"), proc, ctx["log_path"], remote=True,
+                           started_at=row.get("created_at"))
+    return remote_runs.recover(projects_dir, adopt)
 
 def stop_training(projects_dir, name, run_id=None):  # NOSONAR — sequential stop/cleanup pipeline
     """Stop a training run. run_id selects which run; omit if only one is active."""
@@ -1070,6 +1137,11 @@ def stop_training(projects_dir, name, run_id=None):  # NOSONAR — sequential st
 
         proc = info["process"]
         workspace_dir = info.get("workspace_dir", primary_ws)
+
+    if getattr(proc, "is_remote", False):
+        # The pod still has to hand back its results; the monitor thread finishes the run.
+        proc.request_stop("stopped by user")
+        return {"status": "stopped", "run_id": run_id, "run_ref": run_ref(name, run_id)}
 
     if proc is not None:
         try:

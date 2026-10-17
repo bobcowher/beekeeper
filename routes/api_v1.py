@@ -220,7 +220,7 @@ def create_project():
     project = Project.load(config_path)
 
     return api_response(
-        data={"project": project.to_dict()},
+        data={"project": _project_public(project)},
         status_code=201
     )
 
@@ -235,7 +235,7 @@ def get_project(name):
 
     return api_response(data={
         "project": {
-            **project.to_dict(),
+            **_project_public(project),
             "training": status,
             "total_runtime_seconds": total_runtime_seconds,
         }
@@ -311,7 +311,7 @@ def clone_project(name):
 
     return api_response(
         data={
-            "project": cloned_project.to_dict(),
+            "project": _project_public(cloned_project),
             "source": name
         },
         status_code=201
@@ -481,6 +481,47 @@ def _apply_numeric_project_updates(project, data):
     return None
 
 
+_COMPUTE_FIELDS = {"compute_target", "runpod_gpu_types", "runpod_image", "data_dir_sync"}
+
+
+def _project_public(project) -> dict:
+    """project.to_dict(), without the Runpod fields while the provider is off."""
+    from services import runpod_config
+    d = project.to_dict()
+    if not runpod_config.enabled():
+        for k in _COMPUTE_FIELDS:
+            d.pop(k, None)
+    return d
+
+
+def _apply_compute_update(project, data):
+    """Runpod project settings. Unknown fields while the provider is off, like any other bad field."""
+    from services import runpod_config
+    fields = _COMPUTE_FIELDS.intersection(data)
+    if not fields:
+        return None
+    if not runpod_config.enabled():
+        return api_response(error_code="RUNPOD_DISABLED",
+                            error_message=f"{', '.join(sorted(fields))}: Runpod is not enabled on this server",
+                            status_code=400)
+    if "compute_target" in data:
+        if data["compute_target"] not in ("local", "runpod"):
+            return api_response(error_code="INVALID_COMPUTE_TARGET",
+                                error_message="compute_target must be 'local' or 'runpod'", status_code=400)
+        project.compute_target = data["compute_target"]
+    if "runpod_gpu_types" in data:
+        if not isinstance(data["runpod_gpu_types"], list) or \
+                not all(isinstance(g, str) for g in data["runpod_gpu_types"]):
+            return api_response(error_code="INVALID_GPU_TYPES",
+                                error_message="runpod_gpu_types must be a list of GPU type names", status_code=400)
+        project.runpod_gpu_types = runpod_config.parse_gpu_list(data["runpod_gpu_types"])
+    if "runpod_image" in data:
+        project.runpod_image = str(data["runpod_image"] or "").strip()
+    if "data_dir_sync" in data:
+        project.data_dir_sync = bool(data["data_dir_sync"])
+    return None
+
+
 def _apply_data_directory_update(project, data, projects_dir, name):
     data_dir_fields = {"data_dir_enabled", "data_dir_local", "data_dir_remote"}
     if not data_dir_fields.intersection(data):
@@ -525,7 +566,7 @@ def update_project_api(name):
             error_message="Cannot update project while training is running — stop training first",
             status_code=409,
         )
-    for updater in (_apply_text_project_updates, _apply_numeric_project_updates):
+    for updater in (_apply_text_project_updates, _apply_numeric_project_updates, _apply_compute_update):
         error = updater(project, data)
         if error is not None:
             return error
@@ -534,7 +575,47 @@ def update_project_api(name):
     if error is not None:
         return error
     project.save(projects_dir)
-    return api_response(data={"project": project.to_dict()})
+    return api_response(data={"project": _project_public(project)})
+
+
+# ---------------------------------------------------------------------------
+# Compute providers (Runpod)
+# ---------------------------------------------------------------------------
+
+def _require_runpod():
+    from services import runpod_config
+    if not runpod_config.enabled():
+        _abort_json(404, "NOT_FOUND", "Runpod is not enabled on this server")
+
+
+@api_v1_bp.route("/compute/runpod", methods=["GET"])
+@api_key_required
+def runpod_status_api():
+    """Runpod pool: settings (never the key), spend per period, live pods."""
+    _require_runpod()
+    from services import remote_runs
+    return api_response(data=remote_runs.status())
+
+
+@api_v1_bp.route("/compute/runpod/pods/<pod_name>/terminate", methods=["POST"])
+@api_key_required
+def runpod_terminate_api(pod_name):
+    """Stop the run that owns a pod (final sync, then terminate), or kill a stray pod."""
+    _require_runpod()
+    from services import remote_runs
+    if not remote_runs.terminate_by_name(pod_name):
+        return api_response(error_code="NOT_FOUND", error_message=f"No pod named {pod_name}", status_code=404)
+    return api_response(data={"terminating": pod_name})
+
+
+@api_v1_bp.route("/compute/runpod/reset-total", methods=["POST"])
+@api_key_required
+def runpod_reset_total_api():
+    """Reset the total-spend counter to $0."""
+    _require_runpod()
+    from services import runpod_config
+    runpod_config.reset_total(time.time())
+    return api_response(data={"reset": True})
 
 
 @api_v1_bp.route("/folders", methods=["GET"])

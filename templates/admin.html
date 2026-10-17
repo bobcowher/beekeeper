@@ -72,6 +72,122 @@
         </form>
     </section>
 
+    <!-- Compute Providers Section -->
+    <section class="admin-section" id="compute-providers">
+        <h2>Compute Providers</h2>
+        <p class="help-text">
+            Let projects run their training on a rented Runpod GPU instead of this server.
+            Projects opt in one at a time; nothing goes to Runpod unless its project says so.
+            While this is off, none of the Runpod options appear anywhere in Beekeeper.
+        </p>
+        <form method="POST" action="{{ url_for('compute.save_runpod') }}" class="settings-form" id="runpod-form">
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" name="enabled" value="true" id="runpod-enabled" {% if runpod.enabled %}checked{% endif %}>
+                    Enable Runpod
+                </label>
+            </div>
+
+            <div id="runpod-fields"{% if not runpod.enabled %} hidden{% endif %}>
+            <div class="form-group">
+                <label for="runpod-api-key">API Key</label>
+                <div class="form-group-inline">
+                    <input type="password" id="runpod-api-key" name="api_key" autocomplete="off"
+                           placeholder="{{ 'Saved. Enter a new key to replace it' if runpod.has_key else 'rpa_...' }}">
+                    <button type="button" class="btn btn-secondary" id="runpod-test">Test Connection</button>
+                </div>
+                <p class="help-text">Stored on this server only (mode 0600) and never shown again. Pods never see it.</p>
+                <div id="runpod-test-result" class="runpod-test-result" hidden></div>
+            </div>
+
+            <h3 class="admin-subhead">Spend caps (USD)</h3>
+            <p class="help-text">
+                <strong>Soft</strong>: no new pods start, running ones finish.
+                <strong>Hard</strong>: every Runpod run is stopped and its pod terminated.
+                Runs are refused until at least one hard cap is set. Your Runpod credit balance is the
+                last line of defense, so for a home lab, prepaid credits are the safest setup.
+            </p>
+            <table class="caps-table">
+                <thead><tr><th></th><th>Soft</th><th>Hard</th></tr></thead>
+                <tbody>
+                {% for period, label in [('daily', 'Daily'), ('monthly', 'Monthly'), ('total', 'Total')] %}
+                <tr>
+                    <td>{{ label }}</td>
+                    <td><input type="number" step="any" min="0" name="cap_{{ period }}_soft"
+                               value="{{ runpod.caps[period].soft if runpod.caps[period].soft is not none else '' }}"></td>
+                    <td><input type="number" step="any" min="0" name="cap_{{ period }}_hard"
+                               value="{{ runpod.caps[period].hard if runpod.caps[period].hard is not none else '' }}"></td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+
+            <h3 class="admin-subhead">Pods</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="runpod-cloud">Cloud</label>
+                    <select id="runpod-cloud" name="cloud_type">
+                        <option value="COMMUNITY" {% if runpod.cloud_type == 'COMMUNITY' %}selected{% endif %}>Community (cheaper)</option>
+                        <option value="SECURE" {% if runpod.cloud_type == 'SECURE' %}selected{% endif %}>Secure</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="runpod-max-pods">Max concurrent pods</label>
+                    <input type="number" id="runpod-max-pods" name="max_concurrent_pods" min="1" max="32"
+                           value="{{ runpod.max_concurrent_pods }}">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="runpod-image">Default image</label>
+                <input type="text" id="runpod-image" name="default_image" value="{{ runpod.default_image }}">
+                <p class="help-text">Any image with Python 3. Projects can override it, e.g. to try a ROCm image on AMD cards.</p>
+            </div>
+            <div class="form-group">
+                <label for="runpod-gpus">GPU list (optional, one per line, tried in order)</label>
+                <textarea id="runpod-gpus" name="gpu_types" rows="3"
+                          placeholder="NVIDIA GeForce RTX 4090&#10;NVIDIA RTX A6000">{{ runpod.gpu_types | join('\n') }}</textarea>
+                <p class="help-text">Leave empty to use the cheapest card in stock that meets the project's Minimum VRAM (16 GB if unset). Test Connection lists the exact names.</p>
+            </div>
+
+            <h3 class="admin-subhead">Limits</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="runpod-runtime">Max runtime per run (hours)</label>
+                    <input type="number" step="any" min="0.05" id="runpod-runtime" name="max_runtime_hours" value="{{ runpod.max_runtime_hours }}">
+                </div>
+                <div class="form-group">
+                    <label for="runpod-upload">Max upload per run (GB)</label>
+                    <input type="number" step="any" min="0" id="runpod-upload" name="max_upload_gb" value="{{ runpod.max_upload_gb }}">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="runpod-sync">Result sync interval (minutes)</label>
+                    <input type="number" step="any" min="0.25" id="runpod-sync" name="sync_interval_min" value="{{ runpod.sync_interval_min }}">
+                    <p class="help-text">The most you can lose if a pod dies mid-run.</p>
+                </div>
+                <div class="form-group">
+                    <label for="runpod-hold">Hold for sync (hours)</label>
+                    <input type="number" step="any" min="0.05" id="runpod-hold" name="hold_for_sync_hours" value="{{ runpod.hold_for_sync_hours }}">
+                    <p class="help-text">If Beekeeper is down, a pod waits this long past its max runtime for results to be collected, then shuts itself down.</p>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="runpod-disk">Container disk (GB)</label>
+                <input type="number" min="10" id="runpod-disk" name="container_disk_gb" value="{{ runpod.container_disk_gb }}">
+            </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Save Compute Settings</button>
+        </form>
+        {% if runpod.enabled %}
+        <form method="POST" action="{{ url_for('compute.reset_runpod_total') }}" style="margin-top: 12px"
+              onsubmit="return confirm('Reset the Runpod total spend counter to $0? Daily and monthly totals are not affected.');">
+            <button type="submit" class="btn btn-secondary">Reset Total Spend</button>
+        </form>
+        {% endif %}
+    </section>
+
     <!-- SSH Key Section -->
     <section class="admin-section" id="ssh-key">
         <h2>SSH Key</h2>
@@ -477,7 +593,97 @@ code {
     border-radius: 2px;
     font-size: 0.85rem;
 }
+
+.admin-subhead {
+    font-size: 0.95rem;
+    color: var(--text-bright);
+    margin: 1.25rem 0 0.5rem;
+}
+
+.caps-table {
+    border-collapse: collapse;
+    margin-bottom: 0.5rem;
+}
+
+.caps-table th, .caps-table td {
+    padding: 0.35rem 0.75rem 0.35rem 0;
+    text-align: left;
+    color: var(--text-secondary);
+    font-weight: normal;
+}
+
+.caps-table input {
+    width: 7rem;
+}
+
+.runpod-test-result {
+    margin-top: 0.5rem;
+    max-height: 260px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    padding: 0.5rem;
+    font-size: 0.85rem;
+}
+
+.runpod-test-result table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.runpod-test-result td, .runpod-test-result th {
+    padding: 2px 6px;
+    text-align: left;
+}
+
+.runpod-test-result .sold-out {
+    color: var(--text-secondary);
+}
 </style>
 
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script>
+(function () {
+    const enabled = document.getElementById('runpod-enabled');
+    const fields = document.getElementById('runpod-fields');
+    if (!enabled) return;
+    enabled.addEventListener('change', () => { fields.hidden = !enabled.checked; });
+
+    const btn = document.getElementById('runpod-test');
+    const out = document.getElementById('runpod-test-result');
+    btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        out.hidden = false;
+        out.textContent = 'Checking...';
+        const body = new FormData();
+        body.append('api_key', document.getElementById('runpod-api-key').value);
+        body.append('cloud_type', document.getElementById('runpod-cloud').value);
+        try {
+            const resp = await fetch('{{ url_for("compute.test_runpod") }}', {method: 'POST', body});
+            const data = await resp.json();
+            if (!data.ok) {
+                out.textContent = 'Failed: ' + data.error;
+                return;
+            }
+            const table = document.createElement('table');
+            table.innerHTML = '<tr><th>GPU</th><th>VRAM</th><th>$/hr</th><th>Stock</th></tr>';
+            for (const g of data.gpus) {
+                const tr = document.createElement('tr');
+                if (g.availability === 'NONE') tr.className = 'sold-out';
+                for (const v of [g.id, g.memory + ' GB', '$' + g.price.toFixed(2), (g.availability || '?').toLowerCase()]) {
+                    const td = document.createElement('td');
+                    td.textContent = v;
+                    tr.appendChild(td);
+                }
+                table.appendChild(tr);
+            }
+            out.textContent = `Connected. ${data.pod_count} pod(s) on the account. ${data.cloud.toLowerCase()} cloud prices:`;
+            out.appendChild(table);
+        } catch (e) {
+            out.textContent = 'Failed: ' + e;
+        } finally {
+            btn.disabled = false;
+        }
+    });
+})();
+</script>
 {% endblock %}

@@ -5,6 +5,28 @@ import pytest
 from app import create_app
 
 
+@pytest.fixture(autouse=True)
+def _isolate_runpod(monkeypatch, tmp_path):
+    """No test may reach the real Runpod account or read this machine's Runpod settings.
+
+    config.properties and secrets/ live in the real BEEKEEPER_HOME, which create_app
+    uses even under test. Without this, any test that ticks the dispatcher would run
+    the orphan sweep with the real API key. Tests that want Runpod patch these again.
+    """
+    from services import remote_runs, runpod_client, runpod_config
+    store = {}
+    monkeypatch.setattr(runpod_config, "get_config", lambda k, d=None: store.get(k, None if d is None else str(d)))
+    monkeypatch.setattr(runpod_config, "get_config_bool",
+                        lambda k, d=False: str(store.get(k, d)).lower() in ("true", "1"))
+    monkeypatch.setattr(runpod_config, "set_config", lambda k, v: store.__setitem__(k, str(v)))
+    monkeypatch.setattr(runpod_config, "save_config", lambda: None)
+    monkeypatch.setattr(runpod_config, "_home", str(tmp_path / "runpod-home"))
+    monkeypatch.setattr(remote_runs, "_home", str(tmp_path / "runpod-home"))
+    monkeypatch.setattr(runpod_client, "get_client", lambda: None)
+    monkeypatch.setattr(remote_runs, "get_client", lambda: None)
+    return store
+
+
 @pytest.fixture
 def app(tmp_path):
     (tmp_path / "projects").mkdir()

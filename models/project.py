@@ -55,6 +55,11 @@ class Project:
     gpu_memory_minimum: int = 0   # MB — hard floor; run rejected if free VRAM is below this
     gpu_memory_preferred: int = 0  # MB — full ask including offloadable allocations
     folder: str = ""  # flat grouping label; '' = unfiled
+    # Runpod (ignored unless the provider is enabled under Admin → Compute Providers)
+    compute_target: str = "local"  # "local" | "runpod"
+    runpod_gpu_types: list = field(default_factory=list)  # ordered; empty = the pool's list
+    runpod_image: str = ""  # empty = the pool's default image
+    data_dir_sync: bool = False  # upload the data dir to the pod before training
 
     def to_dict(self):
         return asdict(self)

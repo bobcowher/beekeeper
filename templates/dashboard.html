@@ -6,6 +6,11 @@
     <h2>System Stats</h2>
     <div id="stats-content"><p class="muted">Loading stats...</p></div>
 </section>
+{% if runpod_enabled %}
+<a class="remote-strip" href="/nodes" id="remote-compute-strip">
+    <span class="strip-label">Remote Compute</span><span id="remote-strip-text" class="mono">runpod · loading…</span>
+</a>
+{% endif %}
 <section class="card activity-card">
     <h2>Running now</h2>
     <div id="running-activity" class="activity-list"></div>
@@ -20,4 +25,29 @@
 </section>
 <script id="initial-activity" type="application/json">{{ activity | tojson }}</script>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', filename='js/activity.js') }}"></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/activity.js') }}"></script>
+{% if runpod_enabled %}
+<script>
+(function () {
+    const text = document.getElementById("remote-strip-text");
+    async function refresh() {
+        try {
+            const resp = await fetch("/nodes/status");
+            if (!resp.ok) return;
+            const d = await resp.json();
+            const day = d.spend.daily;
+            const cap = day.soft ?? day.hard;
+            const n = d.pods.length;
+            let cls = "";
+            if (day.hard != null && day.spent >= day.hard) cls = "strip-bad";
+            else if (day.soft != null && day.spent >= day.soft) cls = "strip-warn";
+            text.className = "mono " + cls;
+            text.textContent = `runpod · ${n} pod${n === 1 ? "" : "s"} · $${d.burn_rate.toFixed(2)}/hr · today $${day.spent.toFixed(day.spent && day.spent < 1 ? 3 : 2)}` +
+                (cap != null ? ` of $${cap.toFixed(2)} ${day.soft != null ? "soft" : "hard"}` : "");
+        } catch (e) { /* keep last text */ }
+    }
+    refresh();
+    setInterval(refresh, 10000);
+})();
+</script>
+{% endif %}{% endblock %}

@@ -74,6 +74,24 @@ def _training_run_migrations(conn):
     _add_columns(conn, 'training_runs', missing)
 
 
+def _remote_table_migrations(conn):
+    """Remote (Runpod) runs and the spend ledger. Queries live in services/remote_store.py."""
+    conn.execute('''CREATE TABLE IF NOT EXISTS remote_runs (
+        run_pk INTEGER PRIMARY KEY, project_name TEXT NOT NULL, run_number INTEGER NOT NULL,
+        provider TEXT NOT NULL, pod_id TEXT, pod_name TEXT NOT NULL,
+        gpu_type TEXT, image TEXT, cost_per_hr REAL,
+        phase TEXT NOT NULL, phase_detail TEXT,
+        ssh_host TEXT, ssh_port INTEGER, key_path TEXT,
+        created_at REAL, deadline_at REAL, last_sync_at REAL, last_accrual_at REAL,
+        stop_reason TEXT, context TEXT, log_offset INTEGER)''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS spend_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, run_pk INTEGER,
+        bucket REAL NOT NULL, amount_usd REAL NOT NULL, source TEXT NOT NULL,
+        UNIQUE(provider, run_pk, bucket, source))''')
+    _add_columns(conn, 'remote_runs', [('log_offset', 'INTEGER')])
+    conn.execute('''CREATE TABLE IF NOT EXISTS instance_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)''')
+
+
 def _pipeline_table_migrations(conn):
     conn.execute('''CREATE TABLE IF NOT EXISTS pipeline_run_counters (
         pipeline_name TEXT PRIMARY KEY, last_number INTEGER NOT NULL)''')
@@ -213,6 +231,7 @@ class DatabaseService:
             conn.execute('''CREATE INDEX IF NOT EXISTS idx_run_queue_project_status
                             ON run_queue(project_name, status)''')
             _pipeline_table_migrations(conn)
+            _remote_table_migrations(conn)
 
             conn.execute('''CREATE TABLE IF NOT EXISTS schema_migrations (
                 name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')

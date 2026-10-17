@@ -26,3 +26,5 @@ softwarespec.md
 docs/superpowers/
 .secret_key
 .ssh/
+secrets/
+runpod_key.txt

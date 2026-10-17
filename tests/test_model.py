@@ -70,6 +70,7 @@ def test_to_dict_contains_all_fields(tmp_path):
         "pinned", "last_run_at", "tb_logs_max_runs", "run_history_max_runs",
         "parallel_runs_enabled", "max_parallel_runs", "output_paths", "created_at",
         "gpu_enabled", "gpu_memory_minimum", "gpu_memory_preferred", "folder",
+        "compute_target", "runpod_gpu_types", "runpod_image", "data_dir_sync",
     }
     assert expected_keys == set(d.keys())
 

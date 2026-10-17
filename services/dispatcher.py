@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 DISPATCH_INTERVAL = 5          # seconds between ticks
 PURGE_INTERVAL = 3600          # seconds between queue-history purges
 QUEUE_RETENTION_DAYS = 30
-TRANSIENT_CODES = {"ALREADY_RUNNING", "AT_CAPACITY", "INSUFFICIENT_VRAM"}
+TRANSIENT_CODES = {"ALREADY_RUNNING", "AT_CAPACITY", "INSUFFICIENT_VRAM", "SOFT_CAP", "NO_GPU_AVAILABLE"}
 
 _thread = None
 _last_purge = 0.0
@@ -96,6 +96,11 @@ def _maybe_purge():
 
 
 def tick(projects_dir, pipelines_dir=None) -> None:
+    try:
+        from services import remote_runs
+        remote_runs.tick()   # spend tally, hard caps, orphan pods; no-op unless Runpod is enabled
+    except Exception:
+        log.exception("Remote run housekeeping failed")
     for name in get_db().projects_with_queued_runs():
         try:
             dispatch_project_queue(projects_dir, name)
