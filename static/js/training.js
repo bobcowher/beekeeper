@@ -31,7 +31,8 @@ const confirmStartBtn = document.getElementById('btn-confirm-start');
 const cancelStartBtn = document.getElementById('btn-cancel-start');
 const confirmQueueBtn = document.getElementById('btn-confirm-queue');
 const startReasonEl = document.getElementById('start-reason');
-const TRANSIENT_REFUSALS = new Set(['ALREADY_RUNNING', 'AT_CAPACITY', 'INSUFFICIENT_VRAM']);
+// Keep in step with dispatcher.TRANSIENT_CODES: refusals the run queue waits out.
+const TRANSIENT_REFUSALS = new Set(['ALREADY_RUNNING', 'AT_CAPACITY', 'INSUFFICIENT_VRAM', 'SOFT_CAP', 'NO_GPU_AVAILABLE']);
 let canStartRefreshInFlight = null;
 let canStartState = null;
 let activeRunCount = 0;

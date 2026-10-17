@@ -189,3 +189,12 @@ def test_gpu_catalog_endpoint(client, config_store, monkeypatch):
     assert data["cloud"] == "COMMUNITY"
     assert [g["id"] for g in data["gpus"]] == ["A", "B"]   # in stock first; no community price, not listed
     assert client.get("/api/v1/compute/runpod/gpus?cloud=moon").status_code == 400
+
+
+def test_ui_queueable_refusals_match_the_dispatcher():
+    """training.js decides when to offer Add to Queue; it must agree with what the queue waits out."""
+    import pathlib, re
+    from services.dispatcher import TRANSIENT_CODES
+    js = pathlib.Path(__file__).parents[1].joinpath("static/js/training.js").read_text()
+    codes = set(re.findall(r"'([A-Z_]+)'", re.search(r"TRANSIENT_REFUSALS = new Set\(\[(.*?)\]\)", js).group(1)))
+    assert codes == TRANSIENT_CODES
