@@ -106,3 +106,86 @@ def test_edit_form_saves_compute_fields(client, app, config_store):
     assert saved["compute_target"] == "runpod"
     assert saved["runpod_gpu_types"] == ["NVIDIA GeForce RTX 4090", "NVIDIA RTX A6000"]
     assert saved["runpod_image"] == "my/image:1" and saved["data_dir_sync"] is True
+
+
+def _origin_repo(tmp_path):
+    import subprocess
+    seed, origin = tmp_path / "seed", tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(seed)], check=True)
+    (seed / "train.py").write_text("print('hi')\n")
+    (seed / "requirements.txt").write_text("this-package-does-not-exist-anywhere==1\n")
+    subprocess.run(["git", "-C", str(seed), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(seed), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "i"], check=True)
+    subprocess.run(["git", "clone", "-q", "--bare", str(seed), str(origin)], check=True)
+    return str(origin)
+
+
+def test_runpod_project_setup_stops_after_clone(client, app, config_store, tmp_path, monkeypatch):
+    """No venv, setup script or pip install here: the requirements would fail if pip ran."""
+    import json, os, time
+    config_store.update({"compute.runpod.enabled": "true"})
+    r = client.post("/api/v1/projects", json={"name": "rp", "git_url": _origin_repo(tmp_path),
+                                              "compute_target": "runpod"})
+    assert r.status_code in (200, 201), r.get_json()
+    path = os.path.join(app.config["PROJECTS_DIR"], "rp", "project.json")
+    deadline = time.time() + 30
+    while json.load(open(path))["setup_status"] not in ("ready", "error") and time.time() < deadline:
+        time.sleep(0.1)
+    saved = json.load(open(path))
+    assert saved["setup_status"] == "ready", saved["setup_error"]
+    assert saved["compute_target"] == "runpod"
+    assert os.path.isfile(os.path.join(app.config["PROJECTS_DIR"], "rp", "workspace", "train.py"))
+    assert not os.path.exists(os.path.join(app.config["PROJECTS_DIR"], "rp", "venv"))
+
+    # No local python needed to pass the start checks (they stop at the missing cap instead).
+    from services import process_manager as pm
+    project, python_bin, error = pm._training_request(app.config["PROJECTS_DIR"], "rp")
+    assert error is None and python_bin is None
+
+
+def test_create_with_compute_target_refused_when_disabled(client, config_store):
+    r = client.post("/api/v1/projects", json={"name": "rp", "git_url": "https://example.com/x.git",
+                                              "compute_target": "runpod"})
+    assert r.status_code == 400 and r.get_json()["error"]["code"] == "RUNPOD_DISABLED"
+
+
+def test_moving_off_runpod_builds_the_local_env(client, app, config_store, monkeypatch):
+    config_store.update({"compute.runpod.enabled": "true"})
+    make_project_dir(app, "p", compute_target="runpod")
+    built = []
+    from services import project_service
+    monkeypatch.setattr(project_service, "build_local_env", lambda d, n: built.append(n))
+    r = client.patch("/api/v1/projects/p", json={"compute_target": "local"})
+    assert r.status_code == 200 and built == ["p"]
+
+    built.clear()
+    r = client.post("/projects/p/edit", data={"branch": "main", "train_file": "train.py", "compute_target": "local"})
+    assert r.status_code == 302 and built == ["p"]   # still no env, so it asks again
+
+
+def test_tensorboard_falls_back_to_beekeepers_own_for_runpod_projects(app, config_store, monkeypatch, tmp_path):
+    import os, sys
+    from services import process_manager as pm
+    config_store.update({"compute.runpod.enabled": "true"})
+    own = os.path.join(os.path.dirname(sys.executable), "tensorboard")
+    monkeypatch.setattr(pm.os.path, "isfile", lambda p: p == own)
+    assert pm._resolve_tensorboard_binary(str(tmp_path), {"name": "p", "compute_target": "runpod"}) == own
+    assert pm._resolve_tensorboard_binary(str(tmp_path), {"name": "p"}) is None
+
+
+def test_gpu_catalog_endpoint(client, config_store, monkeypatch):
+    from services import runpod_client
+    assert client.get("/api/v1/compute/runpod/gpus").status_code == 404   # provider off
+    config_store.update({"compute.runpod.enabled": "true"})
+    assert client.get("/api/v1/compute/runpod/gpus").get_json()["error"]["code"] == "RUNPOD_NOT_CONFIGURED"
+
+    class Fake:
+        def gpu_types(self, cloud):
+            return [{"id": "B", "memory": 24, "availability": "NONE", "price": {"community": 0.10}},
+                    {"id": "A", "memory": 24, "availability": "LOW", "price": {"community": 0.20}},
+                    {"id": "S", "memory": 80, "availability": "HIGH", "price": {"secure": 2.0}}]
+    monkeypatch.setattr(runpod_client, "get_client", lambda: Fake())
+    data = client.get("/api/v1/compute/runpod/gpus").get_json()["data"]
+    assert data["cloud"] == "COMMUNITY"
+    assert [g["id"] for g in data["gpus"]] == ["A", "B"]   # in stock first; no community price, not listed
+    assert client.get("/api/v1/compute/runpod/gpus?cloud=moon").status_code == 400

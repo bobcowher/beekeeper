@@ -37,7 +37,7 @@ from fastmcp import FastMCP
 BEEKEEPER_HOST = os.environ.get("BEEKEEPER_HOST", "http://localhost:5000").rstrip("/")
 BEEKEEPER_API_KEY = os.environ.get("BEEKEEPER_API_KEY", "")
 
-MCP_VERSION = "0.5.0"
+MCP_VERSION = "0.6.0"
 
 mcp = FastMCP("Beekeeper")
 
@@ -159,11 +159,20 @@ def create_project(
     env_type: str = "venv",
     output_paths: list[str] | None = None,
     folder: str | None = None,
+    compute_target: str | None = None,
+    setup_script: str | None = None,
 ) -> dict:
     """
     Create a new project. Setup (clone, env creation, pip install) runs automatically
     in the background. Poll get_project until setup_status == 'ready', or call
     retry_setup to block until done.
+
+    compute_target: "local" (default) or "runpod". Only accepted when Runpod is enabled
+    on the server (get_compute_status succeeds). A Runpod project's setup stops after the
+    clone: no local env is built, since each pod builds its own at run time.
+
+    setup_script: workspace-relative script run before each training start (and at setup
+    for local projects), e.g. "setup.sh" to download a dataset.
 
     output_paths: workspace-relative directories the training script writes to that
     should survive workspace cleanup (e.g. ["saved_models", "exports"]).
@@ -183,6 +192,10 @@ def create_project(
     }
     if folder is not None:
         body["folder"] = folder
+    if compute_target is not None:
+        body["compute_target"] = compute_target
+    if setup_script is not None:
+        body["setup_script"] = setup_script
     return _post("/projects", body)
 
 
@@ -204,6 +217,10 @@ def update_project(
     data_dir_local: str | None = None,
     data_dir_remote: str | None = None,
     folder: str | None = None,
+    compute_target: str | None = None,
+    runpod_gpu_types: list[str] | None = None,
+    runpod_image: str | None = None,
+    data_dir_sync: bool | None = None,
 ) -> dict:
     """
     Update editable settings for an existing project. Only the fields you provide
@@ -239,6 +256,20 @@ def update_project(
 
     Typical script pattern:
       buffer_device = "cpu" if os.environ.get("GPU_OFFLOAD") == "1" else "cuda"
+
+    Runpod (only when the server has Runpod enabled; otherwise these are rejected):
+      compute_target   — "local" or "runpod". Runpod runs rent a pod per run, sync results
+                         back into the normal run folder and terminate the pod. Moving a
+                         project back to "local" builds its local env (setup_status goes
+                         to pending until it's ready).
+      runpod_gpu_types — ordered GPU type ids to try (exact names from list_runpod_gpus);
+                         [] means the pool's list, or the cheapest in-stock card with at
+                         least gpu_memory_minimum MB (16 GB if unset).
+      runpod_image     — container image override; "" means the pool default.
+      data_dir_sync    — upload the data dir to the pod before training. Required when the
+                         project has a data dir; the GPU bills while it uploads.
+    Runpod costs real money. Check get_compute_status for caps and spend before starting
+    Runpod runs, and tell the user what a run is likely to cost.
     """
     body = {}
     if branch is not None:
@@ -271,6 +302,10 @@ def update_project(
         body["data_dir_remote"] = data_dir_remote
     if folder is not None:
         body["folder"] = folder
+    for key, value in (("compute_target", compute_target), ("runpod_gpu_types", runpod_gpu_types),
+                       ("runpod_image", runpod_image), ("data_dir_sync", data_dir_sync)):
+        if value is not None:
+            body[key] = value
     return _patch(f"/projects/{project_name}", body)
 
 
@@ -343,6 +378,14 @@ def start_training(project_name: str, branch: str | None = None,
     (within ~5s) when the project has a free slot. Returns queue_id and position.
     A start refused because the project is busy (error.details.code ALREADY_RUNNING /
     AT_CAPACITY / INSUFFICIENT_VRAM) can be retried with queue=True.
+
+    Runpod projects (compute_target="runpod") start a rented pod, which costs money.
+    Refusals that clear on their own and can be queued: SOFT_CAP (a spend cap was reached;
+    waits for the next day/month) and NO_GPU_AVAILABLE. Refusals that need a settings
+    change: NO_SPEND_CAP, RUNPOD_NOT_CONFIGURED, DATA_DIR_NOT_SYNCED, UPLOAD_TOO_LARGE,
+    REMOTE_CONDA_UNSUPPORTED. While a Runpod run is active, training_status shows a
+    "node" object with gpu_type, phase (provision/upload/prepare/train/finalize) and
+    cost_per_hr.
     """
     body = {}
     if branch:
@@ -721,6 +764,46 @@ def get_capacity() -> dict:
     Also check gpu_platform before picking a PyTorch/JAX build for requirements.txt.
     """
     return _get("/capacity")
+
+
+# ---------------------------------------------------------------------------
+# Compute providers (Runpod)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def get_compute_status() -> dict:
+    """
+    Runpod pool status, if the server has Runpod enabled (404 NOT_FOUND otherwise).
+
+    Returns settings (cloud, GPU list, limits; never the API key), spend for each period
+    (daily, monthly, total) with its soft and hard caps, burn_rate ($/hr of live pods),
+    pods (one per active Runpod run: run_ref, gpu_type, phase, cost_per_hr, spent so far)
+    and recent finished Runpod runs.
+
+    Soft cap reached: no new pods start, running ones continue.
+    Hard cap reached: Beekeeper stops every Runpod run and terminates its pod.
+    """
+    return _get("/compute/runpod")
+
+
+@mcp.tool()
+def list_runpod_gpus(cloud: str | None = None) -> dict:
+    """
+    Runpod GPU types with live availability (NONE/LOW/MEDIUM/HIGH), VRAM and $/hr for the
+    pool's cloud, or cloud="COMMUNITY"/"SECURE". In-stock types come first, cheapest first.
+    Use the exact id values for update_project(runpod_gpu_types=[...]).
+    """
+    return _get("/compute/runpod/gpus" + (f"?cloud={quote(cloud)}" if cloud else ""))
+
+
+@mcp.tool()
+def terminate_pod(pod_name: str) -> dict:
+    """
+    Stop the Runpod run on this pod and terminate it (pod_name from get_compute_status).
+    Results get a short final sync first, so this is like stop_training but also works
+    for a stray pod no run owns. Use stop_training for an ordinary stop.
+    """
+    return _post(f"/compute/runpod/pods/{quote(pod_name)}/terminate")
 
 
 def main():

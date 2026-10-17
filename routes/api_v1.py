@@ -36,7 +36,7 @@ from services.pipeline_schema import (NAME_RE as PIPELINE_NAME_RE, PipelineValid
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
 SERVER_VERSION = "1.1.0"
-MIN_MCP_VERSION = "0.5.0"
+MIN_MCP_VERSION = "0.6.0"
 PROJECT_FILE = "project.json"
 MCP_SERVER_FILE = "mcp_server.py"
 PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -204,6 +204,12 @@ def create_project():
         "output_paths": output_paths,
         "folder": folder,
     }
+    if _COMPUTE_FIELDS.intersection(data):
+        probe = Project(name=name, git_url=git_url)
+        error = _apply_compute_update(probe, data)
+        if error is not None:
+            return error
+        project_data.update({k: getattr(probe, k) for k in _COMPUTE_FIELDS})
 
     # Create the project
     try:
@@ -575,6 +581,9 @@ def update_project_api(name):
     if error is not None:
         return error
     project.save(projects_dir)
+    from routes.project import _start_local_env_if_needed
+    if _start_local_env_if_needed(projects_dir, project.to_dict()):
+        project = load_project(name)   # setup_status is now pending
     return api_response(data={"project": _project_public(project)})
 
 
@@ -595,6 +604,34 @@ def runpod_status_api():
     _require_runpod()
     from services import remote_runs
     return api_response(data=remote_runs.status())
+
+
+@api_v1_bp.route("/compute/runpod/gpus", methods=["GET"])
+@api_key_required
+def runpod_gpus_api():
+    """Runpod GPU types with live stock and price for the pool's cloud (or ?cloud=)."""
+    _require_runpod()
+    from services import runpod_config
+    from services.runpod_client import RunpodError, get_client
+    client = get_client()
+    if client is None:
+        return api_response(error_code="RUNPOD_NOT_CONFIGURED", error_message="Runpod has no API key",
+                            status_code=400)
+    cloud = (request.args.get("cloud") or runpod_config.load().cloud_type).upper()
+    if cloud not in runpod_config.CLOUD_TYPES:
+        return api_response(error_code="INVALID_CLOUD", error_message="cloud must be COMMUNITY or SECURE",
+                            status_code=400)
+    try:
+        catalog = client.gpu_types(cloud)
+    except RunpodError as e:
+        return api_response(error_code="RUNPOD_ERROR", error_message=str(e), status_code=502)
+    key = cloud.lower()
+    gpus = sorted(
+        ({"id": g["id"], "vram_gb": g["memory"], "price_per_hr": (g.get("price") or {}).get(key),
+          "availability": g.get("availability"), "manufacturer": g.get("manufacturer")}
+         for g in catalog if (g.get("price") or {}).get(key)),
+        key=lambda g: (g["availability"] == "NONE", g["price_per_hr"]))
+    return api_response(data={"cloud": cloud, "gpus": gpus})
 
 
 @api_v1_bp.route("/compute/runpod/pods/<pod_name>/terminate", methods=["POST"])
@@ -1976,6 +2013,9 @@ Read both outputs before taking any action.
 | `switch_branch(name, branch)` | Switch branch (training must be stopped) |
 | `get_stats()` | GPU, CPU, RAM stats |
 | `check_busy()` | Is any training currently running? |
+| `get_compute_status()` | Runpod pool: spend vs caps, live pods (when Runpod is enabled) |
+| `list_runpod_gpus(cloud=None)` | Runpod GPU types with stock and price |
+| `terminate_pod(pod_name)` | Stop the run on a Runpod pod and terminate the pod |
 
 `cancel_pipeline` reports the run's true terminal status. If the run finishes while
 the cancellation is being processed, its response status may be `succeeded` or `failed`

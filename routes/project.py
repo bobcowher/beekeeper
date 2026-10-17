@@ -171,6 +171,9 @@ def create():
         "output_paths": output_paths,
         "env_vars": env_vars,
     }
+    from services import runpod_config
+    if runpod_config.enabled() and request.form.get("compute_target") == "runpod":
+        data["compute_target"] = "runpod"
 
     create_project(projects_dir, data)
     return redirect(url_for(_DETAIL_ROUTE, name=name))
@@ -269,6 +272,18 @@ def _apply_compute_settings(project_data):
     project_data["data_dir_sync"] = bool(request.form.get("data_dir_sync"))
 
 
+def _start_local_env_if_needed(projects_dir, project_data) -> bool:
+    """A project that moved off Runpod has no local env yet: build it (keeps the workspace)."""
+    from services import remote_runs
+    from services.project_service import build_local_env, local_env_missing
+    if remote_runs.is_remote(project_data) or project_data.get("setup_status") != "ready":
+        return False
+    if not local_env_missing(projects_dir, project_data):
+        return False
+    build_local_env(projects_dir, project_data["name"])
+    return True
+
+
 def _apply_resource_settings(project_data):
     project_data["parallel_runs_enabled"] = bool(request.form.get("parallel_runs_enabled"))
     project_data["max_parallel_runs"] = _integer_form_value("max_parallel_runs", 2, 2)
@@ -332,6 +347,10 @@ def update(name):
     project = Project(**project_data)
     project.save(projects_dir)
 
+    if _start_local_env_if_needed(projects_dir, project_data):
+        flash("Project settings updated. It runs here now, so Beekeeper is building its environment; "
+              "training is available once setup finishes.", "success")
+        return redirect(url_for(_DETAIL_ROUTE, name=name))
     flash("Project settings updated.", "success")
     return redirect(url_for(_DETAIL_ROUTE, name=name))
 

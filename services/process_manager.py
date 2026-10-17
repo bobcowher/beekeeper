@@ -1,5 +1,6 @@
 import datetime
 import os
+import sys
 import json
 import signal
 import socket
@@ -193,6 +194,11 @@ def _resolve_tensorboard_binary(projects_dir, project):
     tb = os.path.join(projects_dir, project["name"], "venv", "bin", "tensorboard")
     if os.path.isfile(tb):
         return tb
+    if remote_runs.is_remote(project):
+        # Runpod projects have no local env; Beekeeper's own TensorBoard can read the synced logs.
+        own = os.path.join(os.path.dirname(sys.executable), "tensorboard")
+        if os.path.isfile(own):
+            return own
     return None
 
 
@@ -582,6 +588,8 @@ def _training_request(projects_dir, name, extra_env=None):
     ):
         return None, None, {"error": "env_vars must map strings to strings", "code": "INVALID_ENV"}
 
+    if remote_runs.is_remote(project):
+        return project, None, None   # the pod builds its own environment; none is needed here
     python_bin = _resolve_python_binary(projects_dir, project)
     if not python_bin:
         if project.get("env_type") == "conda":

@@ -174,3 +174,26 @@ def test_check_busy_uses_busy_endpoint_and_keeps_capacity(monkeypatch):
     assert result["busy"] is True
     assert result["running_tasks"] == ["factory#2:deploy"]
     assert result["capacity"] == {"running": 0, "available": 2}
+
+
+def test_runpod_tools(calls):
+    server.get_compute_status()
+    assert calls[-1] == ("_get", "/compute/runpod", None)
+    server.list_runpod_gpus()
+    assert calls[-1] == ("_get", "/compute/runpod/gpus", None)
+    server.list_runpod_gpus(cloud="SECURE")
+    assert calls[-1] == ("_get", "/compute/runpod/gpus?cloud=SECURE", None)
+    server.terminate_pod("bk-abc123-p-1")
+    assert calls[-1][:2] == ("_post", "/compute/runpod/pods/bk-abc123-p-1/terminate")
+
+
+def test_runpod_project_fields(calls):
+    server.update_project("p", compute_target="runpod", runpod_gpu_types=["NVIDIA RTX A5000"],
+                          runpod_image="", data_dir_sync=True)
+    assert calls[-1] == ("_patch", "/projects/p", {
+        "compute_target": "runpod", "runpod_gpu_types": ["NVIDIA RTX A5000"],
+        "runpod_image": "", "data_dir_sync": True})
+    server.update_project("p", branch="dev")
+    assert "compute_target" not in calls[-1][2]
+    server.create_project("p", "git@x:y.git", compute_target="runpod", setup_script="setup.sh")
+    assert calls[-1][2]["compute_target"] == "runpod" and calls[-1][2]["setup_script"] == "setup.sh"

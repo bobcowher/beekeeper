@@ -233,6 +233,10 @@ def create_project(projects_dir, data):
         output_paths=data.get("output_paths", []),
         env_vars=data.get("env_vars", {}),
         folder=data.get("folder", ""),
+        compute_target=data.get("compute_target", "local"),
+        runpod_gpu_types=data.get("runpod_gpu_types", []),
+        runpod_image=data.get("runpod_image", ""),
+        data_dir_sync=data.get("data_dir_sync", False),
         created_at=time.time(),
     )
     project.save(projects_dir)
@@ -243,6 +247,25 @@ def create_project(projects_dir, data):
     thread.start()
 
     return project
+
+
+def local_env_missing(projects_dir, project: dict) -> bool:
+    """True when a local project has no environment yet, e.g. it was created for Runpod."""
+    from services.process_manager import _resolve_python_binary
+    return _resolve_python_binary(projects_dir, project) is None
+
+
+def build_local_env(projects_dir, name):
+    """Create the env, run the setup script and pip install for an already-cloned project.
+
+    Used when a project moves from Runpod back to this server. Unlike retry_setup,
+    it keeps the workspace.
+    """
+    project = Project.load(os.path.join(projects_dir, name, PROJECT_CONFIG_FILE))
+    project.setup_status = "pending"
+    project.setup_error = ""
+    project.save(projects_dir)
+    threading.Thread(target=_setup_project, args=(projects_dir, project, True), daemon=True).start()
 
 
 def retry_setup(projects_dir, name):
@@ -296,6 +319,14 @@ def _setup_project(projects_dir, project, is_retry=False):  # NOSONAR — sequen
             except subprocess.TimeoutExpired:
                 _save_status("error", "Git clone timed out (5 min)")
                 return
+
+        # Runpod projects build their environment on the pod at every run;
+        # a local env, setup script and pip install would only cost time and disk.
+        from services import remote_runs
+        if remote_runs.is_remote(project.to_dict()):
+            _save_status("ready")
+            log.info("Setup for %s stops after clone: it runs on Runpod", project.name)
+            return
 
         # --- Create environment (skip if already exists) ---
         if project.env_type == "conda":
