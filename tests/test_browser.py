@@ -1647,7 +1647,7 @@ def test_pipeline_run_page_shows_inherited_line_and_task_run(live_server):
         assert page.locator("[data-step-log]").count() == 0        # a project task's log is its run's
         page.click('#step-chain .step-node:nth-child(2) .step-card')
         body = page.locator("#step-panel-body")
-        assert "Inherited model/ from produce (run-proj-4), 2.1 GB" in body.inner_text()
+        assert "Inherited model from produce (run-proj-4), 2.1 GB" in body.inner_text()
         assert body.locator(".step-inherited a").get_attribute("href") == "/projects/run-proj/history/4/log"
         assert "Task run run-proj-5 succeeded." in body.inner_text()
         assert page.locator("#step-panel-note").inner_text() == "task · run-proj"
