@@ -41,6 +41,51 @@ def test_starts_head_of_queue_with_branch_and_env(app, starts):
     assert entry["run_pk"] == db.get_run("p", 1)["id"]
 
 
+def _step_pk(db):
+    pk, _, _ = db.create_pipeline_run(
+        "pl", {"name": "pl", "steps": [{"name": "s", "type": "train", "project": "p"}]}, {})
+    return db.create_step_run(pk, 0, "s", "train")
+
+
+def test_step_script_and_inherit_reach_start_training(app, monkeypatch):
+    make_project_dir(app, "p")
+    db = get_db()
+    calls = []
+
+    def fake(projects_dir, name, branch=None, extra_env=None, **step):
+        calls.append(step)
+        db.create_training_run(name, {"started_at": datetime.datetime.now(), "status": "starting"})
+        return {"run_id": 1, "run_ref": "p-1", "status": "starting"}
+
+    monkeypatch.setattr(dispatcher.process_manager, "start_training", fake)
+    db.enqueue_step_run(_step_pk(db), "p", None, None, "pipeline:pl#1", launch={
+        "script": "post.py", "inherit": ["ckpt"], "source_run_dir": "/r/run_1",
+        "source_step": "pre", "source_run_ref": "p-0"})
+    tick(app)
+    assert calls == [{"script": "post.py", "inherit": {
+        "paths": ["ckpt"], "source_run_dir": "/r/run_1", "source_step": "pre", "source_run_ref": "p-0"}}]
+
+
+def test_task_entries_go_to_start_task(app, monkeypatch):
+    make_project_dir(app, "p")
+    db = get_db()
+    calls = []
+
+    def fake_task(projects_dir, name, command, timeout_s, inherit=None, extra_env=None):
+        calls.append((name, command, timeout_s, inherit, extra_env))
+        db.create_training_run(name, {"started_at": datetime.datetime.now(), "status": "starting"})
+        return {"run_id": 1, "run_ref": "p-1", "status": "starting"}
+
+    monkeypatch.setattr(dispatcher.process_manager, "start_task", fake_task)
+    monkeypatch.setattr(dispatcher.process_manager, "start_training",
+                        lambda *a, **k: pytest.fail("a task must not start training"))
+    qid = db.enqueue_step_run(_step_pk(db), "p", None, {"A": "1"}, "pipeline:pl#1",
+                              launch={"kind": "task", "command": "make check", "timeout_s": 30})
+    tick(app)
+    assert calls == [("p", "make check", 30, None, {"A": "1"})]
+    assert db.get_queue_entry(qid)["status"] == "started"
+
+
 def test_one_start_per_project_per_tick(app, starts):
     make_project_dir(app, "p")
     get_db().enqueue_run("p")
