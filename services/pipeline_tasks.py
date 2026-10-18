@@ -16,13 +16,17 @@ _tasks: dict[int, dict] = {}   # step_pk -> {"proc", "started", "timeout_s", "lo
 _lock = threading.Lock()
 
 
-def spawn_task(step_pk, command, cwd, env, log_path, timeout_s) -> int:
+def spawn_task(step_pk, command, cwd, env, log_path, timeout_s, preamble=()) -> int:
+    """preamble: extra [beekeeper] lines for the log header, e.g. what the task inherited."""
     os.makedirs(cwd, exist_ok=True)
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
     fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
     try:
         started = datetime.datetime.now().isoformat(timespec="seconds")
-        os.write(fd, f"[beekeeper] Task started {started}\n[beekeeper] Command:\n{command}\n\n".encode())
+        os.write(fd, f"[beekeeper] Task started {started}\n".encode())
+        for line in preamble:
+            os.write(fd, f"{line}\n".encode())
+        os.write(fd, f"[beekeeper] Command:\n{command}\n\n".encode())
         proc = subprocess.Popen(
             ["bash", "-c", command], cwd=cwd, env=env,
             stdout=fd, stderr=subprocess.STDOUT, start_new_session=True,

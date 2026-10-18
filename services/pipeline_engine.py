@@ -7,10 +7,12 @@ import copy
 import datetime
 import logging
 import os
+import shutil
 import threading
 import time
 
-from services import pipeline_tasks, process_manager
+from services import inherit as inherit_service
+from services import pipeline_checks, pipeline_tasks, process_manager
 from services.config_service import get_config_bool
 from services.db_service import get_db
 from services.pipeline_schema import PROJECT_NAME_RE, step_dir_var, valid_branch_name
@@ -46,18 +48,34 @@ def _tasks_enabled() -> bool:
     return get_config_bool(INLINE_TASKS_KEY, True)
 
 
-def _check_runnable(projects_dir, steps):
-    if any(s["type"] == "task" for s in steps) and not _tasks_enabled():
+def _project_step(step) -> bool:
+    """A train step or a project task: it runs as a run of its project, through the project queue."""
+    return step["type"] == "train" or bool(step.get("project"))
+
+
+def _check_errors_message(errors) -> str:
+    return "; ".join(f"{e['path']}: {e['message']}" for e in errors)
+
+
+def _check_runnable(projects_dir, steps, start=0):
+    """Refuse a start (or resume at steps[start]) that can't run. steps is the whole definition."""
+    todo = steps[start:]
+    if any(s["type"] == "task" for s in todo) and not _tasks_enabled():
         raise PipelineError("TASKS_DISABLED", "Inline task steps are disabled by the administrator", 403)
-    invalid = sorted({s["project"] for s in steps if s["type"] == "train"
+    invalid = sorted({s["project"] for s in todo if _project_step(s)
                       and not PROJECT_NAME_RE.fullmatch(s["project"])})
     if invalid:
         raise PipelineError("INVALID_PROJECT_REF",
                             f"Pipeline contains invalid project reference(s): {', '.join(invalid)}")
-    missing = sorted({s["project"] for s in steps if s["type"] == "train"
+    missing = sorted({s["project"] for s in todo if _project_step(s)
                       and not os.path.isfile(os.path.join(projects_dir, s["project"], "project.json"))})
     if missing:
         raise PipelineError("PROJECT_NOT_FOUND", f"Pipeline references missing project(s): {', '.join(missing)}")
+    # Project settings may have changed since the pipeline was saved; fail now, not hours in.
+    errors = pipeline_checks.check_steps(projects_dir, steps, indices=range(start, len(steps)))
+    if errors:
+        code = next((e["error_code"] for e in errors if e.get("error_code")), "INVALID_PIPELINE")
+        raise PipelineError(code, _check_errors_message(errors))
 
 
 def _wake_dispatcher():
@@ -212,7 +230,7 @@ def resume_pipeline_run(projects_dir, pipelines_dir, name, run_number,  # NOSONA
         idx = _resume_index(run, from_step)
         steps = run["definition"]["steps"]
         _check_artifacts(db, run, idx)
-        _check_runnable(projects_dir, steps[idx:])
+        _check_runnable(projects_dir, steps, start=idx)
         db.delete_skipped_steps(run["id"])
         _supersede_after(db, run, idx)
         db.create_step_run(run["id"], idx, steps[idx]["name"], steps[idx]["type"])
@@ -289,13 +307,18 @@ def tick(projects_dir, pipelines_dir) -> None:
             log.exception("Pipeline %s failed to advance", pipeline_ref(run["pipeline_name"], run["run_number"]))
 
 
-def handoff_env(pipelines_dir, run, step_runs, step_index) -> dict:
+def handoff_env(pipelines_dir, run, step_runs, step_index, inherits=False) -> dict:
+    """The BEEKEEPER_PIPELINE_* variables, plus the step-folder variables unless the step inherits (R5)."""
     name, n = run["pipeline_name"], run["run_number"]
     env = {
         "BEEKEEPER_PIPELINE": name,
         "BEEKEEPER_PIPELINE_RUN_ID": str(n),
         "BEEKEEPER_PIPELINE_RUN_DIR": pipeline_run_dir(pipelines_dir, name, n),
     }
+    if inherits:
+        # Its inputs are in its own run folder. Pointing at the others would also make a
+        # Runpod step upload every earlier step's folder for variables it doesn't use.
+        return env
     by_index = {s["step_index"]: s for s in step_runs}
     for i in range(step_index):
         s = by_index.get(i)
@@ -310,6 +333,8 @@ def handoff_env(pipelines_dir, run, step_runs, step_index) -> dict:
 def _describe_train_step(db, step, step_run, view):
     view["project"] = step["project"]
     view["branch"] = step.get("branch")
+    if step.get("script"):
+        view["script"] = step["script"]
     if step_run and step_run["run_pk"]:
         training_run = db.get_training_run(step_run["run_pk"])
         if training_run:
@@ -339,7 +364,11 @@ def _describe_step(db, index, step, step_run):
         "ended_at": step_run["ended_at"] if step_run else None,
         "run_dir": step_run["run_dir"] if step_run else None,
     }
-    if step["type"] == "train":
+    if step.get("inherit"):
+        view["inherit"] = step["inherit"]
+        view["inherited"] = inherit_service.read_manifest(step_run["run_dir"]) \
+            if step_run and step_run["run_dir"] and step_run["status"] != "superseded" else []
+    if _project_step(step):
         _describe_train_step(db, step, step_run, view)
     else:
         view["has_log"] = bool(step_run and step_run["log_path"])
@@ -399,7 +428,7 @@ def _stop_active_step(projects_dir, sr):
             if entry and entry["status"] == "started":
                 _stop_training_run(projects_dir, entry["run_pk"])
     elif sr["status"] == "running":
-        if sr["step_type"] == "train":
+        if sr["run_pk"]:   # a train step or a project task: a run of its project
             _stop_training_run(projects_dir, sr["run_pk"])
         else:
             pipeline_tasks.kill_task(sr["id"])
@@ -417,34 +446,109 @@ def _advance(projects_dir, pipelines_dir, run):
         return
     status = sr["status"]
     if status == "pending":
-        _launch(pipelines_dir, run, step, sr)
+        _launch(projects_dir, pipelines_dir, run, step, sr)
     elif status == "queued":
         _check_queued(projects_dir, run, sr)
-    elif status == "running" and step["type"] == "train":
-        _check_train(run, sr)
+    elif status == "running" and _project_step(step):
+        _check_train(run, step, sr)
     elif status == "running":
         _check_task(run, step, sr)
     else:
         _settle(run, sr)   # finished but the pipeline row wasn't advanced (crash between writes)
 
 
-def _launch(pipelines_dir, run, step, sr):
+def _inherit_source(db, run, idx) -> tuple[dict | None, str | None]:
+    """({source_run_dir, source_step, source_run_ref}, error) for what step idx inherits.
+
+    The source is the live (non-superseded) attempt of the step above, so a resume or a
+    re-run from an earlier step inherits from whatever that step produced last.
+    """
+    prev = _live_step_run(db, run["id"], idx - 1)
+    if prev is None or prev["status"] != "succeeded" or not prev["run_dir"]:
+        return None, "inherit: the previous step has no finished run folder"
+    ref = f"{pipeline_ref(run['pipeline_name'], run['run_number'])}:{prev['step_name']}"
+    if prev["run_pk"]:
+        tr = db.get_training_run(prev["run_pk"])
+        if tr:
+            ref = run_ref(tr["project_name"], tr["run_number"])
+    return {"source_run_dir": prev["run_dir"], "source_step": prev["step_name"], "source_run_ref": ref}, None
+
+
+def _launch_errors(projects_dir, run, idx, step) -> tuple[dict | None, str | None]:
+    """Repeat the save-time checks (settings may have changed) and find the inherit source.
+
+    Returns (source or None, error). Runs before anything is queued or any pod is rented.
+    """
+    errors = pipeline_checks.check_steps(projects_dir, run["definition"]["steps"], indices=[idx])
+    if errors:
+        return None, _check_errors_message(errors)
+    if not step.get("inherit"):
+        return None, None
+    source, error = _inherit_source(get_db(), run, idx)
+    if error:
+        return None, error
+    missing = inherit_service.missing_paths(source["source_run_dir"], step["inherit"])
+    if missing:
+        return None, f"inherit: {missing[0]} not found in {source['source_run_ref']}'s run folder"
+    return source, None
+
+
+def _launch(projects_dir, pipelines_dir, run, step, sr):
     db = get_db()
     idx = run["current_step"]
-    env = handoff_env(pipelines_dir, run, db.list_step_runs(run["id"]), idx)
+    env = handoff_env(pipelines_dir, run, db.list_step_runs(run["id"]), idx, inherits=bool(step.get("inherit")))
+    if _project_step(step):
+        _launch_project_step(projects_dir, run, step, sr, env)
+    else:
+        _launch_task(projects_dir, pipelines_dir, run, step, sr, env)
+
+
+def _launch_project_step(projects_dir, run, step, sr, env):
+    """A train step or a project task: queue a run of the project (R1)."""
+    db = get_db()
     name, n = run["pipeline_name"], run["run_number"]
-    if step["type"] == "train":
-        if not PROJECT_NAME_RE.fullmatch(step["project"]):
-            _finish_step(run, sr, "failed", error=f"invalid project reference: {step['project']!r}")
-            return
-        extra = dict(step.get("env_vars") or {})
-        extra.update(env)
-        # One transaction: a failed step write must not leave an orphan queue entry behind.
-        db.enqueue_step_run(sr["id"], step["project"], step.get("branch"), extra,
-                            f"pipeline:{pipeline_ref(name, n)}")
-        _wake_dispatcher()   # the queue drain ran earlier in this tick; take the entry on the next one now
+    if not PROJECT_NAME_RE.fullmatch(step["project"]):
+        _finish_step(run, sr, "failed", error=f"invalid project reference: {step['project']!r}")
         return
+    if step["type"] == "task" and not _tasks_enabled():
+        _finish_step(run, sr, "failed", error="Inline task steps are disabled by the administrator")
+        return
+    source, error = _launch_errors(projects_dir, run, run["current_step"], step)
+    if error:
+        _finish_step(run, sr, "failed", error=error)
+        return
+    extra = dict(step.get("env_vars") or {})
+    extra.update(env)
+    launch = {"kind": step["type"]}
+    if step["type"] == "train":
+        launch["script"] = step.get("script")
+    else:
+        launch.update(command=step["command"], timeout_s=step["timeout_s"])
+    if source:
+        launch.update(source, inherit=step["inherit"])
+    # One transaction: a failed step write must not leave an orphan queue entry behind.
+    db.enqueue_step_run(sr["id"], step["project"], step.get("branch"), extra,
+                        f"pipeline:{pipeline_ref(name, n)}", launch=launch)
+    _wake_dispatcher()   # the queue drain ran earlier in this tick; take the entry on the next one now
+
+
+def _seed_step_folder(run_dir, step, source) -> list[str]:
+    """A plain task with inherit gets a fresh folder holding just the inherited paths (R4)."""
+    if os.path.isdir(run_dir):
+        shutil.rmtree(run_dir)   # an earlier attempt's folder; nothing else points into it
+    os.makedirs(run_dir)
+    entries = inherit_service.seed_inherited(source["source_run_dir"], run_dir, step["inherit"],
+                                             source["source_step"], source["source_run_ref"])
+    return inherit_service.log_lines(entries)
+
+
+def _launch_task(projects_dir, pipelines_dir, run, step, sr, env):
+    db = get_db()
+    idx = run["current_step"]
+    name, n = run["pipeline_name"], run["run_number"]
     run_dir = env["BEEKEEPER_PIPELINE_RUN_DIR"]
+    if step.get("inherit"):
+        run_dir = os.path.join(run_dir, "steps", step["name"])
     suffix = f"_attempt{sr['attempt']}" if sr["attempt"] > 1 else ""
     log_rel = os.path.join(name, "runs", f"run_{n}", f"step_{idx}_{step['name']}{suffix}.log")
     if sr["id"] in pipeline_tasks.running_task_pks():
@@ -455,11 +559,23 @@ def _launch(pipelines_dir, run, step, sr):
     if not _tasks_enabled():
         _finish_step(run, sr, "failed", error="Inline task steps are disabled by the administrator")
         return
+    source, error = _launch_errors(projects_dir, run, idx, step)
+    if error:
+        _finish_step(run, sr, "failed", error=error)
+        return
+    preamble = []
+    if source:
+        try:
+            preamble = _seed_step_folder(run_dir, step, source)
+        except (inherit_service.InheritError, OSError) as e:
+            _finish_step(run, sr, "failed", error=str(e))
+            return
     proc_env = os.environ.copy()
     proc_env.update(env)
     try:
         pid = pipeline_tasks.spawn_task(sr["id"], step["command"], run_dir, proc_env,
-                                        os.path.join(pipelines_dir, log_rel), step["timeout_s"])
+                                        os.path.join(pipelines_dir, log_rel), step["timeout_s"],
+                                        preamble=preamble)
     except OSError as e:
         _finish_step(run, sr, "failed", error=f"could not start task: {e}")
         return
@@ -485,7 +601,16 @@ def _check_queued(projects_dir, run, sr):
                            run_dir=run_dir, started_at=_now())
 
 
-def _check_train(run, sr):
+def _run_failure(step, tr) -> str:
+    if step["type"] == "task":
+        if tr.get("exit_code") == process_manager.TASK_TIMEOUT_EXIT:
+            return f"timed out after {step['timeout_s']}s"
+        return f"task run {tr['status']}"
+    return f"training run {tr['status']}"
+
+
+def _check_train(run, step, sr):
+    """A running train step or project task: follow its project run."""
     tr = get_db().get_training_run(sr["run_pk"])
     if tr is None:
         _finish_step(run, sr, "failed", error="training run record was deleted")
@@ -495,7 +620,7 @@ def _check_train(run, sr):
         _finish_step(run, sr, "succeeded", exit_code=tr.get("exit_code"))
     elif tr["status"] in ("crashed", "canceled"):
         _not_live_since.pop(sr["id"], None)
-        _finish_step(run, sr, "failed", exit_code=tr.get("exit_code"), error=f"training run {tr['status']}")
+        _finish_step(run, sr, "failed", exit_code=tr.get("exit_code"), error=_run_failure(step, tr))
     elif process_manager.is_run_live(sr["run_pk"]):
         _not_live_since.pop(sr["id"], None)
     else:
