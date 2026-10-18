@@ -623,13 +623,18 @@ class DatabaseService:
 
             return [dict(row) for row in rows]
 
-    def recent_finished_training_runs(self, limit: int = 20) -> list[dict]:
-        """Each project's latest terminal training run, most recent first."""
+    def recent_finished_training_runs(self, limit: int = 20, standalone_only: bool = False) -> list[dict]:
+        """Each project's latest terminal training run, most recent first.
+
+        standalone_only leaves out runs a pipeline step started (the pipeline's own entry covers them).
+        """
+        standalone = ("AND id NOT IN (SELECT run_pk FROM pipeline_step_runs WHERE run_pk IS NOT NULL) "
+                      if standalone_only else "")
         with self._get_connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM (SELECT *, ROW_NUMBER() OVER ("
                 "  PARTITION BY project_name ORDER BY started_at DESC, id DESC) AS rn "
-                "  FROM training_runs WHERE status NOT IN ('running', 'starting')) "
+                f"  FROM training_runs WHERE status NOT IN ('running', 'starting') {standalone}) "
                 "WHERE rn = 1 ORDER BY started_at DESC LIMIT ?", (limit,)
             ).fetchall()
             return [dict(row) for row in rows]

@@ -1,14 +1,19 @@
-// Beekeeper — recent dashboard activity, refreshed while the tab is visible.
+// Beekeeper — dashboard activity: what's running or queued now, then recent runs grouped by day.
 (function () {
-    const runningEl = document.getElementById('running-activity');
-    const queuedEl = document.getElementById('queued-activity');
+    const nowEl = document.getElementById('activity-now');
     const recentEl = document.getElementById('recent-activity');
-    const queuedCard = document.getElementById('queued-activity-card');
     const initialEl = document.getElementById('initial-activity');
-    if (!runningEl || !queuedEl || !recentEl || !initialEl) return;
+    const filterButtons = document.querySelectorAll('.activity-filters button');
+    const failCountEl = document.querySelector('.activity-fail-count');
+    if (!nowEl || !recentEl || !initialEl) return;
+
+    const OK = new Set(['completed', 'succeeded']);
+    const BAD = new Set(['failed', 'crashed', 'lost']);
 
     let timer = null;
     let polling = true;
+    let filter = 'all';
+    let latest = null;
 
     function duration(seconds) {
         if (seconds === null || seconds === undefined) return '—';
@@ -21,29 +26,79 @@
         return `${s}s`;
     }
 
-    function text(tag, className, value) {
-        const el = document.createElement(tag);
-        if (className) el.className = className;
-        el.textContent = value;
-        return el;
+    function money(value) {
+        return '$' + value.toFixed(value < 1 ? 4 : 2);
     }
 
-    function empty(container, message) {
-        container.replaceChildren(text('p', 'muted activity-empty', message));
+    function el(tag, className, value) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (value !== undefined) node.textContent = value;
+        return node;
     }
 
-    function activityRow(item, detail, status) {
-        const link = document.createElement('a');
-        link.className = `activity-row activity-${item.kind === 'pipeline' ? 'pipeline' : 'training'}`;
-        link.href = item.url;
-        const identity = document.createElement('span');
-        identity.className = 'activity-identity';
-        identity.appendChild(text('span', 'activity-kind', item.kind === 'pipeline' ? 'Pipeline' : 'Training'));
-        identity.appendChild(text('span', 'activity-name', item.run_ref));
-        link.appendChild(identity);
-        link.appendChild(text('span', 'activity-detail muted', detail));
-        if (status) link.appendChild(text('span', `status-badge status-${status}`, status));
+    function outcome(status) {
+        if (OK.has(status)) return 'ok';
+        if (BAD.has(status)) return 'bad';
+        return 'neutral';
+    }
+
+    function where(info) {
+        if (!info) return null;
+        return el('span', info.remote ? 'activity-where remote' : 'activity-where', info.label);
+    }
+
+    const STEP_MARK = {succeeded: '✓', failed: '✕', running: '●', queued: '◌', cancelled: '■'};
+
+    function chain(steps) {
+        const box = el('span', 'activity-chain');
+        steps.forEach((step, i) => {
+            if (i) box.appendChild(el('span', 'activity-arrow', '→'));
+            const chip = el('span', `activity-step step-${step.status}`);
+            if (STEP_MARK[step.status]) chip.appendChild(el('span', 'activity-step-mark', STEP_MARK[step.status]));
+            chip.appendChild(document.createTextNode(step.name));
+            const loc = where(step.where);
+            if (loc) chip.appendChild(loc);
+            box.appendChild(chip);
+        });
+        return box;
+    }
+
+    function nameLine(item, ...extras) {
+        const line = el('span', 'activity-line');
+        line.appendChild(el('span', 'activity-name', item.run_ref));
+        extras.filter(Boolean).forEach(extra => line.appendChild(extra));
+        return line;
+    }
+
+    function row(className, href, mark, main, right) {
+        const link = el('a', className);
+        link.href = href;
+        link.appendChild(mark);
+        link.appendChild(main);
+        link.appendChild(right);
         return link;
+    }
+
+    function rightCol(top, bottom) {
+        const box = el('span', 'activity-right');
+        box.appendChild(el('span', 'activity-when', top));
+        if (bottom) box.appendChild(el('span', null, bottom));
+        return box;
+    }
+
+    function liveRow(item) {
+        const main = el('span', 'activity-main');
+        if (item.kind === 'pipeline') {
+            main.appendChild(nameLine(item));
+            main.appendChild(chain(item.steps || []));
+        } else {
+            main.appendChild(nameLine(item, where(item.where), item.branch ? el('span', 'activity-meta', item.branch) : null));
+        }
+        const started = item.status === 'starting' ? 'starting' : `running ${duration(item.elapsed)}`;
+        const cost = item.cost ? `${money(item.cost)} so far` : '';
+        return row(`activity-row live activity-${item.kind}`, item.url, el('span', 'activity-pulse'), main,
+                   rightCol(started, cost));
     }
 
     // A queue entry a pipeline created is shown as that pipeline's run, with the settings
@@ -53,41 +108,113 @@
         const parts = [`${item.branch || 'default branch'}`, `position ${item.position}`];
         if (item.pipeline_ref) parts.unshift(item.project);
         if (env) parts.push(env);
-        const identity = item.pipeline_ref
-            ? {kind: 'pipeline', run_ref: item.pipeline_ref, url: item.pipeline_url}
-            : {kind: 'training', run_ref: item.project, url: item.url};
-        return activityRow(identity, parts.join(' · '), 'queued');
+        const identity = item.pipeline_ref ? {run_ref: item.pipeline_ref} : {run_ref: item.project};
+        const main = el('span', 'activity-main');
+        main.appendChild(nameLine(identity, el('span', 'activity-meta', parts.join(' · '))));
+        return row(`activity-row queued activity-${item.pipeline_ref ? 'pipeline' : 'training'}`,
+                   item.pipeline_ref ? item.pipeline_url : item.url,
+                   el('span', 'activity-pulse'), main, rightCol('queued'));
+    }
+
+    function recentRow(item) {
+        const state = outcome(item.status);
+        const main = el('span', 'activity-main');
+        if (item.kind === 'pipeline') {
+            main.appendChild(nameLine(item));
+            if (item.steps && item.steps.length) main.appendChild(chain(item.steps));
+            if (item.error) main.appendChild(el('span', 'activity-error', item.error));
+        } else {
+            const meta = state === 'ok' ? item.branch : item.status;
+            main.appendChild(nameLine(item, where(item.where), meta ? el('span', 'activity-meta', meta) : null));
+        }
+        const mark = el('span', `activity-mark ${state}`, state === 'ok' ? '✓' : state === 'bad' ? '✕' : '■');
+        mark.title = item.status;
+        const time = item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'}) : '';
+        const detail = [duration(item.duration), item.cost ? money(item.cost) : ''].filter(Boolean).join(' · ');
+        return row(`activity-row activity-${item.kind}${state === 'bad' ? ' bad' : ''}`, item.url, mark, main,
+                   rightCol(time, detail));
+    }
+
+    function dayLabel(date) {
+        const today = new Date();
+        const startOf = d => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        const days = Math.round((startOf(today) - startOf(date)) / 86400000);
+        if (days === 0) return 'Today';
+        if (days === 1) return 'Yesterday';
+        const opts = {weekday: 'short', month: 'short', day: 'numeric'};
+        if (date.getFullYear() !== today.getFullYear()) opts.year = 'numeric';
+        return date.toLocaleDateString([], opts);
+    }
+
+    function dayHeader(label, items) {
+        const failed = items.filter(item => outcome(item.status) === 'bad').length;
+        const spend = items.reduce((sum, item) => sum + (item.cost || 0), 0);
+        const parts = [`${items.length} run${items.length === 1 ? '' : 's'}`];
+        if (failed) parts.push(`${failed} failed`);
+        if (spend) parts.push(`${money(spend)} Runpod`);
+        const head = el('div', 'activity-day');
+        head.appendChild(el('span', null, label));
+        head.appendChild(el('span', null, parts.join(' · ')));
+        return head;
+    }
+
+    function matches(item) {
+        if (filter === 'all') return true;
+        if (filter === 'failed') return outcome(item.status) === 'bad';
+        return item.kind === filter;
+    }
+
+    function renderNow(data) {
+        nowEl.replaceChildren();
+        if (!data.running.length && !data.queued.length) {
+            const idle = el('div', 'activity-idle');
+            idle.appendChild(el('span', 'activity-idle-dot'));
+            idle.appendChild(document.createTextNode('Nothing running or queued.'));
+            nowEl.appendChild(idle);
+            return;
+        }
+        data.running.forEach(item => nowEl.appendChild(liveRow(item)));
+        data.queued.forEach(item => nowEl.appendChild(queuedRow(item)));
+    }
+
+    function renderRecent(data) {
+        recentEl.replaceChildren();
+        const failures = data.recent.filter(item => outcome(item.status) === 'bad').length;
+        if (failCountEl) {
+            failCountEl.hidden = failures === 0;
+            failCountEl.textContent = failures;
+        }
+        const items = data.recent.filter(matches);
+        if (!items.length) {
+            recentEl.appendChild(el('p', 'muted activity-empty',
+                data.recent.length ? 'Nothing matches this filter.' : 'No finished runs yet.'));
+            return;
+        }
+        const days = new Map();
+        items.forEach(item => {
+            const label = item.timestamp ? dayLabel(new Date(item.timestamp)) : 'Earlier';
+            if (!days.has(label)) days.set(label, []);
+            days.get(label).push(item);
+        });
+        days.forEach((dayItems, label) => {
+            recentEl.appendChild(dayHeader(label, dayItems));
+            dayItems.forEach(item => recentEl.appendChild(recentRow(item)));
+        });
     }
 
     function render(data) {
-        runningEl.replaceChildren();
-        if (!data.running.length) {
-            empty(runningEl, 'Nothing is running.');
-        } else {
-            data.running.forEach(item => {
-                let detail = `${item.branch || 'default branch'} · ${duration(item.elapsed)}`;
-                if (item.kind === 'pipeline') {
-                    const step = item.current_step ? `Step: ${item.current_step} · ` : '';
-                    detail = `${step}${duration(item.elapsed)}`;
-                }
-                runningEl.appendChild(activityRow(item, detail, item.status));
-            });
-        }
-
-        queuedEl.replaceChildren();
-        queuedCard.hidden = data.queued.length === 0;
-        data.queued.forEach(item => queuedEl.appendChild(queuedRow(item)));
-
-        recentEl.replaceChildren();
-        if (!data.recent.length) {
-            empty(recentEl, 'No finished runs yet.');
-        } else {
-            data.recent.forEach(item => {
-                const ended = item.timestamp ? new Date(item.timestamp).toLocaleString() : '';
-                recentEl.appendChild(activityRow(item, `${duration(item.duration)} · ${ended}`, item.status));
-            });
-        }
+        latest = data;
+        renderNow(data);
+        renderRecent(data);
     }
+
+    filterButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            filter = button.dataset.filter;
+            filterButtons.forEach(b => b.setAttribute('aria-pressed', String(b === button)));
+            if (latest) renderRecent(latest);
+        });
+    });
 
     async function refresh() {
         if (!polling || document.hidden) return;

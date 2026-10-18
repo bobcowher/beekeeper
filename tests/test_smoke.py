@@ -31,8 +31,7 @@ MOCK_PY_VERSIONS = [
 def test_dashboard_empty(client):
     resp = client.get("/")
     assert resp.status_code == 200
-    assert b"Running now" in resp.data
-    assert b"Recent activity" in resp.data
+    assert b"Activity" in resp.data and b'id="recent-activity"' in resp.data
 
 
 def test_base_layout_shows_deploy_version(client):
@@ -460,6 +459,68 @@ def test_dashboard_shows_pipeline_waiting_on_a_queue_as_queued_not_running(clien
         "project": "trainer", "branch": "exp", "position": 1, "url": "/projects/trainer",
         "pipeline_ref": "tune#1", "pipeline_url": "/pipelines/tune", "env": {"TUNING_NAME": "wsd_seed2"},
     }]
+
+
+def _finished_training_run(db, project, hour, status="completed", **fields):
+    import datetime
+    pk, n = db.create_training_run(project, {
+        "started_at": datetime.datetime(2026, 10, 11, hour, 0), "status": "running", "branch": "main"})
+    db.update_training_run(pk, status=status, ended_at=datetime.datetime(2026, 10, 11, hour, 5),
+                           duration_seconds=300, **fields)
+    return pk, n
+
+
+def test_dashboard_recent_training_says_where_it_ran_and_what_it_cost(client, app):
+    from services import remote_store
+    from services.db_service import get_db
+
+    db = get_db()
+    _finished_training_run(db, "local", 9, gpu_info='["NVIDIA GeForce RTX 5090 (32,607 MiB)"]',
+                           hostname="desk")
+    pk, n = _finished_training_run(db, "remote", 10, hostname="runpod",
+                                   gpu_info='["NVIDIA RTX 4000 SFF Ada Generation (20 GB, Runpod)"]')
+    remote_store.add_spend("runpod", pk, 0, 0.0025)
+
+    recent = {i["run_ref"]: i for i in client.get("/dashboard/activity").get_json()["recent"]}
+
+    assert recent["local-1"]["where"] == {"label": "RTX 5090", "remote": False}
+    assert recent["local-1"]["cost"] is None
+    assert recent["remote-1"]["where"] == {"label": "Runpod RTX 4000 Ada", "remote": True}
+    assert recent["remote-1"]["cost"] == 0.0025
+    assert recent["remote-1"]["branch"] == "main"
+
+
+def test_dashboard_pipeline_row_carries_its_steps_and_hides_their_training_runs(client, app):
+    from services import remote_store
+    from services.db_service import get_db
+
+    db = get_db()
+    _finished_training_run(db, "trainer", 8)                       # a standalone run: still listed
+    run_pk, _ = _finished_training_run(db, "trainer", 9, hostname="runpod",
+                                       gpu_info='["NVIDIA RTX A4000 (16 GB, Runpod)"]')
+    remote_store.add_spend("runpod", run_pk, 0, 0.003)
+    defn = {"name": "fac", "folder": "", "description": "", "steps": [
+        {"name": "train", "type": "train", "project": "trainer", "env_vars": {}},
+        {"name": "export", "type": "task", "command": "false", "timeout_s": 10},
+        {"name": "after", "type": "task", "command": "true", "timeout_s": 10}]}
+    pipe_pk, _, _ = db.create_pipeline_run("fac", defn)
+    s0 = db.create_step_run(pipe_pk, 0, "train", "train")
+    db.update_step_run(s0, status="succeeded", run_pk=run_pk)
+    s1 = db.create_step_run(pipe_pk, 1, "export", "task")
+    db.update_step_run(s1, status="failed", error="exit code 1")
+    db.update_pipeline_run(pipe_pk, status="failed", error="step 'export': exit code 1",
+                           ended_at="2026-10-11T10:00:00")
+
+    recent = client.get("/dashboard/activity").get_json()["recent"]
+
+    assert [i["run_ref"] for i in recent] == ["fac#1", "trainer-1"]
+    pipe = recent[0]
+    assert [(s["name"], s["status"]) for s in pipe["steps"]] == [
+        ("train", "succeeded"), ("export", "failed"), ("after", "skipped")]
+    assert pipe["steps"][0]["where"] == {"label": "Runpod RTX A4000", "remote": True}
+    assert pipe["steps"][1]["where"] is None
+    assert pipe["cost"] == 0.003
+    assert pipe["error"] == "export: exit code 1"
 
 
 def test_new_pipeline_creates_template_and_redirects(client, app):

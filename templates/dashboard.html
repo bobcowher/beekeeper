@@ -14,16 +14,17 @@
 </section>
 {% endif %}
 </div>
-<section class="card activity-card">
-    <h2>Running now</h2>
-    <div id="running-activity" class="activity-list"></div>
-</section>
-<section class="card activity-card" id="queued-activity-card"{% if not activity.queued %} hidden{% endif %}>
-    <h2>Queued</h2>
-    <div id="queued-activity" class="activity-list"></div>
-</section>
-<section class="card activity-card">
-    <h2>Recent activity</h2>
+<section class="card activity-card" id="activity-card">
+    <div class="activity-head">
+        <h2>Activity</h2>
+        <div class="activity-filters" role="group" aria-label="Filter activity">
+            <button type="button" data-filter="all" aria-pressed="true">All</button>
+            <button type="button" data-filter="pipeline" aria-pressed="false">Pipelines</button>
+            <button type="button" data-filter="training" aria-pressed="false">Training</button>
+            <button type="button" data-filter="failed" aria-pressed="false">Failures<span class="activity-fail-count" hidden></span></button>
+        </div>
+    </div>
+    <div id="activity-now" class="activity-now"></div>
     <div id="recent-activity" class="activity-list"></div>
 </section>
 <script id="initial-activity" type="application/json">{{ activity | tojson }}</script>

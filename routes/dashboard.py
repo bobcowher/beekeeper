@@ -1,9 +1,11 @@
 import datetime
+import json
 import os
+import re
 
 from flask import Blueprint, current_app, jsonify, render_template
 
-from services import pipeline_engine
+from services import pipeline_engine, remote_store
 from services.db_service import get_db
 from services.process_manager import get_runs_for_project
 
@@ -18,6 +20,48 @@ def _seconds_between(start, end=None):
     return max(0, int((ended - started).total_seconds()))
 
 
+_GPU_NOISE = re.compile(r"\s*\(.*\)$|\bNVIDIA\s+|\bGeForce\s+|\s+SFF\b|\s+Generation\b")
+
+
+def _where(run: dict | None) -> dict | None:
+    """Short label for the GPU(s) a run used, e.g. "RTX 5090" or "Runpod A4000"."""
+    if not run or not run.get("gpu_info"):
+        return None
+    try:
+        names = json.loads(run["gpu_info"])
+    except (TypeError, ValueError):
+        return None
+    if not names:
+        return None
+    label = " + ".join(_GPU_NOISE.sub("", str(n)).strip() for n in names)
+    remote = run.get("hostname") == "runpod"
+    return {"label": f"Runpod {label}" if remote else label, "remote": remote}
+
+
+def _cost(run: dict | None) -> float | None:
+    if not run or run.get("hostname") != "runpod":
+        return None
+    return round(remote_store.spent_for_run(run["id"]), 4)
+
+
+def _pipeline_steps(db, row, finished: bool) -> tuple[list[dict], str | None, float | None]:
+    """The run's steps for the dashboard chain, the first failure as "step: error", and its Runpod cost."""
+    run_pks = {s["step_index"]: s["run_pk"] for s in db.list_step_runs(row["id"])}
+    steps, error, costs = [], None, []
+    for view in pipeline_engine.describe_run(row)["steps"]:
+        status = view["status"]
+        if finished and status == "pending":
+            status = "skipped"   # never reached: the pipeline stopped before it
+        run = db.get_training_run(run_pks[view["index"]]) if run_pks.get(view["index"]) else None
+        cost = _cost(run)
+        if cost is not None:
+            costs.append(cost)
+        steps.append({"name": view["name"], "type": view["type"], "status": status, "where": _where(run)})
+        if error is None and status == "failed":
+            error = f"{view['name']}: {view.get('error') or 'failed'}"
+    return steps, error, round(sum(costs), 4) if costs else None
+
+
 def _running_training(projects_dir):
     running = []
     if not os.path.isdir(projects_dir):
@@ -26,7 +70,9 @@ def _running_training(projects_dir):
         if not os.path.isfile(os.path.join(projects_dir, name, "project.json")):
             continue
         for run in get_runs_for_project(name):
+            row = get_db().get_run(name, run["run_id"])
             running.append({
+                "where": _where(row), "cost": _cost(row),
                 "kind": "training", "name": name, "run_id": run["run_id"],
                 "run_ref": run["run_ref"], "branch": run.get("branch") or "",
                 "elapsed": run.get("elapsed"), "status": run.get("status", "running"),
@@ -46,7 +92,9 @@ def _running_pipelines(db):
             continue
         index = run.get("current_step", 0)
         step = run["steps"][index] if index < len(run["steps"]) else None
+        steps, _, cost = _pipeline_steps(db, row, finished=False)
         running.append({
+            "steps": steps, "cost": cost,
             "kind": "pipeline", "name": run["pipeline"], "run_id": run["run_id"],
             "run_ref": run["run_ref"], "current_step": step["name"] if step else "",
             "elapsed": _seconds_between(run.get("started_at")), "status": "running",
@@ -70,9 +118,10 @@ def _queued_item(entry):
 
 def _recent_activity(db, active):
     recent = []
-    for run in db.recent_finished_training_runs(limit=20):
+    for run in db.recent_finished_training_runs(limit=20, standalone_only=True):
         if ("training", run["project_name"]) not in active:
             recent.append({
+                "where": _where(run), "cost": _cost(run), "branch": run.get("branch") or "",
                 "kind": "training", "name": run["project_name"], "run_id": run["run_number"],
                 "run_ref": f"{run['project_name']}-{run['run_number']}", "status": run["status"],
                 "duration": run.get("duration_seconds"),
@@ -81,7 +130,9 @@ def _recent_activity(db, active):
             })
     for run in db.recent_finished_pipeline_runs(limit=20):
         if ("pipeline", run["pipeline_name"]) not in active:
+            steps, error, cost = _pipeline_steps(db, run, finished=True)
             recent.append({
+                "steps": steps, "error": error, "cost": cost,
                 "kind": "pipeline", "name": run["pipeline_name"], "run_id": run["run_number"],
                 "run_ref": f"{run['pipeline_name']}#{run['run_number']}",
                 "status": "completed" if run["status"] == "succeeded" else run["status"],

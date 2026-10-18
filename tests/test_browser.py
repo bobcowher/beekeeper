@@ -1415,29 +1415,63 @@ def test_pipeline_waiting_on_a_project_queue_reads_as_waiting(live_server):
 
 
 @pytest.mark.browser
-def test_dashboard_queued_card_names_the_pipeline_and_its_settings(live_server):
+def test_dashboard_activity_shows_live_queued_and_filters_recent(live_server):
     from playwright.sync_api import sync_playwright
 
-    activity = {"running": [], "recent": [], "queued": [
-        {"project": "demo", "branch": "arch-modern-wsd", "position": 1, "url": "/projects/demo",
-         "pipeline_ref": "tune-wsd#1", "pipeline_url": "/pipelines/tune-wsd", "env": {"TUNING_NAME": "wsd_seed2"}},
-        {"project": "demo", "branch": "", "position": 2, "url": "/projects/demo",
-         "pipeline_ref": None, "pipeline_url": None, "env": {}},
-    ]}
+    step = lambda name, status, where=None: {"name": name, "type": "train", "status": status, "where": where}
+    rp = {"label": "Runpod RTX A4000", "remote": True}
+    activity = {
+        "running": [{"kind": "pipeline", "name": "factory", "run_id": 4, "run_ref": "factory#4",
+                     "current_step": "posttrain", "elapsed": 840, "status": "running", "url": "/pipelines/factory",
+                     "cost": 0.031, "steps": [step("pretrain", "succeeded", rp), step("posttrain", "running", rp)]}],
+        "queued": [
+            {"project": "demo", "branch": "arch-modern-wsd", "position": 1, "url": "/projects/demo",
+             "pipeline_ref": "tune-wsd#1", "pipeline_url": "/pipelines/tune-wsd", "env": {"TUNING_NAME": "wsd_seed2"}},
+            {"project": "demo", "branch": "", "position": 2, "url": "/projects/demo",
+             "pipeline_ref": None, "pipeline_url": None, "env": {}},
+        ],
+        "recent": [
+            {"kind": "pipeline", "name": "zz", "run_id": 3, "run_ref": "zz#3", "status": "failed",
+             "duration": 12, "timestamp": "2026-10-11T15:09:49", "url": "/pipelines/zz", "cost": None,
+             "error": "export: exit code 1", "steps": [step("export", "failed"), step("train", "skipped")]},
+            {"kind": "training", "name": "iris", "run_id": 2, "run_ref": "iris-2", "status": "completed",
+             "duration": 82, "timestamp": "2026-10-11T14:00:00", "url": "/projects/iris/history/2/log",
+             "where": rp, "cost": 0.0038, "branch": "main"},
+        ],
+    }
 
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        page = browser.new_page()
+        page = browser.new_page(viewport={"width": 1400, "height": 900})
         errors = []
         page.on("pageerror", lambda err: errors.append(str(err)))
         page.route("**/dashboard/activity", lambda route: route.fulfill(json=activity))
         page.goto(live_server + "/")
-        page.wait_for_function("document.querySelectorAll('#queued-activity .activity-row').length === 2")
-        first, second = page.locator("#queued-activity .activity-row").all()
-        assert first.get_attribute("href") == "/pipelines/tune-wsd"
-        assert "activity-pipeline" in first.get_attribute("class")
-        assert "demo · arch-modern-wsd · position 1 · TUNING_NAME=wsd_seed2" in first.inner_text()
-        assert second.get_attribute("href") == "/projects/demo"
-        page.locator("#queued-activity-card").screenshot(path="/tmp/beekeeper-dashboard-queued.png")
+        # The first render uses the server's own data; wait for the mocked refresh.
+        page.wait_for_function("document.getElementById('activity-now').textContent.includes('factory#4')",
+                               timeout=10000)
+
+        live, first_queued, second_queued = page.locator("#activity-now .activity-row").all()
+        assert "live" in live.get_attribute("class")
+        assert "running 14m 0s" in live.inner_text() and "$0.0310 so far" in live.inner_text()
+        assert "posttrain" in live.locator(".activity-step.step-running").inner_text()
+        assert first_queued.get_attribute("href") == "/pipelines/tune-wsd"
+        assert "activity-pipeline" in first_queued.get_attribute("class")
+        assert "demo · arch-modern-wsd · position 1 · TUNING_NAME=wsd_seed2" in first_queued.inner_text()
+        assert second_queued.get_attribute("href") == "/projects/demo"
+
+        recent = page.locator("#recent-activity")
+        assert recent.locator(".activity-day").count() == 1
+        assert "2 RUNS · 1 FAILED · $0.0038 RUNPOD" in recent.locator(".activity-day").inner_text().upper()
+        failed = recent.locator(".activity-row.bad")
+        assert "export: exit code 1" in failed.inner_text()
+        assert page.locator(".activity-fail-count").inner_text() == "1"
+        page.locator("#activity-card").screenshot(path="/tmp/beekeeper-dashboard-activity.png")
+
+        page.locator('.activity-filters button[data-filter="failed"]').click()
+        assert recent.locator(".activity-row").count() == 1
+        page.locator('.activity-filters button[data-filter="training"]').click()
+        assert recent.locator(".activity-row").all_inner_texts()[0].startswith("✓")
+        assert "iris-2" in recent.inner_text() and "zz#3" not in recent.inner_text()
         assert errors == []
         browser.close()
