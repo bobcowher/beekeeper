@@ -63,20 +63,32 @@ def make_transport(row: dict):
 # Admission
 # ---------------------------------------------------------------------------
 
-def _dir_size(path: str) -> int:
-    hit = _size_cache.get(path)
+def _dir_size(path: str, skip_top: tuple = ()) -> int:
+    key = (path, skip_top)
+    hit = _size_cache.get(key)
     if hit and time.time() - hit[0] < _SIZE_CACHE_TTL:
         return hit[1]
     total = 0
     for root, dirs, files in os.walk(path):
-        dirs[:] = [d for d in dirs if d not in ("venv", "__pycache__")]
+        dirs[:] = [d for d in dirs if d not in ("venv", "__pycache__")
+                   and not (root == path and d in skip_top)]
         for f in files:
             try:
                 total += os.lstat(os.path.join(root, f)).st_size
             except OSError:
                 pass
-    _size_cache[path] = (time.time(), total)
+    _size_cache[key] = (time.time(), total)
     return total
+
+
+# A plain task that inherits works in steps/<task>/ under the pipeline run folder. Later steps
+# get those files through inherit or PREV_STEP_DIR, so the shared folder goes up without them.
+_PIPELINE_DIR_SKIP = ("steps",)
+
+
+def _input_skip(inputs: dict, path: str) -> tuple:
+    pipe = inputs.get("BEEKEEPER_PIPELINE_RUN_DIR")
+    return _PIPELINE_DIR_SKIP if pipe and os.path.realpath(path) == os.path.realpath(pipe) else ()
 
 
 def _input_dirs(extra_env: dict | None) -> dict:
@@ -155,7 +167,7 @@ def precheck(projects_dir: str, name: str, project: dict, extra_env: dict | None
         sizes["data dir"] = _dir_size(data_dir)
     inputs = _input_dirs(extra_env)
     if inputs:
-        sizes["pipeline inputs"] = sum(_dir_size(p) for p in set(inputs.values()))
+        sizes["pipeline inputs"] = sum(_dir_size(p, _input_skip(inputs, p)) for p in set(inputs.values()))
     if inherit and inherit.get("paths"):
         from services.inherit import source_bytes
         sizes["inherited"] = source_bytes(inherit["source_run_dir"], inherit["paths"])
@@ -399,9 +411,11 @@ class RemoteProcess:
             ex.append("/" + ctx["data_dir_local"].strip("/"))
         return ex
 
-    def _push(self, label, local, remote, excludes=None):
+    def _push(self, label, local, remote, excludes=None, skip_top=()):
+        """skip_top: top-level folders left out of the upload (and of its size)."""
         self._check_stop()
-        size = _dir_size(local)
+        size = _dir_size(local, skip_top)
+        excludes = [*(excludes or []), *(f"/{d}/" for d in skip_top)]
         self._detail(f"uploading {label} ({_fmt_gb(size)})")
         self._log(f"Uploading {label}: {_fmt_gb(size)}")
         t = time.time()
@@ -418,7 +432,8 @@ class RemoteProcess:
         targets = input_targets(inputs)
         for key in sorted(inputs):
             if targets[key] == f"/bk/inputs/{key}":   # first key for this folder does the upload
-                self._push(f"pipeline input {key}", inputs[key], targets[key])
+                self._push(f"pipeline input {key}", inputs[key], targets[key],
+                           skip_top=_input_skip(inputs, inputs[key]))
         if ctx.get("inherited"):
             # The seeded run folder: .beekeeper/ and the inherited paths, at the same relative paths.
             self._push("run folder (inherited paths)", ctx["persistent_run_dir"], "/bk/run")

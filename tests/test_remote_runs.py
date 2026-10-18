@@ -314,6 +314,24 @@ def test_pipeline_inputs_are_uploaded_and_env_rewritten(runpod, tmp_path):
     assert "/bk/inputs/BEEKEEPER_STEP_PRETRAIN_DIR pretrained" in text.replace(str(runpod["node"]), "")
 
 
+def test_pipeline_run_dir_upload_skips_task_step_folders(runpod, tmp_path):
+    """steps/<task>/ holds copies a plain task inherited; later steps reach them through inherit
+    or PREV_STEP_DIR, so the shared pipeline folder goes up without them."""
+    app = runpod["app"]
+    pipe = tmp_path / "pipeline_run"
+    (pipe / "steps" / "check" / "model").mkdir(parents=True)
+    (pipe / "steps" / "check" / "model" / "big.npz").write_text("copy")
+    (pipe / "notes.txt").write_text("shared")
+    _git_project(app, tmp_path, train=(
+        "import os\n"
+        "print('pipeline dir has', sorted(os.listdir(os.environ['BEEKEEPER_PIPELINE_RUN_DIR'])))\n"))
+    r = pm.start_training(app.config["PROJECTS_DIR"], "rp",
+                          extra_env={"BEEKEEPER_PIPELINE_RUN_DIR": str(pipe)})
+    run = _wait_done("rp", r["run_id"])
+    assert run["status"] == "completed", _log(app, "rp", r["run_id"])
+    assert "pipeline dir has ['notes.txt']" in _log(app, "rp", r["run_id"])
+
+
 def _inherit_source(tmp_path, size=None):
     src = tmp_path / "pretrain_run"
     (src / "model").mkdir(parents=True)
