@@ -365,9 +365,8 @@ body {
 }
 .activity-filters button[aria-pressed="true"] { background: var(--bg-input); color: var(--text-bright); }
 .activity-filters button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.activity-fail-count { color: var(--danger); margin-left: 4px; }
 
-.activity-now { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.activity-now { display: flex; flex-direction: column; gap: 6px; }
 .activity-idle {
     display: flex; align-items: center; gap: 10px; padding: 8px 12px;
     background: var(--bg-secondary); border-radius: 4px; color: var(--text-secondary); font-size: 13px;
@@ -2358,3 +2357,6 @@ input.invalid, select.invalid, textarea.invalid { border-color: var(--danger); }
 
 .pods-table a { color: var(--accent); text-decoration: none; }
 .pods-table a:hover { text-decoration: underline; }
+
+/* History page */
+.history-more { display: block; margin: 14px auto 0; }

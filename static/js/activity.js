@@ -1,19 +1,12 @@
-// Beekeeper — dashboard activity: what's running or queued now, then recent runs grouped by day.
+// Beekeeper — run activity. The dashboard's Now card polls what's running or queued;
+// the History page lists finished runs grouped by day, a page at a time.
 (function () {
     const nowEl = document.getElementById('activity-now');
-    const recentEl = document.getElementById('recent-activity');
-    const initialEl = document.getElementById('initial-activity');
-    const filterButtons = document.querySelectorAll('.activity-filters button');
-    const failCountEl = document.querySelector('.activity-fail-count');
-    if (!nowEl || !recentEl || !initialEl) return;
+    const historyEl = document.getElementById('history-list');
 
     const OK = new Set(['completed', 'succeeded']);
     const BAD = new Set(['failed', 'crashed', 'lost']);
 
-    let timer = null;
-    let polling = true;
-    let filter = 'all';
-    let latest = null;
 
     function duration(seconds) {
         if (seconds === null || seconds === undefined) return '—';
@@ -158,12 +151,6 @@
         return head;
     }
 
-    function matches(item) {
-        if (filter === 'all') return true;
-        if (filter === 'failed') return outcome(item.status) === 'bad';
-        return item.kind === filter;
-    }
-
     function renderNow(data) {
         nowEl.replaceChildren();
         if (!data.running.length && !data.queued.length) {
@@ -177,17 +164,11 @@
         data.queued.forEach(item => nowEl.appendChild(queuedRow(item)));
     }
 
-    function renderRecent(data) {
-        recentEl.replaceChildren();
-        const failures = data.recent.filter(item => outcome(item.status) === 'bad').length;
-        if (failCountEl) {
-            failCountEl.hidden = failures === 0;
-            failCountEl.textContent = failures;
-        }
-        const items = data.recent.filter(matches);
+    function renderHistory(items, filter) {
+        historyEl.replaceChildren();
         if (!items.length) {
-            recentEl.appendChild(el('p', 'muted activity-empty',
-                data.recent.length ? 'Nothing matches this filter.' : 'No finished runs yet.'));
+            historyEl.appendChild(el('p', 'muted activity-empty',
+                filter === 'all' ? 'No finished runs yet.' : 'Nothing matches this filter.'));
             return;
         }
         const days = new Map();
@@ -197,63 +178,106 @@
             days.get(label).push(item);
         });
         days.forEach((dayItems, label) => {
-            recentEl.appendChild(dayHeader(label, dayItems));
-            dayItems.forEach(item => recentEl.appendChild(recentRow(item)));
+            historyEl.appendChild(dayHeader(label, dayItems));
+            dayItems.forEach(item => historyEl.appendChild(recentRow(item)));
         });
     }
 
-    function render(data) {
-        latest = data;
-        renderNow(data);
-        renderRecent(data);
-    }
+    function initNow() {
+        const initialEl = document.getElementById('initial-activity');
+        let timer = null;
+        let polling = true;
 
-    filterButtons.forEach(button => {
-        button.addEventListener('click', () => {
-            filter = button.dataset.filter;
-            filterButtons.forEach(b => b.setAttribute('aria-pressed', String(b === button)));
-            if (latest) renderRecent(latest);
+        async function refresh() {
+            if (!polling || document.hidden) return;
+            try {
+                const response = await fetch('/dashboard/activity');
+                if (response.ok) renderNow(await response.json());
+            } catch (error) {
+                console.warn('Could not refresh dashboard activity:', error);
+            }
+        }
+
+        function schedule() {
+            if (timer !== null) window.clearTimeout(timer);
+            if (!polling || document.hidden) return;
+            timer = window.setTimeout(async () => {
+                await refresh();
+                schedule();
+            }, 5000);
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden && timer !== null) {
+                window.clearTimeout(timer);
+                timer = null;
+            } else if (!document.hidden) {
+                void refresh().finally(schedule);
+            }
         });
-    });
+        window.addEventListener('pagehide', () => {
+            polling = false;
+            if (timer !== null) window.clearTimeout(timer);
+        });
+        window.addEventListener('pageshow', event => {
+            if (event.persisted) {
+                polling = true;
+                void refresh().finally(schedule);
+            }
+        });
 
-    async function refresh() {
-        if (!polling || document.hidden) return;
-        try {
-            const response = await fetch('/dashboard/activity');
-            if (response.ok) render(await response.json());
-        } catch (error) {
-            console.warn('Could not refresh dashboard activity:', error);
-        }
+        renderNow(JSON.parse(initialEl.textContent));
+        schedule();
     }
 
-    function schedule() {
-        if (timer !== null) window.clearTimeout(timer);
-        if (!polling || document.hidden) return;
-        timer = window.setTimeout(async () => {
-            await refresh();
-            schedule();
-        }, 5000);
+    function initHistory() {
+        const initial = JSON.parse(document.getElementById('initial-history').textContent);
+        const moreButton = document.getElementById('history-more');
+        const filterButtons = document.querySelectorAll('.activity-filters button');
+        let filter = initial.filter;
+        let items = initial.page.items;
+        let next = initial.page.next;
+        let request = 0;   // a newer filter click wins over an older page still loading
+
+        function show() {
+            renderHistory(items, filter);
+            moreButton.hidden = !next;
+        }
+
+        async function load(before) {
+            const mine = ++request;
+            const params = new URLSearchParams({filter});
+            if (before) params.set('before', before);
+            moreButton.disabled = true;
+            try {
+                const response = await fetch(`/history/data?${params}`);
+                if (!response.ok || mine !== request) return;
+                const page = await response.json();
+                items = before ? items.concat(page.items) : page.items;
+                next = page.next;
+                show();
+            } catch (error) {
+                console.warn('Could not load history:', error);
+            } finally {
+                moreButton.disabled = false;
+            }
+        }
+
+        filterButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                filter = button.dataset.filter;
+                filterButtons.forEach(b => b.setAttribute('aria-pressed', String(b === button)));
+                const url = new URL(window.location.href);
+                if (filter === 'all') url.searchParams.delete('filter');
+                else url.searchParams.set('filter', filter);
+                window.history.replaceState(null, '', url);
+                void load(null);
+            });
+        });
+        moreButton.addEventListener('click', () => void load(next));
+        show();
     }
 
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden && timer !== null) {
-            window.clearTimeout(timer);
-            timer = null;
-        } else if (!document.hidden) {
-            void refresh().finally(schedule);
-        }
-    });
-    window.addEventListener('pagehide', () => {
-        polling = false;
-        if (timer !== null) window.clearTimeout(timer);
-    });
-    window.addEventListener('pageshow', event => {
-        if (event.persisted) {
-            polling = true;
-            void refresh().finally(schedule);
-        }
-    });
-
-    render(JSON.parse(initialEl.textContent));
-    schedule();
+    if (nowEl) initNow();
+    if (historyEl) initHistory();
 })();

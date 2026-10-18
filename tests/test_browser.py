@@ -1414,29 +1414,25 @@ def test_pipeline_waiting_on_a_project_queue_reads_as_waiting(live_server):
         browser.close()
 
 
+def _activity_step(name, status, where=None):
+    return {"name": name, "type": "train", "status": status, "where": where}
+
+
 @pytest.mark.browser
-def test_dashboard_activity_shows_live_queued_and_filters_recent(live_server):
+def test_dashboard_now_card_shows_live_and_queued_runs(live_server):
     from playwright.sync_api import sync_playwright
 
-    step = lambda name, status, where=None: {"name": name, "type": "train", "status": status, "where": where}
     rp = {"label": "Runpod RTX A4000", "remote": True}
     activity = {
         "running": [{"kind": "pipeline", "name": "factory", "run_id": 4, "run_ref": "factory#4",
                      "current_step": "posttrain", "elapsed": 840, "status": "running", "url": "/pipelines/factory",
-                     "cost": 0.031, "steps": [step("pretrain", "succeeded", rp), step("posttrain", "running", rp)]}],
+                     "cost": 0.031, "steps": [_activity_step("pretrain", "succeeded", rp),
+                                              _activity_step("posttrain", "running", rp)]}],
         "queued": [
             {"project": "demo", "branch": "arch-modern-wsd", "position": 1, "url": "/projects/demo",
              "pipeline_ref": "tune-wsd#1", "pipeline_url": "/pipelines/tune-wsd", "env": {"TUNING_NAME": "wsd_seed2"}},
             {"project": "demo", "branch": "", "position": 2, "url": "/projects/demo",
              "pipeline_ref": None, "pipeline_url": None, "env": {}},
-        ],
-        "recent": [
-            {"kind": "pipeline", "name": "zz", "run_id": 3, "run_ref": "zz#3", "status": "failed",
-             "duration": 12, "timestamp": "2026-10-11T15:09:49", "url": "/pipelines/zz", "cost": None,
-             "error": "export: exit code 1", "steps": [step("export", "failed"), step("train", "skipped")]},
-            {"kind": "training", "name": "iris", "run_id": 2, "run_ref": "iris-2", "status": "completed",
-             "duration": 82, "timestamp": "2026-10-11T14:00:00", "url": "/projects/iris/history/2/log",
-             "where": rp, "cost": 0.0038, "branch": "main"},
         ],
     }
 
@@ -1459,19 +1455,63 @@ def test_dashboard_activity_shows_live_queued_and_filters_recent(live_server):
         assert "activity-pipeline" in first_queued.get_attribute("class")
         assert "demo · arch-modern-wsd · position 1 · TUNING_NAME=wsd_seed2" in first_queued.inner_text()
         assert second_queued.get_attribute("href") == "/projects/demo"
+        assert page.locator("#now-card a.card-link").get_attribute("href") == "/history"
+        page.locator("#now-card").screenshot(path="/tmp/beekeeper-dashboard-now.png")
+        assert errors == []
+        browser.close()
 
-        recent = page.locator("#recent-activity")
-        assert recent.locator(".activity-day").count() == 1
-        assert "2 RUNS · 1 FAILED · $0.0038 RUNPOD" in recent.locator(".activity-day").inner_text().upper()
-        failed = recent.locator(".activity-row.bad")
-        assert "export: exit code 1" in failed.inner_text()
-        assert page.locator(".activity-fail-count").inner_text() == "1"
-        page.locator("#activity-card").screenshot(path="/tmp/beekeeper-dashboard-activity.png")
+
+@pytest.mark.browser
+def test_history_groups_by_day_filters_and_pages(live_server):
+    from playwright.sync_api import sync_playwright
+
+    rp = {"label": "Runpod RTX A4000", "remote": True}
+    failed = {"kind": "pipeline", "name": "zz", "run_id": 3, "run_ref": "zz#3", "status": "failed",
+              "duration": 12, "timestamp": "2026-10-11T15:09:49", "url": "/pipelines/zz", "cost": None,
+              "error": "export: exit code 1",
+              "steps": [_activity_step("export", "failed"), _activity_step("train", "skipped")]}
+    done = {"kind": "training", "name": "iris", "run_id": 2, "run_ref": "iris-2", "status": "completed",
+            "duration": 82, "timestamp": "2026-10-11T14:00:00", "url": "/projects/iris/history/2/log",
+            "where": rp, "cost": 0.0038, "branch": "main"}
+    older = dict(done, run_id=1, run_ref="iris-1", timestamp="2026-10-09T10:00:00")
+    requests = []
+
+    def history_data(route):
+        requests.append(route.request.url)
+        url = route.request.url
+        if "filter=failed" in url:
+            route.fulfill(json={"items": [failed], "next": None})
+        elif "before=" in url:
+            route.fulfill(json={"items": [older], "next": None})
+        else:
+            route.fulfill(json={"items": [failed, done], "next": done["timestamp"]})
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1400, "height": 900})
+        errors = []
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        page.route("**/history/data*", history_data)
+        page.goto(live_server + "/history")
+        assert page.locator("nav a[href='/history']").get_attribute("class") == "active"
+
+        # Load the mocked first page through the All filter, then page on from it.
+        page.locator('.activity-filters button[data-filter="all"]').click()
+        page.wait_for_function("document.getElementById('history-list').textContent.includes('zz#3')")
+        days = page.locator("#history-list .activity-day")
+        assert days.count() == 1
+        assert "2 RUNS · 1 FAILED · $0.0038 RUNPOD" in days.inner_text().upper()
+        assert "export: exit code 1" in page.locator("#history-list .activity-row.bad").inner_text()
+
+        page.locator("#history-more").click()
+        page.wait_for_function("document.getElementById('history-list').textContent.includes('iris-1')")
+        assert days.count() == 2
+        assert page.locator("#history-more").is_hidden()
+        assert any("before=2026-10-11T14%3A00%3A00" in u for u in requests)
+        page.locator("#history-card").screenshot(path="/tmp/beekeeper-history.png")
 
         page.locator('.activity-filters button[data-filter="failed"]').click()
-        assert recent.locator(".activity-row").count() == 1
-        page.locator('.activity-filters button[data-filter="training"]').click()
-        assert recent.locator(".activity-row").all_inner_texts()[0].startswith("✓")
-        assert "iris-2" in recent.inner_text() and "zz#3" not in recent.inner_text()
+        page.wait_for_function("document.querySelectorAll('#history-list .activity-row').length === 1")
+        assert page.url.endswith("/history?filter=failed")
         assert errors == []
         browser.close()

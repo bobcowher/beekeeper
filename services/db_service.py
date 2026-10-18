@@ -623,19 +623,22 @@ class DatabaseService:
 
             return [dict(row) for row in rows]
 
-    def recent_finished_training_runs(self, limit: int = 20, standalone_only: bool = False) -> list[dict]:
-        """Each project's latest terminal training run, most recent first.
-
-        standalone_only leaves out runs a pipeline step started (the pipeline's own entry covers them).
-        """
-        standalone = ("AND id NOT IN (SELECT run_pk FROM pipeline_step_runs WHERE run_pk IS NOT NULL) "
-                      if standalone_only else "")
+    def finished_training_runs(self, limit: int = 50, before: str | None = None,
+                               failed_only: bool = False) -> list[dict]:
+        """Finished standalone training runs, newest first. Runs a pipeline step started are left out:
+        the pipeline run's own row covers them. before is an ISO time from an earlier page."""
+        where = ["status NOT IN ('running', 'starting')",
+                 "id NOT IN (SELECT run_pk FROM pipeline_step_runs WHERE run_pk IS NOT NULL)"]
+        params: list = []
+        if failed_only:
+            where.append("status IN ('failed', 'crashed')")
+        if before:
+            where.append("COALESCE(ended_at, started_at) < ?")
+            params.append(before)
         with self._get_connection() as conn:
             rows = conn.execute(
-                "SELECT * FROM (SELECT *, ROW_NUMBER() OVER ("
-                "  PARTITION BY project_name ORDER BY started_at DESC, id DESC) AS rn "
-                f"  FROM training_runs WHERE status NOT IN ('running', 'starting') {standalone}) "
-                "WHERE rn = 1 ORDER BY started_at DESC LIMIT ?", (limit,)
+                f"SELECT * FROM training_runs WHERE {' AND '.join(where)} "
+                "ORDER BY COALESCE(ended_at, started_at) DESC, id DESC LIMIT ?", (*params, limit)
             ).fetchall()
             return [dict(row) for row in rows]
 
@@ -991,6 +994,24 @@ class DatabaseService:
                 "  FROM pipeline_runs r WHERE status NOT IN ('running', 'queued') "
                 "  AND EXISTS (SELECT 1 FROM pipeline_step_runs s WHERE s.pipeline_run_pk = r.id)) "
                 "WHERE rn = 1 ORDER BY started_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+            return [self._pipeline_row(r) for r in rows]
+
+    def finished_pipeline_runs(self, limit: int = 50, before: str | None = None,
+                               failed_only: bool = False) -> list[dict]:
+        """Finished pipeline runs that ran at least one step, newest first."""
+        where = ["status NOT IN ('running', 'queued')",
+                 "EXISTS (SELECT 1 FROM pipeline_step_runs s WHERE s.pipeline_run_pk = r.id)"]
+        params: list = []
+        if failed_only:
+            where.append("status = 'failed'")
+        if before:
+            where.append("COALESCE(ended_at, started_at) < ?")
+            params.append(before)
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM pipeline_runs r WHERE {' AND '.join(where)} "
+                "ORDER BY COALESCE(ended_at, started_at) DESC, id DESC LIMIT ?", (*params, limit)
             ).fetchall()
             return [self._pipeline_row(r) for r in rows]
 

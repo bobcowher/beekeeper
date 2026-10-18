@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Beekeeper - History{% endblock %}
+{% block content %}
+<div class="page-header"><h1>History</h1></div>
+<section class="card activity-card" id="history-card">
+    <div class="activity-head">
+        <h2>Finished runs</h2>
+        <div class="activity-filters" role="group" aria-label="Filter history">
+            {% for value, label in [("all", "All"), ("pipeline", "Pipelines"), ("training", "Training"), ("failed", "Failures")] %}
+            <button type="button" data-filter="{{ value }}" aria-pressed="{{ 'true' if filter == value else 'false' }}">{{ label }}</button>
+            {% endfor %}
+        </div>
+    </div>
+    <div id="history-list" class="activity-list"></div>
+    <button type="button" id="history-more" class="btn btn-secondary history-more" hidden>Show more</button>
+</section>
+<script id="initial-history" type="application/json">{{ {"filter": filter, "page": page} | tojson }}</script>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/activity.js') }}"></script>{% endblock %}

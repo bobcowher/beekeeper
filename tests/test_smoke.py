@@ -31,7 +31,7 @@ MOCK_PY_VERSIONS = [
 def test_dashboard_empty(client):
     resp = client.get("/")
     assert resp.status_code == 200
-    assert b"Activity" in resp.data and b'id="recent-activity"' in resp.data
+    assert b'id="activity-now"' in resp.data and b'href="/history"' in resp.data
 
 
 def test_base_layout_shows_deploy_version(client):
@@ -371,11 +371,13 @@ def test_dashboard_activity_merges_recent_runs_and_queue(client, app):
         "project": "myproject", "branch": "dev", "position": 1,
         "url": "/projects/myproject", "pipeline_ref": None, "pipeline_url": None, "env": {},
     }
-    assert [item["run_ref"] for item in data["recent"]] == ["fac#1", "myproject-1"]
-    assert [item["status"] for item in data["recent"]] == ["failed", "completed"]
+    assert "recent" not in data
+    history = client.get("/history/data").get_json()["items"]
+    assert [item["run_ref"] for item in history] == ["fac#1", "myproject-1"]
+    assert [item["status"] for item in history] == ["failed", "completed"]
 
 
-def test_dashboard_recent_activity_shows_each_project_and_pipeline_once(client, app):
+def test_history_lists_every_finished_run_newest_first(client, app):
     import datetime
     from services.db_service import get_db
 
@@ -395,10 +397,11 @@ def test_dashboard_recent_activity_shows_each_project_and_pipeline_once(client, 
         run_pk, _, _ = db.create_pipeline_run("fac", defn)
         db.update_pipeline_run(run_pk, status="succeeded", ended_at=datetime.datetime.now().isoformat())
 
-    recent = client.get("/dashboard/activity").get_json()["recent"]
+    items = client.get("/history/data").get_json()["items"]
 
-    assert [item["run_ref"] for item in recent] == ["fac#3", "myproject-3", "other-1"]
-    assert recent[1]["status"] == "crashed"
+    assert [item["run_ref"] for item in items] == [
+        "fac#3", "fac#2", "fac#1", "myproject-3", "myproject-2", "myproject-1", "other-1"]
+    assert items[3]["status"] == "crashed"
 
 
 def test_dashboard_activity_reports_live_training_and_pipeline_step(client, app):
@@ -437,8 +440,8 @@ def test_dashboard_activity_excludes_queued_pipeline_runs(client, app):
     data = client.get("/dashboard/activity").get_json()
 
     assert all(item["run_ref"] != "fac#2" for item in data["running"])
-    assert all(item["run_ref"] != "fac#2" for item in data["recent"])
-    assert any(item["run_ref"] == "fac#1" for item in data["recent"])
+    history = client.get("/history/data").get_json()["items"]
+    assert [item["run_ref"] for item in history] == ["fac#1"]
 
 
 def test_dashboard_shows_pipeline_waiting_on_a_queue_as_queued_not_running(client, app):
@@ -454,7 +457,7 @@ def test_dashboard_shows_pipeline_waiting_on_a_queue_as_queued_not_running(clien
     data = client.get("/dashboard/activity").get_json()
 
     assert all(item["run_ref"] != "tune#1" for item in data["running"])
-    assert all(item["run_ref"] != "tune#1" for item in data["recent"])
+    assert all(item["run_ref"] != "tune#1" for item in client.get("/history/data").get_json()["items"])
     assert data["queued"] == [{
         "project": "trainer", "branch": "exp", "position": 1, "url": "/projects/trainer",
         "pipeline_ref": "tune#1", "pipeline_url": "/pipelines/tune", "env": {"TUNING_NAME": "wsd_seed2"},
@@ -470,7 +473,7 @@ def _finished_training_run(db, project, hour, status="completed", **fields):
     return pk, n
 
 
-def test_dashboard_recent_training_says_where_it_ran_and_what_it_cost(client, app):
+def test_history_training_says_where_it_ran_and_what_it_cost(client, app):
     from services import remote_store
     from services.db_service import get_db
 
@@ -481,7 +484,7 @@ def test_dashboard_recent_training_says_where_it_ran_and_what_it_cost(client, ap
                                    gpu_info='["NVIDIA RTX 4000 SFF Ada Generation (20 GB, Runpod)"]')
     remote_store.add_spend("runpod", pk, 0, 0.0025)
 
-    recent = {i["run_ref"]: i for i in client.get("/dashboard/activity").get_json()["recent"]}
+    recent = {i["run_ref"]: i for i in client.get("/history/data").get_json()["items"]}
 
     assert recent["local-1"]["where"] == {"label": "RTX 5090", "remote": False}
     assert recent["local-1"]["cost"] is None
@@ -490,7 +493,7 @@ def test_dashboard_recent_training_says_where_it_ran_and_what_it_cost(client, ap
     assert recent["remote-1"]["branch"] == "main"
 
 
-def test_dashboard_pipeline_row_carries_its_steps_and_hides_their_training_runs(client, app):
+def test_history_pipeline_row_carries_its_steps_and_hides_their_training_runs(client, app):
     from services import remote_store
     from services.db_service import get_db
 
@@ -511,7 +514,7 @@ def test_dashboard_pipeline_row_carries_its_steps_and_hides_their_training_runs(
     db.update_pipeline_run(pipe_pk, status="failed", error="step 'export': exit code 1",
                            ended_at="2026-10-11T10:00:00")
 
-    recent = client.get("/dashboard/activity").get_json()["recent"]
+    recent = client.get("/history/data").get_json()["items"]
 
     assert [i["run_ref"] for i in recent] == ["fac#1", "trainer-1"]
     pipe = recent[0]
@@ -521,6 +524,27 @@ def test_dashboard_pipeline_row_carries_its_steps_and_hides_their_training_runs(
     assert pipe["steps"][1]["where"] is None
     assert pipe["cost"] == 0.003
     assert pipe["error"] == "export: exit code 1"
+
+
+def test_history_pages_with_a_cursor_and_filters_server_side(client, app, monkeypatch):
+    from routes import history
+    from services.db_service import get_db
+
+    monkeypatch.setattr(history, "PAGE_SIZE", 2)
+    db = get_db()
+    for hour in (8, 9, 10):
+        _finished_training_run(db, "p", hour, status="crashed" if hour == 8 else "completed")
+
+    first = client.get("/history/data").get_json()
+    assert [i["run_ref"] for i in first["items"]] == ["p-3", "p-2"]
+    second = client.get(f"/history/data?before={first['next']}").get_json()
+    assert [i["run_ref"] for i in second["items"]] == ["p-1"] and second["next"] is None
+
+    failed = client.get("/history/data?filter=failed").get_json()
+    assert [i["run_ref"] for i in failed["items"]] == ["p-1"]
+    assert client.get("/history/data?filter=pipeline").get_json()["items"] == []
+    page = client.get("/history?filter=failed")
+    assert page.status_code == 200 and b'"filter": "failed"' in page.data
 
 
 def test_new_pipeline_creates_template_and_redirects(client, app):

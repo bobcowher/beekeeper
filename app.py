@@ -116,6 +116,7 @@ def create_app(test_config=None):
     from routes.auth import auth_bp
     from routes.admin import admin_bp
     from routes.pipelines import pipelines_bp
+    from routes.history import history_bp
     from routes.compute import compute_bp
 
     app.register_blueprint(dashboard_bp)
@@ -128,6 +129,7 @@ def create_app(test_config=None):
     app.register_blueprint(auth_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(pipelines_bp)
+    app.register_blueprint(history_bp)
     app.register_blueprint(compute_bp)
 
     # Register middleware
