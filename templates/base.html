@@ -18,7 +18,7 @@
                 <li><a href="/" class="{% if request.path == '/' %}active{% endif %}">Dashboard</a></li>
                 <li><a href="/projects" class="{% if request.path.startswith('/projects') %}active{% endif %}">Projects</a></li>
                 <li><a href="/pipelines" class="{% if request.path.startswith('/pipelines') %}active{% endif %}">Pipelines</a></li>
-                <li><a href="/history" class="{% if request.path.startswith('/history') %}active{% endif %}">History</a></li>
+                <li><a href="/history" class="{% if request.path.startswith('/history') %}active{% endif %}">Run History</a></li>
                 {% if runpod_enabled %}
                 <li><a href="/nodes" class="{% if request.path.startswith('/nodes') %}active{% endif %}">Nodes</a></li>
                 {% endif %}
