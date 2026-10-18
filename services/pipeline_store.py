@@ -66,14 +66,25 @@ def list_pipelines(pipelines_dir) -> list[dict]:
     return out
 
 
-def save_pipeline_text(pipelines_dir, name, text) -> dict:
-    defn = validate(parse_text(text), expected_name=name)
+def validate_with_projects(data, projects_dir=None, expected_name=None) -> dict:
+    """Schema validation, then (with projects_dir) the checks that read project settings."""
+    defn = validate(data, expected_name=expected_name)
+    if projects_dir is not None:
+        from services.pipeline_checks import check_steps
+        errors = check_steps(projects_dir, defn["steps"])
+        if errors:
+            raise PipelineValidationError(errors)
+    return defn
+
+
+def save_pipeline_text(pipelines_dir, name, text, projects_dir=None) -> dict:
+    defn = validate_with_projects(parse_text(text), projects_dir, expected_name=name)
     _atomic_write(_path(pipelines_dir, name), text)
     return defn
 
 
-def save_pipeline(pipelines_dir, defn, expected_name=None) -> dict:
-    defn = validate(defn, expected_name=expected_name)
+def save_pipeline(pipelines_dir, defn, expected_name=None, projects_dir=None) -> dict:
+    defn = validate_with_projects(defn, projects_dir, expected_name=expected_name)
     _atomic_write(_path(pipelines_dir, defn["name"]), to_yaml(defn))
     return defn
 
