@@ -18,6 +18,7 @@ from services.run_refs import run_ref
 from services.run_folder_migration import archive_pk_named_log
 from services.run_storage_service import MARKER, delete_run_storage, persistent_runs_root
 from services.stats_service import get_gpu_stats
+from services import inherit as inherit_service
 from services import remote_runs
 
 log = logging.getLogger(__name__)
@@ -655,11 +656,41 @@ def can_start_training(projects_dir, name):
     return {"can_start": True, "code": None, "message": "Ready to start"}
 
 
-def start_training(projects_dir, name, branch=None, extra_env=None):  # NOSONAR — sequential pre-launch pipeline
-    """Validate, reserve a training slot, and launch the pre-launch sequence in background."""
+def _step_request(project, script, inherit):
+    """Check a pipeline step's script and inherited paths. Returns (project, error).
+
+    inherit is {"paths", "source_run_dir", "source_step", "source_run_ref"} or None.
+    The returned project has train_file replaced by script, so the header, the launch
+    and a remote run all use it.
+    """
+    from services.pipeline_schema import normalize_rel_path
+    if script is not None:
+        normalized = normalize_rel_path(script)
+        if normalized is None:
+            return None, {"error": "script must be a relative path inside the workspace", "code": "INVALID_SCRIPT"}
+        project = dict(project, train_file=normalized)
+    if inherit and inherit.get("paths"):
+        missing = inherit_service.missing_paths(inherit.get("source_run_dir"), inherit["paths"])
+        if missing:
+            source = inherit.get("source_run_ref") or inherit.get("source_run_dir")
+            return None, {"error": f"inherit: {missing[0]} not found in {source}'s run folder",
+                          "code": "INHERIT_SOURCE_MISSING"}
+    return project, None
+
+
+def start_training(projects_dir, name, branch=None, extra_env=None, script=None, inherit=None):  # NOSONAR — sequential pre-launch pipeline
+    """Validate, reserve a training slot, and launch the pre-launch sequence in background.
+
+    script and inherit come from a pipeline step: script replaces the project's train_file,
+    and inherit names output paths to copy from the previous step's run folder into this run's.
+    """
     project, python_bin, error = _training_request(projects_dir, name, extra_env)
     if error:
         return error
+    project, error = _step_request(project, script, inherit)
+    if error:
+        return error
+    inherit = inherit if inherit and inherit.get("paths") else None
 
     if branch is None:
         branch = project.get("branch", "main")
@@ -667,7 +698,7 @@ def start_training(projects_dir, name, branch=None, extra_env=None):  # NOSONAR 
     # A remote run's checks call Runpod, so they run before taking the lock.
     remote_plan = None
     if remote_runs.is_remote(project):
-        error, remote_plan = remote_runs.precheck(projects_dir, name, project, extra_env)
+        error, remote_plan = remote_runs.precheck(projects_dir, name, project, extra_env, inherit=inherit)
         if error:
             return error
 
@@ -686,6 +717,8 @@ def start_training(projects_dir, name, branch=None, extra_env=None):  # NOSONAR 
                 "started_at": datetime.datetime.now(),
                 "status": "starting",
                 "branch": branch,
+                "kind": "train",
+                "train_file": project.get("train_file", "train.py"),
             }
         )
 
@@ -710,8 +743,8 @@ def start_training(projects_dir, name, branch=None, extra_env=None):  # NOSONAR 
 
     thread = threading.Thread(
         target=_execute_training,
-        args=(projects_dir, name, project, python_bin, run_pk, run_id, branch, workspace_dir, gpu_assignment, extra_env)
-        + ((remote_plan,) if remote_plan is not None else ()),
+        args=(projects_dir, name, project, python_bin, run_pk, run_id, branch, workspace_dir, gpu_assignment,
+              extra_env, remote_plan, {"inherit": inherit}),
         daemon=True,
     )
     thread.start()
@@ -734,12 +767,32 @@ def _archive_older_runs_pk_named_log(projects_dir: str, name: str, run_id: int, 
     get_db().update_training_run(old["id"], log_file_path=rel)
 
 
-def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, branch, workspace_dir, gpu_assignment=None, extra_env=None, remote_plan=None):  # NOSONAR — sequential pre-launch pipeline
+def _tracked_in_git(workspace_dir, rel) -> bool:
+    try:
+        r = subprocess.run(["git", "ls-files", "--", rel], cwd=workspace_dir,
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0 and bool((r.stdout or "").strip())
+
+
+def _inherit_clash(workspace_dir, paths) -> str | None:
+    """An inherited path must not replace a real, tracked file or folder in the workspace."""
+    for rel in paths:
+        target = os.path.join(workspace_dir, rel)
+        if os.path.lexists(target) and not os.path.islink(target) and _tracked_in_git(workspace_dir, rel):
+            return f"inherit: '{rel}' clashes with a tracked file or folder in the workspace"
+    return None
+
+
+def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, branch, workspace_dir, gpu_assignment=None, extra_env=None, remote_plan=None, step=None):  # NOSONAR — sequential pre-launch pipeline
     """Run the full pre-launch sequence and start the training subprocess (runs in background thread).
 
     With remote_plan, the setup script, pip install and training run on a Runpod pod instead
     (services/remote_runs.py); git sync, run storage, the log and TensorBoard stay here.
+    step carries a pipeline step's "inherit" (see start_training).
     """
+    inherit = (step or {}).get("inherit")
     is_parallel = workspace_dir != os.path.join(projects_dir, name, "workspace")
     log_path = os.path.join(projects_dir, name, f"train-{run_id}.log")
     _archive_older_runs_pk_named_log(projects_dir, name, run_id, log_path)
@@ -929,6 +982,20 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
     except OSError as e:
         return _abort(f"Could not prepare {persistent_run_rel}: {e}")
 
+    # Inherited paths go into the run folder before the workspace links point at it.
+    inherit_lines = []
+    if inherit:
+        clash = _inherit_clash(workspace_dir, inherit["paths"])
+        if clash:
+            return _abort(clash)
+        try:
+            entries = inherit_service.seed_inherited(
+                inherit["source_run_dir"], persistent_run_dir, inherit["paths"],
+                inherit.get("source_step"), inherit.get("source_run_ref"))
+        except (inherit_service.InheritError, OSError) as e:
+            return _abort(str(e))
+        inherit_lines = inherit_service.log_lines(entries)
+
     _ensure_workspace_symlink(
         workspace_dir,
         tb_log_rel,
@@ -937,15 +1004,21 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
         "TensorBoard",
         is_parallel=is_parallel,
     )
+    inherited_paths = set(inherit["paths"]) if inherit else set()
     for output_rel in output_paths:
+        link_warnings = []
         _ensure_workspace_symlink(
             workspace_dir,
             output_rel,
             os.path.join(persistent_run_dir, output_rel),
-            prelaunch_warnings,
+            link_warnings,
             "output",
             is_parallel=is_parallel,
         )
+        if link_warnings and output_rel in inherited_paths:
+            # The script would not see the inherited files at that path.
+            return _abort(f"inherit: {link_warnings[0]}")
+        prelaunch_warnings.extend(link_warnings)
 
     get_db().update_training_run(
         run_pk,
@@ -963,6 +1036,8 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
 
     log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
     _write_run_header(log_fd, run_meta, project)
+    for line in inherit_lines:
+        os.write(log_fd, f"{line}\n".encode())
     for warning in prelaunch_warnings:
         os.write(log_fd, f"[beekeeper] WARNING: {warning}\n".encode())
     if prelaunch_warnings:
@@ -1017,6 +1092,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
             "data_dir_local": project.get("data_dir_local", "data"),
             "setup_script": project.get("setup_script", ""), "requirements_file": req_file,
             "train_file": train_file, "env": project_env,
+            "inherited": bool(inherit),
         })
         return _register_launched(projects_dir, name, project, run_pk, run_id, branch, workspace_dir,
                                   proc, log_path, remote=True)
