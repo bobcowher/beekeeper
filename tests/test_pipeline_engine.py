@@ -841,3 +841,42 @@ def test_run_waiting_on_a_project_queue_reports_waiting_and_position(env):
     tick(env)
     view = eng.describe_run(get_db().get_pipeline_run("fac", 1))
     assert view["waiting"] is False and "queue_position" not in view["steps"][0]
+
+
+def _run_task_pipeline_to_end(env, defn):
+    store.save_pipeline(env["pl"], defn)
+    eng.start_pipeline_run(env["pd"], env["pl"], defn["name"])
+    deadline = time.time() + 10
+    while get_db().get_pipeline_run(defn["name"], 1)["status"] == "running" and time.time() < deadline:
+        tick(env); time.sleep(0.05)
+    return get_db().get_pipeline_run(defn["name"], 1)
+
+
+def test_keep_on_success_keeps_a_run_that_succeeds(env):
+    run = _run_task_pipeline_to_end(env, {"name": "kp", "keep": "on_success", "steps": [
+        {"name": "work", "type": "task", "command": "true"}]})
+    assert run["status"] == "succeeded" and run["kept"] is True
+    assert eng.describe_run(run)["kept"] is True
+
+
+def test_keep_on_success_leaves_a_failed_run_unkept(env):
+    run = _run_task_pipeline_to_end(env, {"name": "kf", "keep": "on_success", "steps": [
+        {"name": "work", "type": "task", "command": "false"}]})
+    assert run["status"] == "failed" and run["kept"] is False
+
+
+def test_without_keep_a_succeeded_run_is_not_kept(env):
+    run = _run_task_pipeline_to_end(env, {"name": "kn", "steps": [
+        {"name": "work", "type": "task", "command": "true"}]})
+    assert run["status"] == "succeeded" and run["kept"] is False
+
+
+def test_keep_pipeline_run_toggles_and_reports(env):
+    eng.start_pipeline_run(env["pd"], env["pl"], "fac")
+    assert eng.keep_pipeline_run(env["pd"], env["pl"], "fac", 1) == {"run_id": 1, "run_ref": "fac#1", "kept": True}
+    assert get_db().get_pipeline_run("fac", 1)["kept"] is True
+    eng.keep_pipeline_run(env["pd"], env["pl"], "fac", 1, keep=False)
+    assert get_db().get_pipeline_run("fac", 1)["kept"] is False
+    with pytest.raises(eng.PipelineError) as e:
+        eng.keep_pipeline_run(env["pd"], env["pl"], "fac", 9)
+    assert e.value.code == "NOT_FOUND"

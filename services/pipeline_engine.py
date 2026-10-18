@@ -257,6 +257,16 @@ def dismiss_pipeline_run(projects_dir, pipelines_dir, name, run_number) -> dict:
     return {"run_id": run_number, "run_ref": pipeline_ref(name, run_number), "status": run["status"]}
 
 
+def keep_pipeline_run(projects_dir, pipelines_dir, name, run_number, keep=True) -> dict:  # NOSONAR - shared handler signature
+    """Protect a run's step runs from history pruning, or hand them back to it."""
+    db = get_db()
+    with _engine_lock:
+        run = _get_run(name, run_number)
+        db.update_pipeline_run(run["id"], kept=1 if keep else 0)
+    log.info("Pipeline %s %s", pipeline_ref(name, run_number), "kept" if keep else "no longer kept")
+    return {"run_id": run_number, "run_ref": pipeline_ref(name, run_number), "kept": bool(keep)}
+
+
 MAX_ADVANCES_PER_TICK = 50   # bounds the loop below if a step never stops changing
 
 
@@ -386,6 +396,7 @@ def describe_run(run) -> dict:
         "run_id": run["run_number"], "run_ref": pipeline_ref(run["pipeline_name"], run["run_number"]),
         "pipeline": run["pipeline_name"], "status": run["status"], "current_step": run["current_step"],
         "error": run["error"], "overrides": run["overrides"], "dismissed": run["dismissed"],
+        "kept": run["kept"],
         "started": bool(by_index),   # false for queued runs and runs removed from the queue
         # Running, but only waiting in a project's queue: nothing is executing yet.
         "waiting": run["status"] == "running" and steps[run["current_step"]]["status"] == "queued",
@@ -661,8 +672,11 @@ def _settle(run, sr):
                 db.create_step_run(run["id"], idx + 1, nxt["name"], nxt["type"])
             db.update_pipeline_run(run["id"], current_step=idx + 1)
         else:
-            db.update_pipeline_run(run["id"], status="succeeded", ended_at=_now())
-            log.info("Pipeline %s succeeded", pipeline_ref(run["pipeline_name"], run["run_number"]))
+            keep = run["definition"].get("keep") == "on_success"
+            db.update_pipeline_run(run["id"], status="succeeded", ended_at=_now(),
+                                   **({"kept": 1} if keep else {}))
+            log.info("Pipeline %s succeeded%s", pipeline_ref(run["pipeline_name"], run["run_number"]),
+                     "; its runs are kept" if keep else "")
         return
     for j in range(idx + 1, len(steps)):
         if _live_step_run(db, run["id"], j) is None:

@@ -43,3 +43,23 @@ def test_latest_succeeded_pipeline_pins_run_for_rerun(app):
     attach(pks[0], "succeeded")
     deleted = {r["id"] for r in get_db().prune_old_runs("p", keep_last=1)}
     assert pks[0] not in deleted and deleted == {pks[1]}
+
+
+def test_kept_pipeline_run_pins_its_runs_after_newer_runs(app):
+    pks = make_runs(5)
+    kept = attach(pks[0], "succeeded")
+    get_db().update_pipeline_run(kept, kept=1)
+    attach(pks[1], "succeeded")   # latest: pins pks[1] on its own
+    deleted = {r["id"] for r in get_db().prune_old_runs("p", keep_last=1)}
+    assert pks[0] not in deleted and pks[1] not in deleted
+    assert deleted == set(pks[2:4])
+
+
+def test_unkept_older_pipeline_run_is_pruned(app):
+    pks = make_runs(3)
+    older = attach(pks[0], "succeeded")
+    get_db().update_pipeline_run(older, kept=1)
+    get_db().update_pipeline_run(older, kept=0)
+    attach(pks[1], "succeeded")
+    deleted = {r["id"] for r in get_db().prune_old_runs("p", keep_last=1)}
+    assert pks[0] in deleted

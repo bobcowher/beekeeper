@@ -215,3 +215,15 @@ def test_runpod_project_fields(calls):
     assert "compute_target" not in calls[-1][2]
     server.create_project("p", "git@x:y.git", compute_target="runpod", setup_script="setup.sh")
     assert calls[-1][2]["compute_target"] == "runpod" and calls[-1][2]["setup_script"] == "setup.sh"
+
+
+def test_keep_pipeline_run(calls):
+    server.keep_pipeline_run("p", 3)
+    assert calls[-1] == ("_post", "/pipelines/p/runs/3/keep", {"keep": True})
+    server.keep_pipeline_run("p", 3, keep=False)
+    assert calls[-1] == ("_post", "/pipelines/p/runs/3/keep", {"keep": False})
+
+
+def test_set_run_notable(calls):
+    server.set_run_notable("mnist", 12)
+    assert calls[-1] == ("_patch", "/projects/mnist/runs/12", {"notable": True})

@@ -363,6 +363,10 @@
         $('btn-run-submit').textContent = isBusy() ? 'Add to Queue' : 'Run';
         $('btn-pipeline-cancel').hidden = !['running', 'queued'].includes(run?.status);
         $('btn-pipeline-cancel').textContent = run?.status === 'queued' ? 'Remove from Queue' : 'Cancel Run';
+        const keep = $('btn-pipeline-keep');
+        keep.hidden = formOpen || !run || run.status === 'queued';
+        keep.setAttribute('aria-pressed', String(Boolean(run?.kept)));
+        keep.textContent = run?.kept ? '✓ Kept' : 'Keep Run';
         $('btn-pipeline-resume').hidden = formOpen || !(
             run && latest && run.run_id === latest.run_id && ['failed', 'cancelled'].includes(run.status)
         );
@@ -663,6 +667,26 @@
     $('btn-pipeline-resume').addEventListener('click', event => {
         const run = started[0];
         if (run) void action(`${API}/runs/${run.run_id}/resume`, 'resume pipeline', event.currentTarget);
+    });
+    $('btn-pipeline-keep').addEventListener('click', async event => {
+        const run = viewedRun();
+        if (!run) return;
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            const data = await api(`${API}/runs/${run.run_id}/keep`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ keep: !run.kept }),
+            });
+            if (!data.success) throw new Error(errorMessage(data, 'Could not change Keep'));
+            showPageError();
+            await refresh();   // stays on the viewed run, unlike action()
+        } catch (error) {
+            showPageError(`Could not change Keep: ${error.message}`);
+        } finally {
+            button.disabled = false;
+        }
     });
     $('btn-queue-skip').addEventListener('click', event => {
         const run = pausedBy();

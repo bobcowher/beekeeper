@@ -32,6 +32,13 @@
                 </datalist>
             </div>
         </div>
+        <div class="form-group" data-path="keep">
+            <label class="checkbox-label">
+                <input type="checkbox" class="toggle" id="g-keep">
+                <span>Keep Runs That Succeed</span>
+                <span class="tooltip-icon" title="Sets keep: on_success. Every run that finishes cleanly is kept: the training and task runs it made are never pruned from their projects' history. Untick Keep on a run's page to let it be pruned again.">?</span>
+            </label>
+        </div>
         <h2 class="editor-steps-title">Steps
             <span class="tooltip-icon" title="Steps run top to bottom. A step starts when the one above it succeeds; if a step fails, the pipeline stops and can be resumed from that step.">?</span>
         </h2>
@@ -63,6 +70,7 @@
             <tr><td><code>name</code></td><td>Must match the pipeline's name.</td></tr>
             <tr><td><code>description</code></td><td>Optional. Shown on the pipeline page and the Pipelines list.</td></tr>
             <tr><td><code>folder</code></td><td>Optional. Groups the pipeline with projects in the same folder.</td></tr>
+            <tr><td><code>keep</code></td><td>Optional. <code>on_success</code> keeps every run that succeeds: the runs its steps made are never pruned from their projects' history.</td></tr>
             <tr><td><code>steps</code></td><td>Run in order. Each needs a unique <code>name</code> (lowercase, digits, <code>-</code>, <code>_</code>) and a <code>type</code>.</td></tr>
             <tr><th colspan="2"><code>type: train</code></th></tr>
             <tr><td><code>project</code></td><td>Project to train. The run goes through that project's queue.</td></tr>

@@ -36,7 +36,7 @@ from services.pipeline_schema import (NAME_RE as PIPELINE_NAME_RE, PipelineValid
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
 SERVER_VERSION = "1.1.0"
-MIN_MCP_VERSION = "0.7.0"
+MIN_MCP_VERSION = "0.8.0"
 PROJECT_FILE = "project.json"
 MCP_SERVER_FILE = "mcp_server.py"
 PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -907,7 +907,7 @@ def pipeline_runs_get(name, run_id):
 @api_key_required
 def pipeline_runs_action(name, run_id, action):
     handlers = {"cancel": pipeline_engine.cancel_pipeline_run, "resume": pipeline_engine.resume_pipeline_run,
-                "dismiss": pipeline_engine.dismiss_pipeline_run}
+                "dismiss": pipeline_engine.dismiss_pipeline_run, "keep": pipeline_engine.keep_pipeline_run}
     if action not in handlers:
         return api_response(error_code="NOT_FOUND", error_message=f"Unknown action '{action}'", status_code=404)
     kwargs = {}
@@ -921,6 +921,13 @@ def pipeline_runs_action(name, run_id, action):
                 return api_response(error_code="INVALID_STEP", error_message="from_step must be a step name",
                                     status_code=400)
             kwargs["from_step"] = body["from_step"]
+    if action == "keep":
+        body = request.get_json(silent=True)
+        keep = True if body is None or not isinstance(body, dict) else body.get("keep", True)
+        if not isinstance(keep, bool):
+            return api_response(error_code="INVALID_KEEP", error_message="keep must be true or false",
+                                status_code=400)
+        kwargs["keep"] = keep
     try:
         result = handlers[action](current_app.config["PROJECTS_DIR"], _pipelines_dir(), name, run_id, **kwargs)
     except pipeline_engine.PipelineError as e:
@@ -1505,6 +1512,25 @@ def get_run(name, run_id):
     return api_response(data={"run": public_run(run)})
 
 
+@api_v1_bp.route("/projects/<name>/runs/<int:run_id>", methods=["PATCH"])
+@api_key_required
+def update_run_notable(name, run_id):
+    """Mark a run notable (never pruned from history) or clear the mark."""
+    load_project(name)
+
+    from services.db_service import get_db
+    run = get_db().get_run(name, run_id)
+    if not run:
+        return api_response(error_code="NOT_FOUND", error_message=f"Run {run_id} not found", status_code=404)
+
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or not isinstance(body.get("notable"), bool):
+        return api_response(error_code="INVALID_NOTABLE", error_message="Send {\"notable\": true|false}",
+                            status_code=400)
+    get_db().update_run_annotations(run["id"], notable=1 if body["notable"] else 0)
+    return api_response(data={"run": public_run(get_db().get_run(name, run_id))})
+
+
 @api_v1_bp.route("/projects/<name>/runs/<int:run_id>/log", methods=["GET"])
 @api_key_required
 def download_run_log(name, run_id):
@@ -2053,6 +2079,8 @@ Read both outputs before taking any action.
 | `cancel_pipeline(name, run_id)` | Cancel a run and stop its current step |
 | `resume_pipeline(name, run_id, from_step=None)` | Resume a failed/cancelled run, or re-run the latest stopped run from a named step |
 | `dismiss_pipeline_run(name, run_id)` | Skip a failed run so the queue continues |
+| `keep_pipeline_run(name, run_id, keep)` | Protect a pipeline run's step runs from history pruning |
+| `set_run_notable(name, run_id, notable)` | Protect one run from history pruning |
 | `get_step_log(name, run_id, step_name, tail=200)` | Task-step log output |
 | `list_branches(name)` | Available branches |
 | `switch_branch(name, branch)` | Switch branch (training must be stopped) |
@@ -2213,6 +2241,8 @@ Remember the answer. This determines what counts as a good run.
 | `cancel_pipeline(name, run_id)` | Cancel a pipeline run |
 | `resume_pipeline(name, run_id, from_step=None)` | Resume a stopped run or re-run it from a named step |
 | `dismiss_pipeline_run(name, run_id)` | Skip a failed run so the queue continues |
+| `keep_pipeline_run(name, run_id, keep)` | Protect a pipeline run's step runs from history pruning |
+| `set_run_notable(name, run_id, notable)` | Protect one run from history pruning |
 | `get_step_log(name, run_id, step_name)` | Read a task-step log |
 | `get_stats()` | GPU, CPU, RAM |
 | `check_busy()` | Is any training running? |

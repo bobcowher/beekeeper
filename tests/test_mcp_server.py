@@ -20,11 +20,11 @@ def _run(n):
                              "status": "running"}}}
 
 
-def test_mcp_version_is_0_7_0_everywhere():
+def test_mcp_version_is_0_8_0_everywhere():
     pyproject = tomllib.loads(
         pathlib.Path(__file__).parents[1].joinpath("pyproject.toml").read_text()
     )
-    assert server.MCP_VERSION == MIN_MCP_VERSION == pyproject["project"]["version"] == "0.7.0"
+    assert server.MCP_VERSION == MIN_MCP_VERSION == pyproject["project"]["version"] == "0.8.0"
 
 
 def test_analyze_run_explicit_run_id_has_run_ref(mocker):

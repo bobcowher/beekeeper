@@ -12,14 +12,14 @@
     const editor = $('pipeline-yaml');
     const list = $('step-editor-list');
 
-    const TOP_KEYS = new Set(['name', 'folder', 'description', 'steps']);
+    const TOP_KEYS = new Set(['name', 'folder', 'description', 'keep', 'steps']);
     const STEP_KEYS = {
         train: new Set(['name', 'type', 'project', 'branch', 'env_vars', 'script', 'inherit']),
         task: new Set(['name', 'type', 'command', 'timeout_s', 'project', 'inherit']),
     };
 
     let mode = 'graphical';
-    let model = null;          // {description, folder, steps: [step]}; see blankStep()
+    let model = null;          // {description, folder, keep, steps: [step]}; see blankStep()
     let modelChanged = false;  // graphical edits not yet written into the YAML text
     let yamlChanged = false;   // YAML edits not yet loaded into the model
     let unsaved = false;
@@ -119,6 +119,9 @@
         if (!isMapping(parsed)) return new Error('the YAML is not a mapping');
         const extraTop = Object.keys(parsed).filter(key => !TOP_KEYS.has(key));
         if (extraTop.length) return new Error(`it has keys the editor doesn't know: ${extraTop.join(', ')}`);
+        if (parsed.keep !== undefined && parsed.keep !== null && parsed.keep !== 'on_success') {
+            return new Error('its keep is not on_success');
+        }
         const steps = parsed.steps === undefined || parsed.steps === null ? [] : parsed.steps;
         if (!Array.isArray(steps)) return new Error('steps is not a list');
         const out = [];
@@ -145,13 +148,15 @@
                 inherit: inherit.map(text),
             });
         }
-        return { description: text(parsed.description), folder: text(parsed.folder), steps: out };
+        return { description: text(parsed.description), folder: text(parsed.folder),
+                 keep: parsed.keep === 'on_success', steps: out };
     }
 
     function definitionFromModel() {
         const defn = { name: NAME };
         if (model.description.trim()) defn.description = model.description.trim();
         if (model.folder.trim()) defn.folder = model.folder.trim();
+        if (model.keep) defn.keep = 'on_success';
         defn.steps = model.steps.map(step => {
             if (step.type === 'train') {
                 const out = { name: step.name, type: 'train' };
@@ -638,11 +643,17 @@
     function renderGraphical() {
         $('g-description').value = model.description;
         $('g-folder').value = model.folder;
+        $('g-keep').checked = model.keep;
         // A single step (a new pipeline) is opened, so there's something to edit right away.
         expanded.clear();
         if (model.steps.length === 1) expanded.add(model.steps[0].key);
         renderSteps();
     }
+
+    $('g-keep').addEventListener('change', () => {
+        model.keep = $('g-keep').checked;
+        markModelChanged();
+    });
 
     ['description', 'folder'].forEach(key => {
         const input = $(`g-${key}`);

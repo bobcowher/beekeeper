@@ -13,7 +13,7 @@ _PIPELINE_PINNED_RUNS_SQL = '''
     SELECT s.run_pk FROM pipeline_step_runs s
     JOIN pipeline_runs r ON r.id = s.pipeline_run_pk
     WHERE s.run_pk IS NOT NULL AND (
-        r.status = 'running'
+        r.status = 'running' OR r.kept = 1
         OR (r.status IN ('failed', 'cancelled', 'succeeded')
             AND r.id = (SELECT r2.id FROM pipeline_runs r2
                         WHERE r2.pipeline_name = r.pipeline_name
@@ -105,6 +105,7 @@ def _pipeline_table_migrations(conn):
         UNIQUE(pipeline_name, run_number))''')
     _add_columns(conn, 'pipeline_runs', [
         ('overrides', 'TEXT'), ('dismissed', 'INTEGER NOT NULL DEFAULT 0'),
+        ('kept', 'INTEGER NOT NULL DEFAULT 0'),
     ])
     conn.execute('''CREATE TABLE IF NOT EXISTS pipeline_step_runs (
         id INTEGER PRIMARY KEY AUTOINCREMENT, pipeline_run_pk INTEGER NOT NULL,
@@ -919,7 +920,7 @@ class DatabaseService:
 
     # --- Pipelines ----------------------------------------------------------------
 
-    _PIPELINE_RUN_FIELDS = {"status", "current_step", "error", "ended_at", "dismissed"}
+    _PIPELINE_RUN_FIELDS = {"status", "current_step", "error", "ended_at", "dismissed", "kept"}
     _STEP_RUN_FIELDS = {"status", "queue_id", "run_pk", "exit_code", "pid", "log_path",
                         "run_dir", "error", "started_at", "ended_at"}
 
@@ -931,6 +932,7 @@ class DatabaseService:
         run["definition"] = json.loads(run["definition"])
         run["overrides"] = json.loads(run.get("overrides") or "{}")
         run["dismissed"] = bool(run.get("dismissed"))
+        run["kept"] = bool(run.get("kept"))
         return run
 
     def create_pipeline_run(self, pipeline_name: str, definition: dict,

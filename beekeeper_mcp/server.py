@@ -37,7 +37,7 @@ from fastmcp import FastMCP
 BEEKEEPER_HOST = os.environ.get("BEEKEEPER_HOST", "http://localhost:5000").rstrip("/")
 BEEKEEPER_API_KEY = os.environ.get("BEEKEEPER_API_KEY", "")
 
-MCP_VERSION = "0.7.0"
+MCP_VERSION = "0.8.0"
 
 mcp = FastMCP("Beekeeper")
 
@@ -635,6 +635,14 @@ def dismiss_pipeline_run(name: str, run_id: int) -> dict:
 
 
 @mcp.tool()
+def keep_pipeline_run(name: str, run_id: int, keep: bool = True) -> dict:
+    """Keep a pipeline run: the runs its steps made are never pruned from their projects'
+    history. keep=False hands them back to normal pruning. A pipeline with
+    `keep: on_success` in its YAML keeps each run that succeeds automatically."""
+    return _post(f"/pipelines/{name}/runs/{run_id}/keep", {"keep": keep})
+
+
+@mcp.tool()
 def get_step_log(name: str, run_id: int, step_name: str, tail: int = 200) -> dict:
     """Log of a task step. For train steps use get_logs(project, run_id) with the step's run_id."""
     return _get(f"/pipelines/{name}/runs/{run_id}/steps/{step_name}/log?tail={tail}")
@@ -664,6 +672,14 @@ def training_status(project_name: str) -> dict:
     user about a run, refer to it by its run_ref (e.g. "mnist-12").
     """
     return _get(f"/projects/{project_name}/training/status")
+
+
+@mcp.tool()
+def set_run_notable(project_name: str, run_id: int, notable: bool = True) -> dict:
+    """Mark a run notable so history pruning never deletes it (its record, log and run
+    folder), or clear the mark. To keep every run a pipeline run made, use
+    keep_pipeline_run instead."""
+    return _patch(f"/projects/{project_name}/runs/{run_id}", {"notable": notable})
 
 
 # ---------------------------------------------------------------------------

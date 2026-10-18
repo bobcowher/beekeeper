@@ -328,3 +328,26 @@ def test_runs_report_whether_they_ever_started(client, app):
     client.post("/api/v1/pipelines/fac/runs/2/cancel")       # removed while queued
     runs = client.get("/api/v1/pipelines/fac/runs").get_json()["data"]["runs"]
     assert [(r["run_id"], r["status"], r["started"]) for r in runs] == [(2, "cancelled", False), (1, "running", True)]
+
+
+def test_keep_action_sets_and_clears_kept(client, app):
+    make_project_dir(app, "p")
+    post_yaml(client, "/api/v1/pipelines", YAML)
+    client.post("/api/v1/pipelines/fac/runs")
+    r = client.post("/api/v1/pipelines/fac/runs/1/keep")
+    assert r.status_code == 200 and r.get_json()["data"] == {"run_id": 1, "run_ref": "fac#1", "kept": True}
+    assert client.get("/api/v1/pipelines/fac/runs/1").get_json()["data"]["kept"] is True
+    client.post("/api/v1/pipelines/fac/runs/1/keep", json={"keep": False})
+    assert client.get("/api/v1/pipelines/fac/runs/1").get_json()["data"]["kept"] is False
+    bad = client.post("/api/v1/pipelines/fac/runs/1/keep", json={"keep": "yes"})
+    assert bad.status_code == 400 and bad.get_json()["error"]["code"] == "INVALID_KEEP"
+    assert client.post("/api/v1/pipelines/fac/runs/7/keep").status_code == 404
+
+
+def test_keep_on_success_round_trips_through_yaml(client):
+    text = YAML.replace("folder: chess\n", "folder: chess\nkeep: on_success\n")
+    assert post_yaml(client, "/api/v1/pipelines", text).status_code == 201
+    assert client.get("/api/v1/pipelines/fac").get_json()["data"]["pipeline"]["keep"] == "on_success"
+    bad = post_yaml(client, "/api/v1/pipelines/fac", text.replace("on_success", "always"), method="put")
+    assert bad.status_code == 400
+    assert any(e["path"] == "keep" for e in bad.get_json()["error"]["details"]["errors"])

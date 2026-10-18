@@ -766,3 +766,15 @@ def test_logs_without_run_id_return_latest_run(client, app):
     assert data["content"] == "second run\n"
     assert client.get("/api/v1/projects/a/logs?tail=5", headers=_AUTH).get_json()["data"]["content"] == "second run\n"
     assert client.get("/projects/a/logs/download").data == b"second run\n"
+
+
+def test_patch_run_sets_notable(client, ready_project):
+    from services.db_service import get_db
+    import datetime
+    name = ready_project["name"]
+    get_db().create_training_run(name, {"started_at": datetime.datetime.now(), "status": "completed"})
+    r = client.patch(f"/api/v1/projects/{name}/runs/1", json={"notable": True})
+    assert r.status_code == 200 and r.get_json()["data"]["run"]["notable"] == 1
+    bad = client.patch(f"/api/v1/projects/{name}/runs/1", json={"notable": "yes"})
+    assert bad.status_code == 400 and bad.get_json()["error"]["code"] == "INVALID_NOTABLE"
+    assert client.patch(f"/api/v1/projects/{name}/runs/9", json={"notable": True}).status_code == 404

@@ -1691,3 +1691,60 @@ def test_run_history_shows_script_and_filters_tasks(live_server):
         page.locator("#history-section").screenshot(path="/tmp/beekeeper-history-kinds.png")
         assert errors == []
         browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_keep_toggle_and_editor_checkbox(live_server):
+    from playwright.sync_api import sync_playwright
+
+    state = {"kept": True, "posted": []}
+
+    def serve_runs(route):
+        run = {"run_id": 1, "run_ref": "keep-pipe#1", "pipeline": "keep-pipe", "status": "succeeded",
+               "current_step": 0, "error": None, "overrides": {}, "dismissed": False, "kept": state["kept"],
+               "started": True, "waiting": False, "started_at": "2026-10-12T10:00:00",
+               "ended_at": "2026-10-12T10:01:00",
+               "steps": [{"index": 0, "name": "a", "type": "task", "status": "succeeded", "attempt": 1,
+                          "error": None, "exit_code": 0, "started_at": None, "ended_at": None,
+                          "run_dir": None, "has_log": False}]}
+        route.fulfill(json={"success": True, "data": {"runs": [run]}})
+
+    def keep(route):
+        body = route.request.post_data_json
+        state["posted"].append(body)
+        state["kept"] = body["keep"]
+        route.fulfill(json={"success": True, "data": {"run_id": 1, "run_ref": "keep-pipe#1", "kept": body["keep"]}})
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        _create_pipeline(page, live_server,
+                         "name: keep-pipe\nkeep: on_success\nsteps:\n  - {name: a, type: task, command: 'true'}\n")
+        page.route("**/api/v1/pipelines/keep-pipe/runs?limit=50", serve_runs)
+        page.route("**/api/v1/pipelines/keep-pipe/runs/1/keep", keep)
+        page.goto(live_server + "/pipelines/keep-pipe")
+        button = page.locator("#btn-pipeline-keep")
+        page.wait_for_function("document.getElementById('btn-pipeline-keep').textContent.includes('Kept')")
+        assert button.get_attribute("aria-pressed") == "true"
+        page.screenshot(path="/tmp/beekeeper-pipeline-kept.png", full_page=True)
+        button.click()
+        page.wait_for_function("document.getElementById('btn-pipeline-keep').textContent === 'Keep Run'")
+        assert state["posted"] == [{"keep": False}]
+        assert button.get_attribute("aria-pressed") == "false"
+
+        page.goto(live_server + "/pipelines/keep-pipe/edit")
+        page.locator(".step-editor").first.wait_for()
+        assert page.locator("#g-keep").is_checked()
+        page.wait_for_timeout(300)   # let the toggle transition finish for the screenshot
+        page.screenshot(path="/tmp/beekeeper-pipeline-keep-graphical.png")
+        page.locator("#g-keep").uncheck()
+        page.click("#tab-yaml")
+        page.wait_for_function("!document.getElementById('pipeline-yaml').value.includes('keep:')")
+        page.click("#tab-graphical")
+        page.locator("#g-keep").check()
+        page.click("#tab-yaml")
+        page.wait_for_function("document.getElementById('pipeline-yaml').value.includes('keep: on_success')")
+        assert errors == []
+        browser.close()

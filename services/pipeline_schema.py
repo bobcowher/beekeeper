@@ -18,7 +18,8 @@ ENV_KEY_RE = re.compile(r"^[A-Za-z_]\w*$", re.ASCII)
 MAX_STEPS = 32
 DEFAULT_TASK_TIMEOUT = 3600
 MAX_TASK_TIMEOUT = 86400
-TOP_KEYS = {"name", "folder", "description", "steps"}
+TOP_KEYS = {"name", "folder", "description", "keep", "steps"}
+KEEP_VALUES = ("on_success",)
 TRAIN_KEYS = {"name", "type", "project", "branch", "env_vars", "script", "inherit"}
 TASK_KEYS = {"name", "type", "command", "timeout_s", "project", "inherit"}
 
@@ -311,11 +312,18 @@ def validate(data, expected_name: str | None = None) -> dict:
     elif not isinstance(description, str):
         err("description", _not_string(description))
 
+    keep = data.get("keep")
+    if keep is not None and keep not in KEEP_VALUES:
+        err("keep", "must be on_success, or left out")
+
     out_steps = _validate_steps(data.get("steps"), err)
 
     if errors:
         raise PipelineValidationError(errors)
-    return {"name": name, "folder": folder, "description": description, "steps": out_steps}
+    defn = {"name": name, "folder": folder, "description": description, "steps": out_steps}
+    if keep:
+        defn["keep"] = keep
+    return defn
 
 
 class _Dumper(yaml.SafeDumper):
@@ -336,6 +344,8 @@ def to_yaml(defn: dict) -> str:
         out["folder"] = defn["folder"]
     if defn.get("description"):
         out["description"] = defn["description"]
+    if defn.get("keep"):
+        out["keep"] = defn["keep"]
     steps = []
     for step in defn["steps"]:
         s = dict(step)
