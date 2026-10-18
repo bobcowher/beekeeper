@@ -36,7 +36,7 @@ from services.pipeline_schema import (NAME_RE as PIPELINE_NAME_RE, PipelineValid
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
 SERVER_VERSION = "1.1.0"
-MIN_MCP_VERSION = "0.6.0"
+MIN_MCP_VERSION = "0.7.0"
 PROJECT_FILE = "project.json"
 MCP_SERVER_FILE = "mcp_server.py"
 PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
