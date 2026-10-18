@@ -153,6 +153,8 @@ def list_projects():
                     "pinned": project.pinned,
                     "last_run_at": project.last_run_at,
                     "folder": project.folder,
+                    "train_file": project.train_file,
+                    "output_paths": project.output_paths,
                 })
             except Exception:
                 continue

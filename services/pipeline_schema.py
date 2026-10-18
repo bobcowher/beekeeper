@@ -210,9 +210,10 @@ def _validate_task_step(step, path, err, name):
     inherit = _inherit_field(step, path, err)
     if name is None or command is None or timeout is None or project is False or inherit is None:
         return None
-    result = {"name": name, "type": "task", "command": command, "timeout_s": timeout}
+    result = {"name": name, "type": "task"}
     if project is not None:
-        result["project"] = project
+        result["project"] = project   # before the command, so the YAML reads "where, then what"
+    result.update(command=command, timeout_s=timeout)
     if inherit:
         result["inherit"] = inherit
     return result
