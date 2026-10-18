@@ -68,7 +68,8 @@ def _training_run_migrations(conn):
         (column, typedef) for column, typedef in [
             ('notes', "TEXT NOT NULL DEFAULT ''"), ('notable', 'INTEGER NOT NULL DEFAULT 0'),
             ('tags', "TEXT NOT NULL DEFAULT ''"), ('persistent_dir', 'TEXT'),
-            ('run_number', 'INTEGER'),
+            ('run_number', 'INTEGER'), ('kind', "TEXT NOT NULL DEFAULT 'train'"),
+            ('train_file', 'TEXT'),
         ] if column not in columns
     ]
     _add_columns(conn, 'training_runs', missing)
@@ -230,6 +231,12 @@ class DatabaseService:
                 started_at TIMESTAMP)''')
             conn.execute('''CREATE INDEX IF NOT EXISTS idx_run_queue_project_status
                             ON run_queue(project_name, status)''')
+            # Pipeline steps: a script override, inherited paths and project tasks.
+            _add_columns(conn, 'run_queue', [
+                ('kind', "TEXT NOT NULL DEFAULT 'train'"), ('script', 'TEXT'), ('inherit', 'TEXT'),
+                ('source_run_dir', 'TEXT'), ('source_step', 'TEXT'), ('source_run_ref', 'TEXT'),
+                ('command', 'TEXT'), ('timeout_s', 'INTEGER'),
+            ])
             _pipeline_table_migrations(conn)
             _remote_table_migrations(conn)
 
@@ -523,8 +530,8 @@ class DatabaseService:
             cursor = conn.execute(
                 '''INSERT INTO training_runs
                    (project_name, run_number, started_at, status, commit_sha, commit_message,
-                    branch, python_version, gpu_info, hostname)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    branch, python_version, gpu_info, hostname, kind, train_file)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (
                     project_name,
                     run_id,
@@ -536,6 +543,8 @@ class DatabaseService:
                     metadata.get('python_version'),
                     metadata.get('gpu_info'),
                     metadata.get('hostname'),
+                    metadata.get('kind') or 'train',
+                    metadata.get('train_file'),
                 )
             )
             conn.execute('COMMIT')
@@ -584,7 +593,7 @@ class DatabaseService:
         allowed_fields = [
             'ended_at', 'duration_seconds', 'status', 'exit_code',
             'log_file_path', 'tensorboard_dir', 'persistent_dir',
-            'commit_sha', 'commit_message', 'python_version', 'gpu_info', 'hostname',
+            'commit_sha', 'commit_message', 'python_version', 'gpu_info', 'hostname', 'train_file',
         ]
         updates = []
         values = []
@@ -803,6 +812,7 @@ class DatabaseService:
     def _queue_row(row) -> dict:
         entry = dict(row)
         entry["env_vars"] = json.loads(entry["env_vars"]) if entry.get("env_vars") else {}
+        entry["inherit"] = json.loads(entry["inherit"]) if entry.get("inherit") else []
         return entry
 
     def enqueue_run(self, project_name: str, branch: str | None = None,
@@ -1087,18 +1097,32 @@ class DatabaseService:
             conn.commit()
             return cursor.lastrowid
 
-    def enqueue_step_run(self, step_pk: int, project_name: str, branch: str | None,
-                         env_vars: dict | None, source: str) -> int | None:
-        """Enqueue a pipeline train step's run and mark the step queued in one transaction.
+    _STEP_LAUNCH_FIELDS = ("kind", "script", "inherit", "source_run_dir", "source_step",
+                           "source_run_ref", "command", "timeout_s")
 
+    def enqueue_step_run(self, step_pk: int, project_name: str, branch: str | None,
+                         env_vars: dict | None, source: str, launch: dict | None = None) -> int | None:
+        """Enqueue a pipeline step's project run and mark the step queued in one transaction.
+
+        launch holds what the dispatcher passes on: kind ('train' or 'task'), script,
+        inherit (list of paths) with source_run_dir/source_step/source_run_ref, and a
+        task's command and timeout_s.
         Returns the queue id, or None (nothing written) if the step is no longer pending.
         """
+        launch = dict(launch or {})
+        launch["kind"] = launch.get("kind") or "train"
+        if launch.get("inherit"):
+            launch["inherit"] = json.dumps(launch["inherit"])
+        else:
+            launch.pop("inherit", None)
+        cols = [k for k in self._STEP_LAUNCH_FIELDS if launch.get(k) is not None]
         with self._get_connection() as conn:
             cursor = conn.execute(
-                '''INSERT INTO run_queue (project_name, branch, env_vars, source, status, created_at)
-                   VALUES (?, ?, ?, ?, 'queued', ?)''',
+                f'''INSERT INTO run_queue (project_name, branch, env_vars, source, status, created_at
+                                           {"".join(", " + c for c in cols)})
+                   VALUES (?, ?, ?, ?, 'queued', ?{", ?" * len(cols)})''',  # NOSONAR - column names from a fixed tuple
                 (project_name, branch, json.dumps(env_vars) if env_vars else None, source,
-                 datetime.now().isoformat()))
+                 datetime.now().isoformat(), *(launch[k] for k in cols)))
             queue_id = cursor.lastrowid
             updated = conn.execute(
                 "UPDATE pipeline_step_runs SET status = 'queued', queue_id = ? "

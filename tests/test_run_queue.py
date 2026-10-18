@@ -22,6 +22,45 @@ def test_enqueue_and_list_fifo(db):
     assert sorted(db.projects_with_queued_runs()) == ["p", "q"]
 
 
+def _pending_step(db):
+    pk, _, _ = db.create_pipeline_run(
+        "pl", {"name": "pl", "steps": [{"name": "s", "type": "train", "project": "p"}]}, {})
+    return db.create_step_run(pk, 0, "s", "train")
+
+
+def test_enqueue_run_defaults_to_a_training_run(db):
+    entry = db.get_queue_entry(db.enqueue_run("p"))
+    assert entry["kind"] == "train" and entry["script"] is None and entry["inherit"] == []
+
+
+def test_enqueue_step_run_stores_script_and_inherit(db):
+    qid = db.enqueue_step_run(_pending_step(db), "p", None, {"A": "1"}, "pipeline:pl#1", launch={
+        "script": "post.py", "inherit": ["checkpoints"], "source_run_dir": "/x/run_3",
+        "source_step": "pre", "source_run_ref": "p-3"})
+    entry = db.get_queue_entry(qid)
+    assert entry["kind"] == "train" and entry["script"] == "post.py"
+    assert entry["inherit"] == ["checkpoints"] and entry["source_run_dir"] == "/x/run_3"
+    assert entry["source_step"] == "pre" and entry["source_run_ref"] == "p-3"
+
+
+def test_enqueue_step_run_project_task(db):
+    qid = db.enqueue_step_run(_pending_step(db), "p", None, None, "pipeline:pl#1", launch={
+        "kind": "task", "command": "test -s c/x", "timeout_s": 60})
+    entry = db.get_queue_entry(qid)
+    assert (entry["kind"], entry["command"], entry["timeout_s"]) == ("task", "test -s c/x", 60)
+
+
+def test_training_runs_record_kind_and_train_file(db):
+    pk, _ = db.create_training_run("p", {"started_at": datetime.datetime.now(), "status": "starting",
+                                         "kind": "task", "train_file": "bash x.sh"})
+    row = db.get_training_run(pk)
+    assert row["kind"] == "task" and row["train_file"] == "bash x.sh"
+    pk2, _ = db.create_training_run("p", {"started_at": datetime.datetime.now(), "status": "starting"})
+    assert db.get_training_run(pk2)["kind"] == "train"
+    db.update_training_run(pk2, train_file="train.py")
+    assert db.get_training_run(pk2)["train_file"] == "train.py"
+
+
 def test_started_entries_leave_the_queue(db):
     a = db.enqueue_run("p")
     db.mark_queue_started(a, run_pk=42)
