@@ -21,6 +21,29 @@ def test_declared_on_both_sides_passes(app):
     assert check(app, steps) == []
 
 
+def test_subfolder_of_an_output_path_passes(app):
+    make_project_dir(app, "m", output_paths=["checkpoints"])
+    steps = _steps({"name": "pre", "type": "train", "project": "m"},
+                   {"name": "post", "type": "train", "project": "m", "inherit": ["checkpoints/pretrain"]})
+    assert check(app, steps) == []
+
+
+def test_output_path_prefix_is_not_a_parent(app):
+    make_project_dir(app, "m", output_paths=["checkpoints"])
+    steps = _steps({"name": "pre", "type": "train", "project": "m"},
+                   {"name": "post", "type": "train", "project": "m", "inherit": ["checkpoints2/x"]})
+    assert [e["message"] for e in check(app, steps)] == [
+        "'checkpoints2/x' isn't an output path of the previous step (pre)",
+        "m doesn't list 'checkpoints2/x' as an output path"]
+
+
+def test_subfolder_of_the_data_dir_link_cannot_be_inherited(app):
+    make_project_dir(app, "m", output_paths=["checkpoints", "data"], data_dir_enabled=True)
+    steps = _steps({"name": "pre", "type": "train", "project": "m"},
+                   {"name": "post", "type": "train", "project": "m", "inherit": ["data/champion"]})
+    assert check(app, steps) == [{"path": "steps[1].inherit", "message": "'data/champion' is inside m's data dir link"}]
+
+
 def test_previous_project_lacks_path(app):
     make_project_dir(app, "a", output_paths=[])
     make_project_dir(app, "b", output_paths=["checkpoints"])

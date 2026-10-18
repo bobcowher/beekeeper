@@ -91,13 +91,18 @@ def format_size(n: int) -> str:
     return f"{n} B"
 
 
-def log_lines(entries) -> list[str]:
-    """The run log lines for a seeding: one per path, plus a warning for each empty one."""
+def log_lines(entries, run_dir=None) -> list[str]:
+    """The run log lines for a seeding: one per path, plus a warning for each empty one.
+
+    With run_dir, a path that was copied as a single file is shown without the trailing '/'.
+    """
     lines = []
     for e in entries:
+        is_file = run_dir is not None and os.path.isfile(os.path.join(run_dir, e["path"]))
+        shown = e["path"] if is_file else f"{e['path']}/"
         files = f"{e['files']} file{'' if e['files'] == 1 else 's'}"
-        lines.append(f"[beekeeper] Inherited {e['path']}/ from {e['source_step']} ({e['source_run_ref']}): "
+        lines.append(f"[beekeeper] Inherited {shown} from {e['source_step']} ({e['source_run_ref']}): "
                      f"{files}, {format_size(e['bytes'])}")
         if e["files"] == 0:
-            lines.append(f"[beekeeper] WARNING: inherited {e['path']}/ is empty")
+            lines.append(f"[beekeeper] WARNING: inherited {shown} is empty")
     return lines

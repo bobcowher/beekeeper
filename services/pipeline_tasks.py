@@ -1,4 +1,4 @@
-"""Inline shell tasks for pipeline steps: bash -c <command> in its own process group.
+"""Inline shell tasks for pipeline steps: bash -o pipefail -c <command> in its own process group.
 
 State is in-memory only. After a restart poll_task() reports "missing" and the
 engine fails the step with "interrupted by restart".
@@ -28,7 +28,7 @@ def spawn_task(step_pk, command, cwd, env, log_path, timeout_s, preamble=()) -> 
             os.write(fd, f"{line}\n".encode())
         os.write(fd, f"[beekeeper] Command:\n{command}\n\n".encode())
         proc = subprocess.Popen(
-            ["bash", "-c", command], cwd=cwd, env=env,
+            ["bash", "-o", "pipefail", "-c", command], cwd=cwd, env=env,
             stdout=fd, stderr=subprocess.STDOUT, start_new_session=True,
         )
     finally:

@@ -19,6 +19,7 @@ from services.run_folder_migration import archive_pk_named_log
 from services.run_storage_service import MARKER, delete_run_storage, persistent_runs_root
 from services.stats_service import get_gpu_stats
 from services import inherit as inherit_service
+from services.pipeline_schema import path_within
 from services import remote_runs
 
 log = logging.getLogger(__name__)
@@ -798,7 +799,7 @@ def _reserve_run(projects_dir, name, project, branch, kind, remote=False):
 
 
 def start_task(projects_dir, name, command, timeout_s, inherit=None, extra_env=None):
-    """Start a pipeline project task: `bash -c <command>` in the project's workspace (spec R1–R3).
+    """Start a pipeline project task: `bash -o pipefail -c <command>` in the project's workspace (spec R1–R3).
 
     A task is a run of its project (kind 'task'): it takes a slot under the project's
     parallel-run setting, gets a run folder, the output-path links and inherited paths,
@@ -1085,7 +1086,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
                 inherit.get("source_step"), inherit.get("source_run_ref"))
         except (inherit_service.InheritError, OSError) as e:
             return _abort(str(e))
-        inherit_lines = inherit_service.log_lines(entries)
+        inherit_lines = inherit_service.log_lines(entries, persistent_run_dir)
 
     _ensure_workspace_symlink(
         workspace_dir,
@@ -1106,7 +1107,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
             "output",
             is_parallel=is_parallel,
         )
-        if link_warnings and output_rel in inherited_paths:
+        if link_warnings and any(path_within(rel, [output_rel]) for rel in inherited_paths):
             # The script would not see the inherited files at that path.
             return _abort(f"inherit: {link_warnings[0]}")
         prelaunch_warnings.extend(link_warnings)
@@ -1197,7 +1198,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
 
     try:
         proc = subprocess.Popen(
-            ["bash", "-c", task["command"]] if task else [python_bin, "-u", train_file],
+            ["bash", "-o", "pipefail", "-c", task["command"]] if task else [python_bin, "-u", train_file],
             cwd=workspace_dir,
             stdout=log_fd,
             stderr=subprocess.STDOUT,

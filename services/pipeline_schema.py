@@ -127,6 +127,11 @@ def normalize_rel_path(value) -> str | None:
     return None if value in (".", "") else value
 
 
+def path_within(rel, paths) -> bool:
+    """True when rel is one of paths or a folder inside one, e.g. checkpoints/posttrain in checkpoints."""
+    return any(rel == p or rel.startswith(p + "/") for p in paths)
+
+
 def _script_field(step, path, err):
     script = _str_field(step, "script", path, err)
     if script is None:
@@ -158,6 +163,11 @@ def _inherit_field(step, path, err):
             err(f"{path}.inherit", f"'{normalized}' is listed twice")
             return None
         out.append(normalized)
+    for item in out:
+        outer = next((p for p in out if p != item and path_within(item, [p])), None)
+        if outer:
+            err(f"{path}.inherit", f"'{item}' is inside '{outer}', which is already inherited")
+            return None
     return out
 
 
@@ -279,7 +289,7 @@ def _check_inherit_order(raw_steps, steps, err):
         if prev["type"] != "task" or prev.get("project"):
             continue   # a project's output paths: checked against the project
         for rel in inherit:
-            if rel not in (prev.get("inherit") or []):
+            if not path_within(rel, prev.get("inherit") or []):
                 err(f"steps[{index}].inherit", f"'{rel}' isn't an output path of the previous step ({prev['name']})")
 
 
@@ -330,8 +340,20 @@ class _Dumper(yaml.SafeDumper):
     pass
 
 
+# Plain scalars a YAML 1.2 parser reads as a number, bool or null. PyYAML follows YAML 1.1 and
+# leaves some of these unquoted (5e6, 1e-3, 0o17), so another tool would read "5e6" as a float.
+_YAML12_NON_STRING = re.compile(
+    r"[-+]?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?|0o[0-7]+|0x[0-9a-fA-F]+"
+    r"|[-+]?\.(inf|Inf|INF)|\.(nan|NaN|NAN)|true|True|TRUE|false|False|FALSE|null|Null|NULL|~")
+
+
 def _represent_str(dumper, value):
-    style = "|" if "\n" in value else None
+    if "\n" in value:
+        style = "|"
+    elif _YAML12_NON_STRING.fullmatch(value):
+        style = "'"
+    else:
+        style = None
     return dumper.represent_scalar("tag:yaml.org,2002:str", value, style=style)
 
 

@@ -105,3 +105,12 @@ def test_log_line_format():
 def test_source_bytes(dirs):
     src, _ = dirs
     assert inherit.source_bytes(src, ["data", "missing"]) == len("a,b\n1,2\n")
+
+
+def test_log_line_for_a_single_file_has_no_slash(tmp_path):
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    (src / "checkpoints").mkdir(parents=True)
+    (src / "checkpoints" / "model.pt").write_text("w")
+    entries = inherit.seed_inherited(str(src), str(dst), ["checkpoints/model.pt"], "train", "m-2")
+    assert inherit.log_lines(entries, str(dst)) == [
+        "[beekeeper] Inherited checkpoints/model.pt from train (m-2): 1 file, 1 B"]

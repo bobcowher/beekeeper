@@ -351,7 +351,7 @@
             el('label', { for: input.id }, 'Inherit ',
                 el('span', {
                     className: 'tooltip-icon', text: '?',
-                    title: 'Output paths copied from the previous step’s run folder into this step’s, at the same relative paths. The script opens them as checkpoints/model.pt, with no environment variables. Each must be an output path of both steps’ projects.',
+                    title: 'Output paths copied from the previous step’s run folder into this step’s, at the same relative paths. The script opens them as checkpoints/model.pt, with no environment variables. Each must be an output path of both steps’ projects, or a folder inside one, such as checkpoints/posttrain.',
                 })),
             chips, input, options);
     }
@@ -408,7 +408,7 @@
         return [
             el('div', { className: 'form-row' },
                 field('Project', select, 'Optional. A project task runs in that project’s workspace on this server, as a run of the project (no GPU), and can pass output paths on. Without a project the task runs in the pipeline’s folder.')),
-            field('Command', command, 'Run with bash -c. A project task runs in the project’s workspace. A plain task runs in this run’s shared folder, $BEEKEEPER_PIPELINE_RUN_DIR, or with Inherit, in its own folder holding the inherited paths. Without Inherit, earlier steps’ outputs are in $BEEKEEPER_PREV_STEP_DIR and $BEEKEEPER_STEP_<NAME>_DIR.'),
+            field('Command', command, 'Run with bash -o pipefail -c, so a failure anywhere in a pipe fails the step. A project task runs in the project’s workspace. A plain task runs in this run’s shared folder, $BEEKEEPER_PIPELINE_RUN_DIR, or with Inherit, in its own folder holding the inherited paths. Without Inherit, earlier steps’ outputs are in $BEEKEEPER_PREV_STEP_DIR and $BEEKEEPER_STEP_<NAME>_DIR.'),
             index > 0 ? inheritField(step, index) : null,
             el('div', { className: 'step-timeout' },
                 field('Timeout (seconds)', timeout, 'Optional. The task is killed after this long. Default 3600.')),

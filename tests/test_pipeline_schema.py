@@ -176,6 +176,20 @@ def test_to_yaml_quotes_ambiguous_strings():
     assert validate(parse_text(to_yaml(d)))["steps"][0]["branch"] == "no"
 
 
+@pytest.mark.parametrize("value", ["5e6", "1e-3", "1.5", "-2", "0o17", "0x1F", ".inf", ".NaN", "True", "null", "~"])
+def test_to_yaml_quotes_strings_a_yaml_1_2_parser_reads_as_non_strings(value):
+    d = validate({"name": "p", "steps": [{"name": "a", "type": "train", "project": "x", "env_vars": {"V": value}}]})
+    text = to_yaml(d)
+    assert f"V: '{value}'" in text
+    assert validate(parse_text(text))["steps"][0]["env_vars"]["V"] == value
+
+
+def test_to_yaml_leaves_plain_strings_unquoted():
+    d = validate({"name": "p", "steps": [{"name": "a", "type": "train", "project": "x",
+                                          "env_vars": {"A": "5e6x", "B": "v1.2"}}]})
+    assert "A: 5e6x" in to_yaml(d) and "B: v1.2" in to_yaml(d)
+
+
 @pytest.mark.parametrize("text", ["no", "0", "[]"])
 def test_falsy_non_string_description_rejected(text):
     errs = errors_for(f"name: p\ndescription: {text}\nsteps:\n  - {{name: a, type: task, command: x}}\n")
@@ -224,6 +238,26 @@ def test_inherit_duplicates_after_normalizing():
     errs = errors_for(_steps(TRAIN_A, {"name": "b", "type": "train", "project": "m",
                                        "inherit": ["ckpt", "ckpt/"]}))
     assert errs["steps[1].inherit"] == "'ckpt' is listed twice"
+
+
+def test_inherit_path_inside_another_inherited_path():
+    errs = errors_for(_steps(TRAIN_A, {"name": "b", "type": "train", "project": "m",
+                                       "inherit": ["ckpt/post", "ckpt"]}))
+    assert errs["steps[1].inherit"] == "'ckpt/post' is inside 'ckpt', which is already inherited"
+
+
+def test_inherit_sibling_prefix_is_not_inside():
+    d = validate(_steps(TRAIN_A, {"name": "b", "type": "train", "project": "m", "inherit": ["ckpt", "ckpt2"]}))
+    assert d["steps"][1]["inherit"] == ["ckpt", "ckpt2"]
+
+
+def test_inherit_subfolder_of_what_a_plain_task_inherited():
+    d = validate(_steps(TRAIN_A, {"name": "t", "type": "task", "command": "true", "inherit": ["ckpt"]},
+                        {"name": "u", "type": "task", "command": "true", "inherit": ["ckpt/post"]}))
+    assert d["steps"][2]["inherit"] == ["ckpt/post"]
+    errs = errors_for(_steps(TRAIN_A, {"name": "t", "type": "task", "command": "true", "inherit": ["ckpt/post"]},
+                             {"name": "u", "type": "task", "command": "true", "inherit": ["ckpt"]}))
+    assert errs["steps[2].inherit"] == "'ckpt' isn't an output path of the previous step (t)"
 
 
 def test_inherit_must_be_string_or_list():

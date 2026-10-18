@@ -530,9 +530,12 @@ def create_pipeline(definition_yaml: str) -> dict:
     inherit: copies the named output paths from the previous step's run folder into this
     step's fresh run folder, at the same relative paths, so the script opens
     checkpoints/pretrained.pt with no env vars or absolute paths. Only the step directly
-    above is a source, and each path must be an output path of both projects (a plain
-    task has the paths it inherited). It works the same on this server and on Runpod;
+    above is a source, and each path must be an output path of both projects, or a folder
+    inside one (checkpoints/posttrain copies just that folder; a plain task has the paths
+    it inherited). It works the same on this server and on Runpod;
     on Runpod the inherited files count toward the upload limit.
+
+    Task commands run with bash -o pipefail, so a failure anywhere in a pipe fails the step.
 
     Project tasks (a task with project:) are runs of that project, kind "task": they go
     through its queue, get a run folder and output-path links, run with its env on PATH

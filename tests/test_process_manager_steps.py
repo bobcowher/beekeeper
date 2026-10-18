@@ -145,6 +145,30 @@ def test_inherited_path_clashing_with_tracked_file_aborts(app, project, source_r
     assert "inherit: 'checkpoints' clashes with a tracked file or folder in the workspace" in _log(app)
 
 
+def test_inherited_subfolder_lands_inside_the_output_path(app, project, source_run):
+    src = source_run["source_run_dir"]
+    os.makedirs(os.path.join(src, "checkpoints", "posttrain"))
+    with open(os.path.join(src, "checkpoints", "posttrain", "model.pt"), "w") as f:
+        f.write("post")
+    ws = os.path.join(app.config["PROJECTS_DIR"], "m", "workspace")
+    result, popen = _launch(app, inherit=dict(source_run, paths=["checkpoints/posttrain"]))
+    assert "error" not in result
+    popen.assert_called_once()
+    assert open(os.path.join(ws, "checkpoints", "posttrain", "model.pt")).read() == "post"
+    assert not os.path.exists(os.path.join(ws, "checkpoints", "pretrained.pt"))   # the sibling stays behind
+    assert "[beekeeper] Inherited checkpoints/posttrain/ from pretrain (m-1): 1 file, 4 B" in _log(app)
+
+
+def test_inherited_subfolder_aborts_when_its_output_path_cannot_be_linked(app, project, source_run):
+    os.makedirs(os.path.join(source_run["source_run_dir"], "checkpoints", "posttrain"))
+    ws = os.path.join(app.config["PROJECTS_DIR"], "m", "workspace")
+    os.makedirs(os.path.join(ws, "checkpoints"))
+    open(os.path.join(ws, "checkpoints", "stale.pt"), "w").close()
+    _, popen = _launch(app, inherit=dict(source_run, paths=["checkpoints/posttrain"]))
+    popen.assert_not_called()
+    assert "inherit: Could not protect output path 'checkpoints'" in _log(app)
+
+
 def test_inherited_path_untracked_leftover_warning_becomes_error(app, project, source_run):
     ws = os.path.join(app.config["PROJECTS_DIR"], "m", "workspace")
     os.makedirs(os.path.join(ws, "checkpoints"))
@@ -190,7 +214,7 @@ def test_task_runs_bash_in_workspace_with_env_bin_first_and_no_gpu(app, project,
     result = _task(app, popen=popen, inherit=source_run)
     assert result == {"run_id": 1, "run_ref": "m-1", "status": "starting"}
     ws = os.path.join(app.config["PROJECTS_DIR"], "m", "workspace")
-    assert seen["cmd"] == ["bash", "-c", "test -s checkpoints/pretrained.pt"]
+    assert seen["cmd"] == ["bash", "-o", "pipefail", "-c", "test -s checkpoints/pretrained.pt"]
     assert seen["cwd"] == ws
     env = seen["env"]
     assert env["PATH"].split(":")[0] == "/fake/venv/bin"
@@ -267,3 +291,9 @@ def test_task_exit_code_recorded(app, project):
     result = _task(app, command="exit 3", real_popen=True)
     row = get_db().get_run("m", result["run_id"])
     assert row["status"] == "crashed" and row["exit_code"] == 3
+
+
+def test_task_fails_when_a_command_inside_a_pipe_fails(app, project):
+    result = _task(app, command="false | tee /dev/null", real_popen=True)
+    row = get_db().get_run("m", result["run_id"])
+    assert row["status"] == "crashed" and row["exit_code"] == 1

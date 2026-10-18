@@ -9,7 +9,7 @@ Beekeeper can offer a fix. The fix is never applied here.
 import json
 import os
 
-from services.pipeline_schema import normalize_rel_path
+from services.pipeline_schema import normalize_rel_path, path_within
 
 INHERIT_PATH_NOT_DECLARED = "INHERIT_PATH_NOT_DECLARED"
 TASK_NEEDS_LOCAL_ENV = "TASK_NEEDS_LOCAL_ENV"
@@ -41,10 +41,12 @@ def _step_paths(step, project) -> set[str] | None:
 
 def _reserved_link(project, rel) -> str | None:
     name = project["name"]
-    if project.get("data_dir_enabled") and normalize_rel_path(project.get("data_dir_local") or "data") == rel:
-        return f"'{rel}' is {name}'s data dir link"
-    if normalize_rel_path(project.get("tensorboard_log_dir") or "runs") == rel:
-        return f"'{rel}' is {name}'s TensorBoard dir"
+    data_link = normalize_rel_path(project.get("data_dir_local") or "data")
+    if project.get("data_dir_enabled") and path_within(rel, [data_link]):
+        return f"'{rel}' is {name}'s data dir link" if rel == data_link else f"'{rel}' is inside {name}'s data dir link"
+    tb_dir = normalize_rel_path(project.get("tensorboard_log_dir") or "runs")
+    if path_within(rel, [tb_dir]):
+        return f"'{rel}' is {name}'s TensorBoard dir" if rel == tb_dir else f"'{rel}' is inside {name}'s TensorBoard dir"
     return None
 
 
@@ -67,7 +69,7 @@ def _check_inherit(index, step, project, prev, prev_project, errors):
     path = f"steps[{index}].inherit"
     prev_paths = _step_paths(prev, prev_project) if prev.get("project") else None
     for rel in step.get("inherit") or []:
-        if prev_paths is not None and rel not in prev_paths:
+        if prev_paths is not None and not path_within(rel, prev_paths):
             errors.append({"path": path,
                            "message": f"'{rel}' isn't an output path of the previous step ({prev['name']})"})
         if not step.get("project") or not project:
@@ -75,7 +77,7 @@ def _check_inherit(index, step, project, prev, prev_project, errors):
         reserved = _reserved_link(project, rel)
         if reserved:
             errors.append({"path": path, "message": reserved})
-        elif rel not in _output_paths(project):
+        elif not path_within(rel, _output_paths(project)):
             errors.append({
                 "path": path,
                 "message": f"{step['project']} doesn't list '{rel}' as an output path",

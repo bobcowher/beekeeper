@@ -105,3 +105,8 @@ def test_task_exit_wakes_dispatcher(tmp_path):
     tasks.spawn_task(90, "true", str(tmp_path), env_with(), str(tmp_path / "l.log"), 60)
     assert dispatcher._wake.wait(timeout=5)
     assert wait_done(90) == ("exited", 0)
+
+
+def test_failure_inside_a_pipe_fails_the_task(tmp_path):
+    tasks.spawn_task(5, "false | tee /dev/null", str(tmp_path), env_with(), str(tmp_path / "l.log"), 60)
+    assert wait_done(5) == ("exited", 1)

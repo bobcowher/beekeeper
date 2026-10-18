@@ -550,7 +550,7 @@ def _seed_step_folder(run_dir, step, source) -> list[str]:
     os.makedirs(run_dir)
     entries = inherit_service.seed_inherited(source["source_run_dir"], run_dir, step["inherit"],
                                              source["source_step"], source["source_run_ref"])
-    return inherit_service.log_lines(entries)
+    return inherit_service.log_lines(entries, run_dir)
 
 
 def _launch_task(projects_dir, pipelines_dir, run, step, sr, env):

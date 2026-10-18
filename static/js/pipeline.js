@@ -119,7 +119,7 @@
         list.className = 'step-inherited';
         entries.forEach(entry => {
             const item = document.createElement('li');
-            item.append('Inherited ', textElement('code', '', `${entry.path}/`), ` from ${entry.source_step} (`,
+            item.append('Inherited ', textElement('code', '', entry.path), ` from ${entry.source_step} (`,
                 runLogLink(entry.source_run_ref), `), ${formatSize(entry.bytes)}`);
             if (!entry.files) item.append(' ', textElement('span', 'muted', '(empty)'));
             list.appendChild(item);
