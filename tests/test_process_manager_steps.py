@@ -152,3 +152,118 @@ def test_inherited_path_untracked_leftover_warning_becomes_error(app, project, s
     _, popen = _launch(app, inherit=source_run)
     popen.assert_not_called()
     assert "inherit: Could not protect output path 'checkpoints'" in _log(app)
+
+
+# --- project tasks ----------------------------------------------------------------
+
+def _task(app, command="test -s checkpoints/pretrained.pt", timeout_s=60, popen=None, real_popen=False,
+          **kwargs):
+    patches = [
+        patch("services.process_manager._resolve_python_binary", return_value="/fake/venv/bin/python"),
+        patch("services.process_manager._resolve_tensorboard_binary", return_value=None),
+        patch("services.process_manager._update_project_json"),
+        patch("services.process_manager.threading.Thread", side_effect=_inline_thread),
+        patch("services.process_manager.subprocess.run", side_effect=_run_only_cp()),
+        patch("services.process_manager.get_gpu_stats", side_effect=AssertionError("tasks get no GPU")),
+    ]
+    if not real_popen:
+        patches.append(patch("services.process_manager.subprocess.Popen",
+                             side_effect=popen or (lambda cmd, **kw: MagicMock(pid=9999))))
+        patches.append(patch("services.process_manager._monitor_process"))
+    for p in patches:
+        p.start()
+    try:
+        return pm.start_task(app.config["PROJECTS_DIR"], "m", command, timeout_s, **kwargs)
+    finally:
+        for p in reversed(patches):
+            p.stop()
+
+
+def test_task_runs_bash_in_workspace_with_env_bin_first_and_no_gpu(app, project, source_run):
+    seen = {}
+
+    def popen(cmd, **kw):
+        seen.update(cmd=cmd, **kw)
+        return MagicMock(pid=9999)
+
+    make_project_dir(app, "m", output_paths=["checkpoints"], gpu_enabled=True, env_vars={"A": "1"})
+    result = _task(app, popen=popen, inherit=source_run)
+    assert result == {"run_id": 1, "run_ref": "m-1", "status": "starting"}
+    ws = os.path.join(app.config["PROJECTS_DIR"], "m", "workspace")
+    assert seen["cmd"] == ["bash", "-c", "test -s checkpoints/pretrained.pt"]
+    assert seen["cwd"] == ws
+    env = seen["env"]
+    assert env["PATH"].split(":")[0] == "/fake/venv/bin"
+    assert env["CUDA_VISIBLE_DEVICES"] == ""
+    assert env["A"] == "1" and env["BEEKEEPER_RUN_REF"] == "m-1"
+    assert env["BEEKEEPER_RUN_DIR"].endswith("persistent/runs/run_1")
+    row = get_db().get_run("m", 1)
+    assert row["kind"] == "task" and row["train_file"] == "test -s checkpoints/pretrained.pt"
+    text = _log(app)
+    assert "kind    : task" in text and "script  : test -s checkpoints/pretrained.pt" in text
+    assert "Inherited checkpoints/ from pretrain (m-1)" in text
+    assert os.path.isfile(os.path.join(ws, "checkpoints", "pretrained.pt"))
+
+
+def test_task_skips_setup_script_and_pip(app, project):
+    calls = []
+    make_project_dir(app, "m", setup_script="setup.sh")
+    ws = os.path.join(app.config["PROJECTS_DIR"], "m", "workspace")
+    open(os.path.join(ws, "setup.sh"), "w").close()
+    open(os.path.join(ws, "requirements.txt"), "w").close()
+    with patch("services.process_manager._resolve_python_binary", return_value="/fake/venv/bin/python"), \
+         patch("services.process_manager._update_project_json"), \
+         patch("services.process_manager.threading.Thread", side_effect=_inline_thread), \
+         patch("services.process_manager.subprocess.run", side_effect=lambda c, **k: calls.append(c) or _ok()), \
+         patch("services.process_manager.subprocess.Popen", return_value=MagicMock(pid=1)), \
+         patch("services.process_manager._monitor_process"):
+        pm.start_task(app.config["PROJECTS_DIR"], "m", "true", 60)
+    assert not any("pip" in c or "setup.sh" in " ".join(c) for c in calls)
+
+
+def test_task_in_busy_parallel_project_gets_a_clone(app, project):
+    make_project_dir(app, "m", parallel_runs_enabled=True, max_parallel_runs=2)
+    primary = os.path.join(app.config["PROJECTS_DIR"], "m", "workspace")
+    pm._running[999] = {"project_name": "m", "process": None, "starting": True, "run_pk": 999,
+                        "run_id": 7, "branch": "main", "workspace_dir": primary}
+    seen = {}
+
+    def popen(cmd, **kw):
+        seen["cwd"] = kw["cwd"]
+        return MagicMock(pid=1)
+
+    result = _task(app, command="true", popen=popen)
+    assert seen["cwd"] == os.path.join(app.config["PROJECTS_DIR"], "m", f"workspace-{result['run_id']}")
+
+
+def test_task_refused_when_project_busy_without_parallel_runs(app, project):
+    pm._running[999] = {"project_name": "m", "process": None, "starting": True, "run_pk": 999,
+                        "run_id": 7, "branch": "main", "workspace_dir": "x"}
+    assert _task(app, command="true")["code"] == "ALREADY_RUNNING"
+
+
+def test_task_on_runpod_project_without_local_env(app, project, monkeypatch):
+    from services import remote_runs
+    monkeypatch.setattr(remote_runs, "is_remote", lambda p: True)
+    with patch("services.process_manager._resolve_python_binary", return_value=None):
+        result = pm.start_task(app.config["PROJECTS_DIR"], "m", "true", 60)
+    assert result == {"error": "m runs on Runpod and has no local environment for tasks",
+                      "code": "TASK_NEEDS_LOCAL_ENV"}
+
+
+def test_task_timeout_is_enforced(app, project):
+    result = _task(app, command="echo started; sleep 30", timeout_s=1, real_popen=True)
+    deadline = time.time() + 20
+    while get_db().get_run("m", result["run_id"])["status"] in ("starting", "running"):
+        assert time.time() < deadline
+        time.sleep(0.1)
+    row = get_db().get_run("m", result["run_id"])
+    assert row["status"] == "crashed" and row["exit_code"] == pm.TASK_TIMEOUT_EXIT
+    text = _log(app, result["run_id"])
+    assert "started" in text and "[beekeeper] Task timed out after 1s" in text
+
+
+def test_task_exit_code_recorded(app, project):
+    result = _task(app, command="exit 3", real_popen=True)
+    row = get_db().get_run("m", result["run_id"])
+    assert row["status"] == "crashed" and row["exit_code"] == 3
