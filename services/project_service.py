@@ -255,17 +255,18 @@ def local_env_missing(projects_dir, project: dict) -> bool:
     return _resolve_python_binary(projects_dir, project) is None
 
 
-def build_local_env(projects_dir, name):
+def build_local_env(projects_dir, name, force_local=False):
     """Create the env, run the setup script and pip install for an already-cloned project.
 
     Used when a project moves from Runpod back to this server. Unlike retry_setup,
-    it keeps the workspace.
+    it keeps the workspace. force_local builds it for a project that still trains on
+    Runpod, so pipeline tasks can run in its workspace here.
     """
     project = Project.load(os.path.join(projects_dir, name, PROJECT_CONFIG_FILE))
     project.setup_status = "pending"
     project.setup_error = ""
     project.save(projects_dir)
-    threading.Thread(target=_setup_project, args=(projects_dir, project, True), daemon=True).start()
+    threading.Thread(target=_setup_project, args=(projects_dir, project, True, force_local), daemon=True).start()
 
 
 def retry_setup(projects_dir, name):
@@ -289,7 +290,7 @@ def retry_setup(projects_dir, name):
     thread.start()
 
 
-def _setup_project(projects_dir, project, is_retry=False):  # NOSONAR — sequential setup pipeline
+def _setup_project(projects_dir, project, is_retry=False, force_local=False):  # NOSONAR — sequential setup pipeline
     """Clone repo, create env, install deps. Updates project.json status as it goes."""
     log.info("Setup thread started for project: %s", project.name)
 
@@ -323,7 +324,7 @@ def _setup_project(projects_dir, project, is_retry=False):  # NOSONAR — sequen
         # Runpod projects build their environment on the pod at every run;
         # a local env, setup script and pip install would only cost time and disk.
         from services import remote_runs
-        if remote_runs.is_remote(project.to_dict()):
+        if remote_runs.is_remote(project.to_dict()) and not force_local:
             _save_status("ready")
             log.info("Setup for %s stops after clone: it runs on Runpod", project.name)
             return

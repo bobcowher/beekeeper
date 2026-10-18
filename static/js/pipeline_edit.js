@@ -14,8 +14,8 @@
 
     const TOP_KEYS = new Set(['name', 'folder', 'description', 'steps']);
     const STEP_KEYS = {
-        train: new Set(['name', 'type', 'project', 'branch', 'env_vars']),
-        task: new Set(['name', 'type', 'command', 'timeout_s']),
+        train: new Set(['name', 'type', 'project', 'branch', 'env_vars', 'script', 'inherit']),
+        task: new Set(['name', 'type', 'command', 'timeout_s', 'project', 'inherit']),
     };
 
     let mode = 'graphical';
@@ -98,7 +98,10 @@
     // ── Model ↔ definition ──────────────────────────────────────────────────
 
     function blankStep(type = 'task') {
-        return { key: nextKey++, name: '', type, project: '', branch: '', env: [], command: '', timeout: '' };
+        return {
+            key: nextKey++, name: '', type, project: '', branch: '', env: [], command: '', timeout: '',
+            script: '', inherit: [],
+        };
     }
 
     function uniqueStepName(base) {
@@ -127,6 +130,9 @@
             if (step.env_vars !== undefined && step.env_vars !== null && !isMapping(step.env_vars)) {
                 return new Error(`step ${i + 1}'s env_vars is not a mapping`);
             }
+            let inherit = step.inherit === undefined || step.inherit === null ? [] : step.inherit;
+            if (typeof inherit === 'string') inherit = [inherit];
+            if (!Array.isArray(inherit)) return new Error(`step ${i + 1}'s inherit is not a list`);
             out.push({
                 ...blankStep(step.type),
                 name: text(step.name),
@@ -135,6 +141,8 @@
                 env: Object.entries(step.env_vars || {}).map(([k, v]) => [k, text(v)]),
                 command: text(step.command),
                 timeout: text(step.timeout_s),
+                script: text(step.script),
+                inherit: inherit.map(text),
             });
         }
         return { description: text(parsed.description), folder: text(parsed.folder), steps: out };
@@ -151,11 +159,16 @@
                 if (step.branch.trim()) out.branch = step.branch.trim();
                 const env = step.env.filter(([k, v]) => k.trim() || v);
                 if (env.length) out.env_vars = Object.fromEntries(env.map(([k, v]) => [k.trim(), v]));
+                if (step.script.trim()) out.script = step.script.trim();
+                if (step.inherit.length) out.inherit = [...step.inherit];
                 return out;
             }
-            const out = { name: step.name, type: 'task', command: step.command };
+            const out = { name: step.name, type: 'task' };
+            if (step.project) out.project = step.project;
+            out.command = step.command;
             const timeout = step.timeout.trim();
             if (timeout) out.timeout_s = /^\d+$/.test(timeout) ? Number(timeout) : timeout;
+            if (step.inherit.length) out.inherit = [...step.inherit];
             return out;
         });
         return defn;
@@ -215,7 +228,9 @@
 
     function projectSelect(step, index) {
         const select = el('select', { id: `step-${step.key}-project`, 'data-path': `steps[${index}].project` });
-        select.append(el('option', { value: '', text: 'Choose a project…' }));
+        select.append(el('option', {
+            value: '', text: step.type === 'task' ? 'None: run in the pipeline folder' : 'Choose a project…',
+        }));
         projects.forEach(project => {
             const ready = project.setup_status === 'ready';
             select.append(el('option', {
@@ -272,8 +287,77 @@
             rows, add);
     }
 
+    // Output paths the step above has: its project's, or what a plain task inherited itself.
+    function previousStepPaths(index) {
+        const prev = model.steps[index - 1];
+        if (!prev) return [];
+        if (prev.type === 'train' || prev.project) {
+            return projects.find(project => project.name === prev.project)?.output_paths || [];
+        }
+        return prev.inherit;
+    }
+
+    function inheritField(step, index) {
+        const chips = el('div', { className: 'chip-list' });
+        const options = el('datalist', { id: `step-${step.key}-inherit-options` });
+        const input = el('input', {
+            type: 'text', id: `step-${step.key}-inherit`, list: options.id,
+            placeholder: 'output path, e.g. checkpoints', autocomplete: 'off',
+        });
+        const suggest = () => {
+            options.replaceChildren(...previousStepPaths(index)
+                .filter(path => !step.inherit.includes(path))
+                .map(path => el('option', { value: path })));
+        };
+        const render = () => {
+            chips.replaceChildren(...step.inherit.map(path => el('span', { className: 'chip' },
+                el('code', { text: path }),
+                el('button', {
+                    type: 'button', className: 'chip-remove', 'aria-label': `Stop inheriting ${path}`,
+                    onclick: () => {
+                        step.inherit = step.inherit.filter(item => item !== path);
+                        markModelChanged();
+                        render();
+                        suggest();
+                    },
+                }, '×'))));
+        };
+        const add = () => {
+            const value = input.value.trim().replace(/\/+$/, '');
+            input.value = '';
+            if (!value || step.inherit.includes(value)) return;
+            step.inherit.push(value);
+            clearFieldError(input);
+            markModelChanged();
+            render();
+            suggest();
+        };
+        input.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ',') {
+                event.preventDefault();
+                add();
+            }
+        });
+        input.addEventListener('change', add);
+        input.addEventListener('focus', suggest);
+        render();
+        suggest();
+        return el('div', { className: 'form-group step-inherit', 'data-path': `steps[${index}].inherit` },
+            el('label', { for: input.id }, 'Inherit ',
+                el('span', {
+                    className: 'tooltip-icon', text: '?',
+                    title: 'Output paths copied from the previous step’s run folder into this step’s, at the same relative paths. The script opens them as checkpoints/model.pt, with no environment variables. Each must be an output path of both steps’ projects.',
+                })),
+            chips, input, options);
+    }
+
     function trainBody(step, index) {
         const select = projectSelect(step, index);
+        const trainFile = () => projects.find(project => project.name === step.project)?.train_file || 'train.py';
+        const script = bindText(el('input', {
+            type: 'text', id: `step-${step.key}-script`, placeholder: trainFile(),
+            'data-path': `steps[${index}].script`,
+        }), step, 'script');
         const branchList = el('datalist', { id: `step-${step.key}-branches` });
         const branch = bindText(el('input', {
             type: 'text', id: `step-${step.key}-branch`, list: branchList.id,
@@ -284,17 +368,27 @@
             clearFieldError(select);
             markModelChanged();
             fillBranches(step, branchList);
+            script.placeholder = trainFile();
         });
         fillBranches(step, branchList);
         return [
             el('div', { className: 'form-row' },
                 field('Project', select, 'Queues a training run on this project and waits for it to finish. The run uses the project’s normal queue and settings.'),
                 el('div', {}, field('Branch', branch, 'Optional. Leave empty to use the project’s own branch.'), branchList)),
+            el('div', { className: 'form-row' },
+                field('Script', script, 'Optional. The file to run, relative to the workspace. Leave empty to use the project’s training file.')),
+            index > 0 ? inheritField(step, index) : null,
             envRows(step, index),
         ];
     }
 
     function taskBody(step, index) {
+        const select = projectSelect(step, index);
+        select.addEventListener('change', () => {
+            step.project = select.value;
+            clearFieldError(select);
+            markModelChanged();
+        });
         const command = bindText(el('textarea', {
             id: `step-${step.key}-command`, className: 'code-editor', spellcheck: 'false',
             'data-path': `steps[${index}].command`,
@@ -307,7 +401,10 @@
             placeholder: '3600', 'data-path': `steps[${index}].timeout_s`,
         }), step, 'timeout');
         return [
-            field('Command', command, 'Run with bash -c in this run’s shared folder, $BEEKEEPER_PIPELINE_RUN_DIR. Earlier steps’ outputs are in $BEEKEEPER_PREV_STEP_DIR and $BEEKEEPER_STEP_<NAME>_DIR.'),
+            el('div', { className: 'form-row' },
+                field('Project', select, 'Optional. A project task runs in that project’s workspace on this server, as a run of the project (no GPU), and can pass output paths on. Without a project the task runs in the pipeline’s folder.')),
+            field('Command', command, 'Run with bash -c. A project task runs in the project’s workspace. A plain task runs in this run’s shared folder, $BEEKEEPER_PIPELINE_RUN_DIR, or with Inherit, in its own folder holding the inherited paths. Without Inherit, earlier steps’ outputs are in $BEEKEEPER_PREV_STEP_DIR and $BEEKEEPER_STEP_<NAME>_DIR.'),
+            index > 0 ? inheritField(step, index) : null,
             el('div', { className: 'step-timeout' },
                 field('Timeout (seconds)', timeout, 'Optional. The task is killed after this long. Default 3600.')),
         ];
@@ -337,18 +434,23 @@
 
     // What a collapsed step shows: its project or the first line of its command.
     function stepSummary(step) {
+        const inherits = step.inherit.length ? ` · inherits ${step.inherit.join(', ')}` : '';
         if (step.type === 'train') {
             if (!step.project) return { text: 'no project chosen', missing: true };
             const vars = step.env.filter(([k]) => k.trim()).length;
             const variableLabel = vars === 1 ? 'variable' : 'variables';
             return {
                 text: step.project + (step.branch.trim() ? ` @ ${step.branch.trim()}` : '') +
-                    (vars ? ` · ${vars} ${variableLabel}` : ''),
+                    (step.script.trim() ? ` · ${step.script.trim()}` : '') +
+                    (vars ? ` · ${vars} ${variableLabel}` : '') + inherits,
             };
         }
         const lines = step.command.split('\n').filter(line => line.trim());
         if (!lines.length) return { text: 'no command', missing: true };
-        return { text: lines[0] + (lines.length > 1 ? `  (+${lines.length - 1} more)` : ''), code: true };
+        const where = step.project ? `${step.project}: ` : '';
+        return {
+            text: where + lines[0] + (lines.length > 1 ? `  (+${lines.length - 1} more)` : '') + inherits, code: true,
+        };
     }
 
     function refreshHeader(card) {
@@ -579,6 +681,51 @@
         document.querySelectorAll('.has-error').forEach(node => node.classList.remove('has-error'));
     }
 
+    // An error that one call fixes carries a fix object (see pipeline_checks.py). Beekeeper
+    // never applies it on its own; this button is the user asking for it.
+    function fixButton(error) {
+        const fix = error.fix;
+        if (!fix || !fix.project) return null;
+        const project = encodeURIComponent(fix.project);
+        let label, note, request;
+        if (fix.call === 'update_project') {
+            const paths = fix.output_paths_add || [];
+            label = `Add ${paths.join(', ')} to ${fix.project}’s output paths`;
+            note = `Every run of ${fix.project}, standalone runs included, will save ${paths.map(p => `${p}/`).join(', ')} in its run folder from then on.`;
+            request = () => api(`/api/v1/projects/${project}`, {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ output_paths_add: paths }),
+            });
+        } else if (fix.call === 'build_local_env') {
+            label = `Build a local environment for ${fix.project}`;
+            note = `Creates ${fix.project}’s environment on this server so tasks can run in its workspace. Its training stays on Runpod.`;
+            request = () => api(`/api/v1/projects/${project}/local-env`, { method: 'POST' });
+        } else {
+            return null;
+        }
+        const status = el('span', { className: 'muted fix-status', role: 'status' });
+        const button = el('button', {
+            type: 'button', className: 'btn btn-secondary btn-sm fix-btn',
+            onclick: async () => {
+                button.disabled = true;
+                try {
+                    const data = await request();
+                    if (!data.success) throw new Error(errorMessage(data, 'the request failed'));
+                    await loadProjects();
+                    if (fix.call === 'build_local_env') {
+                        status.textContent = 'Building. Validate again once the project’s setup is ready.';
+                    } else {
+                        $('btn-yaml-validate').click();
+                    }
+                } catch (err) {
+                    status.textContent = `Could not apply: ${err.message}`;
+                    button.disabled = false;
+                }
+            },
+        }, label);
+        return el('div', { className: 'field-fix' }, button, ' ', status, el('div', { className: 'muted fix-note', text: note }));
+    }
+
     // In the graphical view an error sits under the field it names (steps[2].project → that
     // dropdown); anything without a field, like a YAML syntax error, goes in the list.
     function showErrors(errors) {
@@ -597,12 +744,13 @@
                 const step = model.steps.find(item => String(item.key) === card.dataset.key);
                 if (step) setExpanded(step, true);   // the field is inside the collapsed form
             }
-            const message = el('div', { className: 'field-error', role: 'alert', text: error.message });
+            const message = el('div', { className: 'field-error', role: 'alert' }, error.message, fixButton(error));
             if (target.tagName === 'LI') target.querySelector('.step-editor-head').after(message);
             else target.after(message);
         });
         unplaced.forEach(error => {
-            $('yaml-errors').append(el('li', {}, el('code', { text: error.path || '(root)' }), ` ${error.message}`));
+            $('yaml-errors').append(el('li', {}, el('code', { text: error.path || '(root)' }), ` ${error.message}`,
+                fixButton(error)));
         });
         const first = document.querySelector('.invalid, #yaml-errors li');
         if (first) first.scrollIntoView({ block: 'center', behavior: 'smooth' });

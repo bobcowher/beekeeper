@@ -10,6 +10,7 @@
     let allRuns = [];
     let filterNotable = false;
     let filterTag = '';
+    let filterKind = 'all';   // 'all' | 'train' | 'task' (pipeline project tasks)
     const checkedIds = new Set();
     const expandedNotes = new Set();
 
@@ -50,6 +51,7 @@
 
     function getFiltered() {
         return allRuns.filter(run => {
+            if (filterKind !== 'all' && (run.kind || 'train') !== filterKind) return false;
             if (filterNotable && !run.notable) return false;
             if (filterTag) {
                 const tags = (run.tags || '').split(',').map(t => t.trim()).filter(Boolean);
@@ -65,6 +67,11 @@
         const filtered = getFiltered();
 
         let html = '<div class="history-filter-bar">';
+        html += '<div class="segmented" role="group" aria-label="Run kind">';
+        [['all', 'All'], ['train', 'Training'], ['task', 'Tasks']].forEach(([kind, label]) => {
+            html += `<button type="button" class="segmented-btn filter-kind-btn" data-kind="${kind}" aria-pressed="${filterKind === kind}">${label}</button>`;
+        });
+        html += '</div>';
         html += `<button class="filter-notable-btn${filterNotable ? ' active' : ''}" id="filter-notable-btn">&#9733; Starred</button>`;
         html += `<input type="text" class="filter-tag-input" id="filter-tag-input" placeholder="Filter by tag…" value="${escHtml(filterTag)}">`;
         if (checkedIds.size === 2) {
@@ -94,6 +101,7 @@
         html += '<th>Duration</th>';
         html += '<th>Status</th>';
         html += '<th>Branch / Commit</th>';
+        html += '<th>Script</th>';
         html += '<th>Tags</th>';
         html += '<th>Actions</th>';
         html += '</tr></thead><tbody>';
@@ -131,6 +139,9 @@
         row += `<td>${duration}</td>`;
         row += `<td><span class="status-badge status-${statusClass}">${run.status}</span></td>`;
         row += `<td><code>${branch}</code> <code title="${commitMsg}">${commitShort}</code></td>`;
+        const script = escHtml(run.train_file || '');
+        const kindLabel = run.kind === 'task' ? '<span class="run-kind-task">task</span> ' : '';
+        row += `<td class="run-script">${kindLabel}<code title="${script}">${script || '-'}</code></td>`;
         row += `<td class="tags-cell" data-run-id="${run.run_id}">${tagsHtml}</td>`;
         row += '<td class="run-actions">';
         row += `<button class="btn btn-secondary btn-sm notes-btn" data-run-id="${run.run_id}">${run.notes ? '&#128221;' : '+'} Notes</button>`;
@@ -144,7 +155,7 @@
         // Notes sub-row
         const notesText = escHtml(run.notes || '');
         row += `<tr class="notes-row" data-run-id="${run.run_id}" style="${notesOpen ? '' : 'display:none'}">`;
-        row += `<td colspan="9"><textarea class="notes-editor" data-run-id="${run.run_id}" placeholder="Add post-run observations…">${notesText}</textarea></td>`;
+        row += `<td colspan="10"><textarea class="notes-editor" data-run-id="${run.run_id}" placeholder="Add post-run observations…">${notesText}</textarea></td>`;
         row += '</tr>';
 
         return row;
@@ -153,6 +164,13 @@
     // ---------- Events ----------
 
     function attachFilterEvents() {
+        listEl.querySelectorAll('.filter-kind-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                filterKind = btn.dataset.kind;
+                renderAll();
+            });
+        });
+
         document.getElementById('filter-notable-btn')?.addEventListener('click', () => {
             filterNotable = !filterNotable;
             renderAll();

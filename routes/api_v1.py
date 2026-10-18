@@ -19,7 +19,7 @@ from services.process_manager import can_start_training, start_training, stop_tr
 from services.stats_service import get_all_stats, get_cpu_stats, get_memory_stats, get_gpu_stats, get_gpu_platform_info
 from services.db_service import get_db
 from services.auth_service import api_key_required
-from services.project_service import ensure_data_dir_symlink, validate_output_paths
+from services.project_service import ensure_data_dir_symlink, parse_output_paths, validate_output_paths
 from services.git_utils import git_env
 from services.run_storage_service import delete_run_storage
 
@@ -36,7 +36,7 @@ from services.pipeline_schema import (NAME_RE as PIPELINE_NAME_RE, PipelineValid
 api_v1_bp = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 
 SERVER_VERSION = "1.1.0"
-MIN_MCP_VERSION = "0.6.0"
+MIN_MCP_VERSION = "0.7.0"
 PROJECT_FILE = "project.json"
 MCP_SERVER_FILE = "mcp_server.py"
 PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -153,6 +153,8 @@ def list_projects():
                     "pinned": project.pinned,
                     "last_run_at": project.last_run_at,
                     "folder": project.folder,
+                    "train_file": project.train_file,
+                    "output_paths": project.output_paths,
                 })
             except Exception:
                 continue
@@ -324,6 +326,26 @@ def clone_project(name):
     )
 
 
+@api_v1_bp.route("/projects/<name>/local-env", methods=["POST"])
+@api_key_required
+def build_project_local_env(name):
+    """Build a local environment (env, setup script, pip install) in the existing workspace.
+
+    Pipeline project tasks run on this server, so a Runpod project needs one for them.
+    The project keeps training on Runpod. Runs asynchronously; poll GET /projects/<name>.
+    """
+    project = load_project(name)
+    if project.setup_status in SETUP_ACTIVE_STATUSES:
+        return api_response(error_code="SETUP_IN_PROGRESS",
+                            error_message="Project setup is already running", status_code=409)
+    if get_training_status(name)["status"] == "running":
+        return api_response(error_code="TRAINING_RUNNING",
+                            error_message="Cannot build an environment while a run is active", status_code=409)
+    from services import project_service
+    project_service.build_local_env(current_app.config["PROJECTS_DIR"], name, force_local=True)
+    return api_response(data={"status": "building"}, status_code=202)
+
+
 @api_v1_bp.route("/projects/<name>/setup/retry", methods=["POST"])
 @api_key_required
 def retry_project_setup(name):
@@ -437,6 +459,21 @@ def rename_project_api(name):
     })
 
 
+def _add_output_paths(project, paths):
+    """Append output paths (the fix a pipeline inherit check offers). Existing ones are kept."""
+    if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+        return api_response(error_code="INVALID_OUTPUT_PATHS",
+                            error_message="output_paths_add must be a list of paths", status_code=400)
+    try:
+        existing = list(project.output_paths or [])
+        added = [p for p in parse_output_paths(paths) if p not in existing]
+        merged = validate_output_paths(existing + added, project.tensorboard_log_dir or "runs")
+    except ValueError as e:
+        return api_response(error_code="INVALID_OUTPUT_PATHS", error_message=str(e), status_code=400)
+    project.output_paths = merged
+    return None
+
+
 def _apply_text_project_updates(project, data):
     if "folder" in data:
         try:
@@ -448,6 +485,10 @@ def _apply_text_project_updates(project, data):
             setattr(project, field, data[field].strip() or getattr(project, field))
     if "setup_script" in data:
         project.setup_script = data["setup_script"].strip()
+    if "output_paths_add" in data:
+        error = _add_output_paths(project, data["output_paths_add"])
+        if error is not None:
+            return error
     if "env_vars" in data:
         if not isinstance(data["env_vars"], dict):
             return api_response(
@@ -716,8 +757,10 @@ def _save_body(name: str | None):
         target = name or (data.get("name") if isinstance(data, dict) else None)
         if not isinstance(target, str) or not PIPELINE_NAME_RE.fullmatch(target):
             validate_pipeline(data)            # raises with the precise name error
-        return pipeline_store.save_pipeline_text(_pipelines_dir(), target, text)
-    return pipeline_store.save_pipeline(_pipelines_dir(), data, expected_name=name)
+        return pipeline_store.save_pipeline_text(_pipelines_dir(), target, text,
+                                                 projects_dir=current_app.config["PROJECTS_DIR"])
+    return pipeline_store.save_pipeline(_pipelines_dir(), data, expected_name=name,
+                                        projects_dir=current_app.config["PROJECTS_DIR"])
 
 
 @api_v1_bp.route("/pipelines", methods=["GET"])
@@ -752,9 +795,11 @@ def pipelines_create():
 @api_v1_bp.route("/pipelines/validate", methods=["POST"])
 @api_key_required
 def pipelines_validate():
-    """Validate a YAML or JSON definition.
+    """Validate a YAML or JSON definition, including the checks against project settings.
 
-    Besides the verdict, returns what an editor needs to switch views: `parsed` (the mapping as
+    An error the user can fix with one call carries error_code and a fix object naming that
+    call (e.g. {"call": "update_project", "project": "m", "output_paths_add": ["checkpoints"]});
+    nothing is changed until that call is made. Besides the verdict, returns what an editor needs to switch views: `parsed` (the mapping as
     given, even when invalid), `definition` (normalized, when valid) and, for JSON bodies,
     `yaml` (that mapping as YAML, valid or not).
     """
@@ -765,7 +810,7 @@ def pipelines_validate():
                                   "parsed": None, "definition": None, "yaml": None})
     draft = draft_yaml(data) if text is None and isinstance(data, dict) else None
     try:
-        defn = validate_pipeline(data)
+        defn = pipeline_store.validate_with_projects(data, current_app.config["PROJECTS_DIR"])
     except PipelineValidationError as e:
         return api_response(data={"valid": False, "errors": e.errors, "normalized_yaml": None,
                                   "parsed": data, "definition": None, "yaml": draft})

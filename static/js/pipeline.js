@@ -90,6 +90,43 @@
         return (definition.steps || []).find(step => step.name === name) || {};
     }
 
+    // Train steps and project tasks run as runs of their project; plain tasks run here.
+    function isProjectStep(step) {
+        return step.type === 'train' || Boolean(step.project || stepDefinition(step.name).project);
+    }
+
+    function formatSize(bytes) {
+        for (const [unit, size] of [['GB', 1e9], ['MB', 1e6], ['KB', 1e3]]) {
+            if (bytes >= size) return `${(bytes / size).toFixed(1)} ${unit}`;
+        }
+        return `${bytes} B`;
+    }
+
+    // "my-model-3" → its run log; a plain task's source ("fac#1:check") has no page of its own.
+    function runLogLink(ref) {
+        const match = /^(.+)-(\d+)$/.exec(ref || '');
+        if (!match || ref.includes('#')) return textElement('span', '', ref || '');
+        const link = document.createElement('a');
+        link.href = `/projects/${encodeURIComponent(match[1])}/history/${match[2]}/log`;
+        link.textContent = ref;
+        return link;
+    }
+
+    function inheritedList(step) {
+        const entries = step.inherited || [];
+        if (!entries.length) return null;
+        const list = document.createElement('ul');
+        list.className = 'step-inherited';
+        entries.forEach(entry => {
+            const item = document.createElement('li');
+            item.append('Inherited ', textElement('code', '', `${entry.path}/`), ` from ${entry.source_step} (`,
+                runLogLink(entry.source_run_ref), `), ${formatSize(entry.bytes)}`);
+            if (!entry.files) item.append(' ', textElement('span', 'muted', '(empty)'));
+            list.appendChild(item);
+        });
+        return list;
+    }
+
     function viewedRun() {
         return selectedRun ? runs.find(run => run.run_id === selectedRun) : started[0];
     }
@@ -145,7 +182,15 @@
         const def = stepDefinition(step.name);
         if (step.type === 'train') {
             const branch = stepBranch(step) ? ` @ ${stepBranch(step)}` : '';
-            return textElement('div', 'step-detail step-detail-wrap', `${step.project || def.project || ''}${branch}`);
+            const script = def.script ? ` · ${def.script}` : '';
+            return textElement('div', 'step-detail step-detail-wrap',
+                `${step.project || def.project || ''}${branch}${script}`);
+        }
+        if (isProjectStep(step)) {
+            const line = textElement('div', 'step-detail', `${step.project || def.project} · `);
+            line.appendChild(textElement('code', '', def.command || ''));
+            line.title = def.command || '';
+            return line;
         }
         const line = textElement('div', 'step-detail', '');
         const code = textElement('code', '', def.command || '');
@@ -171,7 +216,7 @@
             button.className = 'step-card';
             button.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
             button.setAttribute('aria-controls', 'step-panel');
-            if (step.type === 'task') button.dataset.stepLog = step.name;
+            if (step.type === 'task' && !isProjectStep(step)) button.dataset.stepLog = step.name;
             button.addEventListener('click', () => chooseStep(run ? run.run_id : null, step.name));
 
             const name = textElement('div', 'step-name', step.name);
@@ -196,14 +241,15 @@
     }
 
     function panelNote(step, definitionStep) {
-        if (step.type !== 'task') return `train · ${step.project || definitionStep.project || ''}`;
+        if (isProjectStep(step)) return `${step.type} · ${step.project || definitionStep.project || ''}`;
         if (!step.has_log) return '';
         return step.status === 'running' ? 'log · live' : 'log';
     }
 
     function renderTrainingPanel(body, run, step, definitionStep) {
+        const what = step.type === 'task' ? 'Task run' : 'Training run';
         if (step.run_id) {
-            const paragraph = textElement('p', '', 'Training run ');
+            const paragraph = textElement('p', '', `${what} `);
             const link = document.createElement('a');
             link.href = `/projects/${encodeURIComponent(step.project)}/history/${step.run_id}/log`;
             link.textContent = step.run_ref;
@@ -213,11 +259,15 @@
         } else if (step.status === 'queued') {
             body.appendChild(textElement('p', '', `Waiting in ${step.project}'s queue` +
                 (step.wait_reason ? `: ${step.wait_reason}` : '.')));
+        } else if (step.type === 'task') {
+            body.appendChild(textElement('p', 'muted',
+                `${run ? 'Not started yet. ' : ''}Queues a task run on ${definitionStep.project || step.project}.`));
         } else {
             const branch = stepBranch(step) ? ` on branch ${stepBranch(step)}` : '';
             body.appendChild(textElement('p', 'muted',
                 `${run ? 'Not started yet. ' : ''}Queues a training run on ${definitionStep.project || step.project}${branch}.`));
         }
+        if (step.type === 'task') body.appendChild(textElement('pre', 'step-command', definitionStep.command || ''));
         const env = definitionStep.env_vars || {};
         if (Object.keys(env).length) {
             body.appendChild(textElement('pre', 'step-command',
@@ -253,19 +303,22 @@
         const def = stepDefinition(step.name);
         $('step-panel-title').textContent = step.name;
         $('step-panel-note').textContent = panelNote(step, def);
+        const inherited = inheritedList(step);
+        if (inherited) body.appendChild(inherited);
 
+        if (isProjectStep(step)) {
+            pre.hidden = true;
+            renderTrainingPanel(body, run, step, def);
+            return;
+        }
         if (step.type === 'task' && run && step.has_log) {
             pre.hidden = false;
             return;   // the log itself is filled by loadLog()
         }
         pre.hidden = true;
-        if (step.type === 'task') {
-            const command = textElement('pre', 'step-command', def.command || '');
-            body.appendChild(textElement('div', 'muted', run ? 'Not started yet. Command:' : 'Command:'));
-            body.appendChild(command);
-            return;
-        }
-        renderTrainingPanel(body, run, step, def);
+        const command = textElement('pre', 'step-command', def.command || '');
+        body.appendChild(textElement('div', 'muted', run ? 'Not started yet. Command:' : 'Command:'));
+        body.appendChild(command);
     }
 
     async function loadLog(run) {

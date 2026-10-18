@@ -121,9 +121,12 @@ def choose_gpus(catalog: list[dict], wanted: list[str], floor_gb: int, cloud: st
     return sorted(fits, key=lambda g: g["price"][key]), warnings
 
 
-def precheck(projects_dir: str, name: str, project: dict, extra_env: dict | None = None) -> tuple[dict | None, dict | None]:
+def precheck(projects_dir: str, name: str, project: dict, extra_env: dict | None = None,
+             inherit: dict | None = None) -> tuple[dict | None, dict | None]:
     """Everything that may refuse a remote start, outside process_manager's lock (makes API calls).
 
+    inherit is a pipeline step's inherited paths (see process_manager.start_training); they
+    are seeded into the run folder here and uploaded with it, so they count toward the limit.
     Returns (error, plan). error is {"error", "code"} like any start refusal.
     """
     settings = runpod_config.load()
@@ -153,6 +156,9 @@ def precheck(projects_dir: str, name: str, project: dict, extra_env: dict | None
     inputs = _input_dirs(extra_env)
     if inputs:
         sizes["pipeline inputs"] = sum(_dir_size(p) for p in set(inputs.values()))
+    if inherit and inherit.get("paths"):
+        from services.inherit import source_bytes
+        sizes["inherited"] = source_bytes(inherit["source_run_dir"], inherit["paths"])
     total = sum(sizes.values())
     if settings.max_upload_gb and total > settings.max_upload_gb * 1e9:
         biggest = max(sizes, key=sizes.get)
@@ -413,6 +419,9 @@ class RemoteProcess:
         for key in sorted(inputs):
             if targets[key] == f"/bk/inputs/{key}":   # first key for this folder does the upload
                 self._push(f"pipeline input {key}", inputs[key], targets[key])
+        if ctx.get("inherited"):
+            # The seeded run folder: .beekeeper/ and the inherited paths, at the same relative paths.
+            self._push("run folder (inherited paths)", ctx["persistent_run_dir"], "/bk/run")
         if ctx.get("data_dir"):
             self._push("data dir", ctx["data_dir"], "/bk/data")
 

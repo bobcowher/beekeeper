@@ -67,13 +67,18 @@
             <tr><th colspan="2"><code>type: train</code></th></tr>
             <tr><td><code>project</code></td><td>Project to train. The run goes through that project's queue.</td></tr>
             <tr><td><code>branch</code></td><td>Optional. Defaults to the project's branch.</td></tr>
+            <tr><td><code>script</code></td><td>Optional. The file to run, relative to the workspace. Defaults to the project's training file.</td></tr>
+            <tr><td><code>inherit</code></td><td>Optional. Output paths copied from the previous step's run folder into this run's, at the same relative paths, e.g. <code>[checkpoints, data]</code>. Each must be an output path of both projects.</td></tr>
             <tr><td><code>env_vars</code></td><td>Optional map of string values, added to the run's environment. Values are not shell-expanded.</td></tr>
             <tr><th colspan="2"><code>type: task</code></th></tr>
-            <tr><td><code>command</code></td><td>Run with <code>bash -c</code> in the pipeline run folder.</td></tr>
+            <tr><td><code>command</code></td><td>Run with <code>bash -c</code>: in the project's workspace for a project task, otherwise in the pipeline run folder (or, with <code>inherit</code>, in the task's own folder).</td></tr>
+            <tr><td><code>project</code></td><td>Optional. Makes it a project task: a run of that project on this server, through its queue, with its environment and no GPU.</td></tr>
+            <tr><td><code>inherit</code></td><td>Optional. As for train steps. A task without a project passes on exactly what it inherited.</td></tr>
             <tr><td><code>timeout_s</code></td><td>Optional. Seconds before the task is killed. Default 3600.</td></tr>
             <tr><th colspan="2">Environment every step gets</th></tr>
             <tr><td><code>BEEKEEPER_PIPELINE_RUN_DIR</code></td><td>This run's shared folder.</td></tr>
             <tr><td><code>BEEKEEPER_PIPELINE_RUN_ID</code></td><td>The run number.</td></tr>
+            <tr><th colspan="2">Steps without <code>inherit</code> also get</th></tr>
             <tr><td><code>BEEKEEPER_PREV_STEP_DIR</code></td><td>Output folder of the previous step.</td></tr>
             <tr><td><code>BEEKEEPER_STEP_&lt;NAME&gt;_DIR</code></td><td>Output folder of an earlier step; name uppercased, <code>-</code> becomes <code>_</code>.</td></tr>
         </tbody>

@@ -1129,7 +1129,7 @@ def test_extra_env_reaches_execute_training(app, fake_python, no_launch):
     make_project_dir(app, "p")
     r = pm.start_training(app.config["PROJECTS_DIR"], "p", extra_env={"LR": "1e-5"})
     assert "error" not in r
-    assert no_launch["args"][-1] == {"LR": "1e-5"}
+    assert no_launch["args"][9] == {"LR": "1e-5"}
 
 
 def test_merge_run_env_precedence_and_reserved():

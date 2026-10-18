@@ -37,7 +37,7 @@ from fastmcp import FastMCP
 BEEKEEPER_HOST = os.environ.get("BEEKEEPER_HOST", "http://localhost:5000").rstrip("/")
 BEEKEEPER_API_KEY = os.environ.get("BEEKEEPER_API_KEY", "")
 
-MCP_VERSION = "0.6.0"
+MCP_VERSION = "0.7.0"
 
 mcp = FastMCP("Beekeeper")
 
@@ -221,6 +221,7 @@ def update_project(
     runpod_gpu_types: list[str] | None = None,
     runpod_image: str | None = None,
     data_dir_sync: bool | None = None,
+    output_paths_add: list[str] | None = None,
 ) -> dict:
     """
     Update editable settings for an existing project. Only the fields you provide
@@ -230,6 +231,11 @@ def update_project(
 
     folder: dashboard grouping label (flat, no '/'); '' removes it from its folder.
     Folder-only changes are allowed while training.
+
+    output_paths_add: workspace-relative folders to add to the project's output paths
+    (existing ones are kept). Every run of the project, standalone or in a pipeline, then
+    saves those folders in its run folder. This is the fix validate_pipeline offers for
+    INHERIT_PATH_NOT_DECLARED; only make it when the user agrees.
 
     Static data directory (mounts a read-only system path into the workspace):
       data_dir_enabled — enable the symlink (default: false)
@@ -306,6 +312,8 @@ def update_project(
                        ("runpod_image", runpod_image), ("data_dir_sync", data_dir_sync)):
         if value is not None:
             body[key] = value
+    if output_paths_add is not None:
+        body["output_paths_add"] = output_paths_add
     return _patch(f"/projects/{project_name}", body)
 
 
@@ -338,6 +346,33 @@ def retry_setup(project_name: str, wait: bool = True, timeout_seconds: int = 600
             return {"success": False, "setup_status": "error", "error": error}
 
     return {"success": False, "setup_status": "timeout", "error": "Timed out waiting for setup"}
+
+
+@mcp.tool()
+def build_local_env(project_name: str, wait: bool = True, timeout_seconds: int = 900) -> dict:
+    """
+    Build a local environment (venv, setup script, pip install) for a project, keeping
+    its workspace. Pipeline project tasks run on this server, so a Runpod project needs
+    one before a pipeline can use it in a task step; its training stays on Runpod.
+    This is the fix validate_pipeline offers for TASK_NEEDS_LOCAL_ENV; only run it when
+    the user agrees. If wait=True (default), polls until setup is ready or fails.
+    """
+    result = _post(f"/projects/{project_name}/local-env")
+    if not wait or not result.get("success"):
+        return result
+
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        time.sleep(5)
+        info = _get(f"/projects/{project_name}")
+        project = info.get("data", {}).get("project", {})
+        status = project.get("setup_status", "unknown")
+        if status == "ready":
+            return {"success": True, "setup_status": "ready"}
+        if status == "error":
+            return {"success": False, "setup_status": "error", "error": project.get("setup_error", "unknown")}
+
+    return {"success": False, "setup_status": "timeout", "error": "Timed out waiting for the environment"}
 
 
 @mcp.tool()
@@ -439,39 +474,96 @@ def get_pipeline(name: str) -> dict:
     return _get(f"/pipelines/{name}")
 
 
+_FIX_NOTE = """
+    Validation also checks the projects. An error that one call can fix has an error_code
+    and a fix object naming that call, for example
+      {"path": "steps[2].inherit", "error_code": "INHERIT_PATH_NOT_DECLARED",
+       "fix": {"call": "update_project", "project": "my-model", "output_paths_add": ["checkpoints"]}}
+      {"path": "steps[1].project", "error_code": "TASK_NEEDS_LOCAL_ENV",
+       "fix": {"call": "build_local_env", "project": "my-model"}}
+    Nothing is changed until you make that call, which is a separate tool call. Ask the
+    user first: an added output path is saved by every later run of that project.
+"""
+
+
+def _with_fix_note(fn):
+    fn.__doc__ = (fn.__doc__ or "").rstrip() + "\n" + _FIX_NOTE
+    return fn
+
+
 @mcp.tool()
+@_with_fix_note
 def create_pipeline(definition_yaml: str) -> dict:
     """Create a pipeline from YAML. Returns validation errors on failure.
 
     Pipeline YAML:
-      name: chess-factory          # lowercase, digits, '_' '-'
+      name: my-model-factory       # lowercase, digits, '_' '-'
       folder: chess                # optional
       steps:
-        - name: pretrain           # unique; exposed to later steps as $BEEKEEPER_STEP_PRETRAIN_DIR
+        - name: fetch-data
+          type: task
+          project: my-model        # project task: runs in my-model's workspace on this server
+          command: bash scripts/download.sh   # writes data/ (an output path of my-model)
+        - name: pretrain           # unique step name
           type: train
-          project: chess-pretrain  # an existing project; the run is queued on it
+          project: my-model        # an existing project; the run is queued on it
+          script: pretrain.py      # optional; defaults to the project's train_file
+          inherit: [data]          # optional; output paths copied from the step above
           branch: main             # optional
           env_vars: {LR: "1e-5"}   # optional, values must be quoted strings
-        - name: deploy
-          type: task               # shell command run on the Beekeeper host
+        - name: check
+          type: task
+          project: my-model
+          inherit: [checkpoints, data]
+          command: test -s checkpoints/pretrained.pt
+        - name: posttrain
+          type: train
+          project: my-model
+          script: posttrain.py
+          inherit: [checkpoints, data]
+        - name: export
+          type: task               # plain task (no project): shell command on the Beekeeper host
+          inherit: [checkpoints]
           timeout_s: 600           # optional, default 3600
-          command: |
-            cp "$BEEKEEPER_STEP_PRETRAIN_DIR/model.pt" /srv/models/
-    Every step also gets BEEKEEPER_PIPELINE_RUN_DIR and BEEKEEPER_PREV_STEP_DIR.
+          command: cp checkpoints/posttrained.pt /models/my-model.pt
+
+    inherit: copies the named output paths from the previous step's run folder into this
+    step's fresh run folder, at the same relative paths, so the script opens
+    checkpoints/pretrained.pt with no env vars or absolute paths. Only the step directly
+    above is a source, and each path must be an output path of both projects (a plain
+    task has the paths it inherited). It works the same on this server and on Runpod;
+    on Runpod the inherited files count toward the upload limit.
+
+    Project tasks (a task with project:) are runs of that project, kind "task": they go
+    through its queue, get a run folder and output-path links, run with its env on PATH
+    and no GPU, and always run on this server. A plain task with inherit runs in its own
+    step folder; without inherit it runs in the pipeline run folder.
+
+    Steps without inherit also get BEEKEEPER_PREV_STEP_DIR and BEEKEEPER_STEP_<NAME>_DIR
+    (absolute folders of earlier steps). Steps with inherit don't. Every step gets
+    BEEKEEPER_PIPELINE, BEEKEEPER_PIPELINE_RUN_ID and BEEKEEPER_PIPELINE_RUN_DIR.
     A step that exits non-zero fails the pipeline; later steps are skipped.
     """
     return _send_yaml("POST", "/pipelines", definition_yaml)
 
 
 @mcp.tool()
+@_with_fix_note
 def validate_pipeline(definition_yaml: str) -> dict:
-    """Validate pipeline YAML without saving it. Returns normalized YAML or validation errors."""
+    """Validate pipeline YAML without saving it. Returns normalized YAML or validation errors.
+
+    Field reference (script, inherit, project tasks): see create_pipeline.
+    """
     return _send_yaml("POST", "/pipelines/validate", definition_yaml)
 
 
 @mcp.tool()
+@_with_fix_note
 def update_pipeline(name: str, definition_yaml: str) -> dict:
-    """Replace a pipeline's YAML. Running pipeline runs keep the definition they started with."""
+    """Replace a pipeline's YAML. Running pipeline runs keep the definition they started with.
+
+    Field reference (script, inherit, project tasks): see create_pipeline.
+    """
     return _send_yaml("PUT", f"/pipelines/{name}", definition_yaml)
 
 

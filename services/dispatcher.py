@@ -68,6 +68,24 @@ def _claim_started_run(db, projects_dir, name, entry, result):
     process_manager.stop_training(projects_dir, name, run_id=result["run_id"])
 
 
+def _inherit_of(entry) -> dict | None:
+    if not entry.get("inherit"):
+        return None
+    return {"paths": entry["inherit"], "source_run_dir": entry.get("source_run_dir"),
+            "source_step": entry.get("source_step"), "source_run_ref": entry.get("source_run_ref")}
+
+
+def _start_entry(projects_dir, name, entry):
+    """Start a queue entry: a training run, or a pipeline project task (kind 'task')."""
+    extra_env = entry["env_vars"] or None
+    inherit = _inherit_of(entry)
+    if entry.get("kind") == "task":
+        return process_manager.start_task(projects_dir, name, entry["command"], entry["timeout_s"],
+                                          inherit=inherit, extra_env=extra_env)
+    step = {k: v for k, v in (("script", entry.get("script")), ("inherit", inherit)) if v}
+    return process_manager.start_training(projects_dir, name, branch=entry["branch"], extra_env=extra_env, **step)
+
+
 def dispatch_project_queue(projects_dir, name) -> None:
     """Try to start the oldest queued run for one project."""
     db = get_db()
@@ -75,8 +93,7 @@ def dispatch_project_queue(projects_dir, name) -> None:
     if not queued:
         return
     entry = queued[0]
-    result = process_manager.start_training(
-        projects_dir, name, branch=entry["branch"], extra_env=entry["env_vars"] or None)
+    result = _start_entry(projects_dir, name, entry)
     if "error" not in result:
         _claim_started_run(db, projects_dir, name, entry, result)
     elif _is_transient(result.get("code"), projects_dir, name):

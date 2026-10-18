@@ -118,6 +118,24 @@ def test_validate_pipeline_sends_yaml(yaml_calls):
     )
 
 
+def test_update_project_output_paths_add(calls):
+    server.update_project("my-model", output_paths_add=["checkpoints"])
+    assert calls[-1] == ("_patch", "/projects/my-model", {"output_paths_add": ["checkpoints"]})
+
+
+def test_build_local_env(calls):
+    server.build_local_env("my-model", wait=False)
+    assert calls[-1] == ("_post", "/projects/my-model/local-env", None)
+
+
+def test_pipeline_tool_docs_explain_inherit_and_fixes():
+    for tool in (server.create_pipeline, server.update_pipeline, server.validate_pipeline):
+        doc = (getattr(tool, "fn", None) or tool).__doc__
+        assert "inherit" in doc and "fix" in doc, tool
+    doc = (getattr(server.create_pipeline, "fn", None) or server.create_pipeline).__doc__
+    assert "script:" in doc and "project task" in doc.lower()
+
+
 def test_pipeline_definition_tools(calls):
     server.get_pipeline("p")
     assert calls[-1] == ("_get", "/pipelines/p", None)

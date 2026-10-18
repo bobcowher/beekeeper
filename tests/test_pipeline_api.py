@@ -261,6 +261,65 @@ def test_latest_run_skips_runs_that_never_started(client, app):
     assert latest["run_id"] == 1 and latest["status"] == "running"
 
 
+INHERIT_YAML = ("name: inh\nsteps:\n  - {name: pre, type: train, project: a}\n"
+                "  - {name: post, type: train, project: my-model, inherit: checkpoints}\n")
+
+
+def test_validate_returns_error_code_and_fix(client, app):
+    make_project_dir(app, "a", output_paths=["checkpoints"])
+    make_project_dir(app, "my-model")
+    data = post_yaml(client, "/api/v1/pipelines/validate", INHERIT_YAML).get_json()["data"]
+    assert data["valid"] is False
+    assert data["errors"] == [{
+        "path": "steps[1].inherit",
+        "message": "my-model doesn't list 'checkpoints' as an output path",
+        "error_code": "INHERIT_PATH_NOT_DECLARED",
+        "fix": {"call": "update_project", "project": "my-model", "output_paths_add": ["checkpoints"]},
+    }]
+
+
+def test_save_refused_until_fix_applied(client, app):
+    make_project_dir(app, "a", output_paths=["checkpoints"])
+    make_project_dir(app, "my-model")
+    r = post_yaml(client, "/api/v1/pipelines", INHERIT_YAML)
+    assert r.status_code == 400
+    assert r.get_json()["error"]["details"]["errors"][0]["error_code"] == "INHERIT_PATH_NOT_DECLARED"
+    fix = client.patch("/api/v1/projects/my-model", json={"output_paths_add": ["checkpoints"]})
+    assert fix.status_code == 200
+    assert fix.get_json()["data"]["project"]["output_paths"] == ["checkpoints"]
+    assert post_yaml(client, "/api/v1/pipelines", INHERIT_YAML).status_code == 201
+
+
+def test_output_paths_add_keeps_existing_and_skips_duplicates(client, app):
+    make_project_dir(app, "m", output_paths=["data"])
+    r = client.patch("/api/v1/projects/m", json={"output_paths_add": ["checkpoints", "data"]})
+    assert r.get_json()["data"]["project"]["output_paths"] == ["data", "checkpoints"]
+
+
+@pytest.mark.parametrize("bad", ["checkpoints", ["../x"], ["runs"]])
+def test_output_paths_add_rejects_bad_values(client, app, bad):
+    make_project_dir(app, "m")
+    r = client.patch("/api/v1/projects/m", json={"output_paths_add": bad})
+    assert r.status_code == 400
+    assert r.get_json()["error"]["code"] == "INVALID_OUTPUT_PATHS"
+
+
+def test_build_local_env_endpoint(client, app, monkeypatch):
+    from services import project_service
+    calls = []
+    monkeypatch.setattr(project_service, "build_local_env",
+                        lambda d, name, force_local=False: calls.append((name, force_local)))
+    make_project_dir(app, "m", compute_target="runpod")
+    r = client.post("/api/v1/projects/m/local-env")
+    assert r.status_code == 202
+    assert calls == [("m", True)]
+
+
+def test_build_local_env_refused_while_setup_runs(client, app):
+    make_project_dir(app, "m", setup_status="installing_deps")
+    assert client.post("/api/v1/projects/m/local-env").status_code == 409
+
+
 def test_runs_report_whether_they_ever_started(client, app):
     make_project_dir(app, "p")
     post_yaml(client, "/api/v1/pipelines", YAML)

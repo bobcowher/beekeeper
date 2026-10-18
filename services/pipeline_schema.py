@@ -3,6 +3,7 @@
 Validation runs on the parsed value, so YAML's implicit typing (`no` -> False,
 `0.001` -> float) is caught here and reported with a "quote it" hint.
 """
+import posixpath
 import re
 import unicodedata
 
@@ -18,8 +19,8 @@ MAX_STEPS = 32
 DEFAULT_TASK_TIMEOUT = 3600
 MAX_TASK_TIMEOUT = 86400
 TOP_KEYS = {"name", "folder", "description", "steps"}
-TRAIN_KEYS = {"name", "type", "project", "branch", "env_vars"}
-TASK_KEYS = {"name", "type", "command", "timeout_s"}
+TRAIN_KEYS = {"name", "type", "project", "branch", "env_vars", "script", "inherit"}
+TASK_KEYS = {"name", "type", "command", "timeout_s", "project", "inherit"}
 
 
 def valid_branch_name(s) -> bool:
@@ -114,6 +115,59 @@ def _env_field(env, path, err):
     return dict(env) if ok else None
 
 
+def normalize_rel_path(value) -> str | None:
+    """A workspace-relative path with no '..' and no leading '/', normalized; None if it isn't one."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value or value.startswith("/") or ".." in value.split("/"):
+        return None
+    value = posixpath.normpath(value)
+    return None if value in (".", "") else value
+
+
+def _script_field(step, path, err):
+    script = _str_field(step, "script", path, err)
+    if script is None:
+        return None
+    normalized = normalize_rel_path(script)
+    if normalized is None:
+        err(f"{path}.script", "must be a relative path inside the workspace")
+        return False
+    return normalized
+
+
+def _inherit_field(step, path, err):
+    """The step's inherit list, normalized. [] when absent, None when invalid."""
+    value = step.get("inherit")
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        err(f"{path}.inherit", "must be a path or a list of paths")
+        return None
+    out = []
+    for item in value:
+        normalized = normalize_rel_path(item)
+        if normalized is None:
+            err(f"{path}.inherit", f"{item!r} must be a relative path inside the workspace, with no '..'")
+            return None
+        if normalized in out:
+            err(f"{path}.inherit", f"'{normalized}' is listed twice")
+            return None
+        out.append(normalized)
+    return out
+
+
+def _project_field(step, path, err, required):
+    project = _str_field(step, "project", path, err, required=required)
+    if project is not None and not PROJECT_NAME_RE.fullmatch(project):
+        err(f"{path}.project", "must name a project using only letters, digits, '_' or '-'")
+        return False
+    return project
+
+
 def _validated_step_name(step, path, err):
     name = _str_field(step, "name", path, err, required=True)
     if name is not None and not STEP_NAME_RE.fullmatch(name):
@@ -123,20 +177,23 @@ def _validated_step_name(step, path, err):
 
 
 def _validate_train_step(step, path, err, name):
-    project = _str_field(step, "project", path, err, required=True)
-    if project is not None and not PROJECT_NAME_RE.fullmatch(project):
-        err(f"{path}.project", "must name a project using only letters, digits, '_' or '-'")
-        project = None
+    project = _project_field(step, path, err, required=True) or None
+    script = _script_field(step, path, err)
+    inherit = _inherit_field(step, path, err)
     branch = _str_field(step, "branch", path, err)
     branch_ok = branch is None or valid_branch_name(branch)
     if not branch_ok:
         err(f"{path}.branch", "is not a valid branch name")
     env = _env_field(step.get("env_vars", {}), f"{path}.env_vars", err)
-    if name is None or project is None or env is None or not branch_ok:
+    if name is None or project is None or env is None or not branch_ok or script is False or inherit is None:
         return None
     result = {"name": name, "type": "train", "project": project, "env_vars": env}
     if branch is not None:
         result["branch"] = branch
+    if script is not None:
+        result["script"] = script
+    if inherit:
+        result["inherit"] = inherit
     return result
 
 
@@ -149,9 +206,17 @@ def _validate_task_step(step, path, err, name):
     if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= MAX_TASK_TIMEOUT:
         err(f"{path}.timeout_s", f"must be an integer from 1 to {MAX_TASK_TIMEOUT}")
         timeout = None
-    if name is None or command is None or timeout is None:
+    project = _project_field(step, path, err, required=False)
+    inherit = _inherit_field(step, path, err)
+    if name is None or command is None or timeout is None or project is False or inherit is None:
         return None
-    return {"name": name, "type": "task", "command": command, "timeout_s": timeout}
+    result = {"name": name, "type": "task"}
+    if project is not None:
+        result["project"] = project   # before the command, so the YAML reads "where, then what"
+    result.update(command=command, timeout_s=timeout)
+    if inherit:
+        result["inherit"] = inherit
+    return result
 
 
 def _validate_step(step, path, err):
@@ -191,7 +256,30 @@ def _validate_steps(steps, err):
             continue
         seen[variable] = validated["name"]
         output.append(validated)
+    _check_inherit_order(steps, output, err)
     return output
+
+
+def _check_inherit_order(raw_steps, steps, err):
+    """The project-independent half of the "has path P" rule (services/pipeline_checks.py has the rest).
+
+    Runs only when every step validated, so indexes line up with the YAML.
+    """
+    if len(steps) != len(raw_steps):
+        return
+    for index, step in enumerate(steps):
+        inherit = step.get("inherit") or []
+        if not inherit:
+            continue
+        if index == 0:
+            err("steps[0].inherit", "the first step has nothing to inherit from")
+            continue
+        prev = steps[index - 1]
+        if prev["type"] != "task" or prev.get("project"):
+            continue   # a project's output paths: checked against the project
+        for rel in inherit:
+            if rel not in (prev.get("inherit") or []):
+                err(f"steps[{index}].inherit", f"'{rel}' isn't an output path of the previous step ({prev['name']})")
 
 
 def validate(data, expected_name: str | None = None) -> dict:

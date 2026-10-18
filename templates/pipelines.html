@@ -58,26 +58,27 @@
         Start it once and Beekeeper carries it through.
     </p>
     <ol class="step-chain pipeline-intro-chain" aria-label="Example pipeline">
-        <li class="step-node"><div class="step-name">fetch-data <span class="step-type">task</span></div><div class="step-detail"><code>./download.sh</code></div></li>
-        <li class="step-node"><div class="step-name">pretrain <span class="step-type">train</span></div><div class="step-detail">chess-base</div></li>
-        <li class="step-node"><div class="step-name">fine-tune <span class="step-type">train</span></div><div class="step-detail">chess-ft</div></li>
-        <li class="step-node"><div class="step-name">export <span class="step-type">task</span></div><div class="step-detail"><code>cp model.pt /models/</code></div></li>
+        <li class="step-node"><div class="step-name">fetch-data <span class="step-type">task</span></div><div class="step-detail">chess · <code>./download.sh</code></div></li>
+        <li class="step-node"><div class="step-name">pretrain <span class="step-type">train</span></div><div class="step-detail">chess · pretrain.py</div></li>
+        <li class="step-node"><div class="step-name">fine-tune <span class="step-type">train</span></div><div class="step-detail">chess · finetune.py</div></li>
+        <li class="step-node"><div class="step-name">export <span class="step-type">task</span></div><div class="step-detail"><code>cp checkpoints/model.pt /models/</code></div></li>
     </ol>
     <div class="pipeline-intro-grid">
         <div>
             <h3>Train steps</h3>
             <p>Queue a training run on one of your projects and wait for it to finish. They go through the
-            project's normal queue, so parallel-run limits and GPU checks still apply.</p>
+            project's normal queue, so parallel-run limits and GPU checks still apply. Pick the
+            <code>script</code> each step runs.</p>
         </div>
         <div>
             <h3>Task steps</h3>
-            <p>Run a shell command. Each pipeline run gets its own folder,
-            <code>$BEEKEEPER_PIPELINE_RUN_DIR</code>, that tasks start in.</p>
+            <p>Run a shell command. With a <code>project</code>, it runs in that project's workspace;
+            without one, in the pipeline run's own folder.</p>
         </div>
         <div>
             <h3>Handing off outputs</h3>
-            <p>Every step can find the output folders of the steps before it:
-            <code>$BEEKEEPER_PREV_STEP_DIR</code> or <code>$BEEKEEPER_STEP_&lt;NAME&gt;_DIR</code>.</p>
+            <p><code>inherit: [checkpoints]</code> copies output paths from the step above into the step's
+            run folder, so the script opens <code>checkpoints/model.pt</code> like it would on your laptop.</p>
         </div>
         <div>
             <h3>When a step fails</h3>
@@ -91,19 +92,24 @@
 steps:
   - name: fetch-data
     type: task
-    command: ./download.sh
+    project: chess              # runs in chess's workspace
+    command: ./download.sh      # writes data/, an output path of chess
   - name: pretrain
     type: train
-    project: chess-base
+    project: chess
+    script: pretrain.py
+    inherit: [data]
   - name: fine-tune
     type: train
-    project: chess-ft
+    project: chess
+    script: finetune.py         # opens checkpoints/pretrained.pt
+    inherit: [checkpoints, data]
     env_vars:
       EPOCHS: "3"
-    # train.py reads $BEEKEEPER_STEP_PRETRAIN_DIR from its environment
   - name: export
     type: task
-    command: cp "$BEEKEEPER_PREV_STEP_DIR/model.pt" /models/</pre>
+    inherit: [checkpoints]
+    command: cp checkpoints/model.pt /models/</pre>
     </details>
     <div class="pipeline-intro-actions">
         <a href="{{ url_for('pipelines.new') }}" class="btn btn-primary">Create your first pipeline</a>

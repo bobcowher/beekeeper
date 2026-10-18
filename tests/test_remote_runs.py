@@ -314,6 +314,54 @@ def test_pipeline_inputs_are_uploaded_and_env_rewritten(runpod, tmp_path):
     assert "/bk/inputs/BEEKEEPER_STEP_PRETRAIN_DIR pretrained" in text.replace(str(runpod["node"]), "")
 
 
+def _inherit_source(tmp_path, size=None):
+    src = tmp_path / "pretrain_run"
+    (src / "model").mkdir(parents=True)
+    if size:
+        with open(src / "model" / "big.npz", "wb") as f:
+            f.truncate(size)
+    else:
+        (src / "model" / "model.npz").write_text("pretrained")
+    return {"paths": ["model"], "source_run_dir": str(src), "source_step": "produce", "source_run_ref": "rp-1"}
+
+
+def test_inherited_paths_are_pushed_to_the_pod_run_folder(runpod, tmp_path):
+    app = runpod["app"]
+    _git_project(app, tmp_path, output_paths=["model"], files={"consume.py": (
+        "import os\n"
+        "print('consumer read', open('model/model.npz').read())\n"
+        "open('model/consumed.txt', 'w').write('yes')\n")})
+    r = pm.start_training(app.config["PROJECTS_DIR"], "rp", script="consume.py", inherit=_inherit_source(tmp_path))
+    assert "error" not in r, r
+    run = _wait_done("rp", r["run_id"])
+    text = _log(app, "rp", r["run_id"])
+    assert run["status"] == "completed", text
+    assert "consumer read pretrained" in text
+    assert "Inherited model/ from produce (rp-1)" in text
+    assert "Uploading run folder (inherited paths)" in text
+    run_dir = os.path.join(app.config["PROJECTS_DIR"], "rp", "persistent", "runs", f"run_{r['run_id']}")
+    assert open(os.path.join(run_dir, "model", "consumed.txt")).read() == "yes"
+    assert os.path.isfile(os.path.join(run_dir, ".beekeeper", "inherited.json"))
+    assert os.path.isfile(runpod["node"] / "bk" / "run" / "model" / "model.npz")
+
+
+def test_precheck_counts_inherited_bytes_and_refuses_over_the_limit(runpod, tmp_path):
+    app = runpod["app"]
+    _git_project(app, tmp_path, output_paths=["model"])
+    r = pm.start_training(app.config["PROJECTS_DIR"], "rp", inherit=_inherit_source(tmp_path, size=2 * 10**9))
+    assert r["code"] == "UPLOAD_TOO_LARGE" and "inherited" in r["error"]
+    assert pm.get_db().get_training_runs("rp") == []
+
+
+def test_precheck_reports_inherited_size(runpod, tmp_path):
+    app = runpod["app"]
+    _git_project(app, tmp_path, output_paths=["model"])
+    project = json.load(open(os.path.join(app.config["PROJECTS_DIR"], "rp", "project.json")))
+    error, plan = remote_runs.precheck(app.config["PROJECTS_DIR"], "rp", project,
+                                       inherit=_inherit_source(tmp_path))
+    assert error is None and plan["upload_sizes"]["inherited"] == len("pretrained")
+
+
 def test_inputs_naming_the_same_folder_upload_once(tmp_path):
     a = tmp_path / "a"
     a.mkdir()

@@ -1738,6 +1738,8 @@ input[type="checkbox"].toggle:disabled {
     width: 150px;
 }
 .filter-tag-input:focus { border-color: var(--accent); outline: none; }
+.run-kind-task { display: inline-block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.03em; padding: 0 0.35rem; border: 1px solid var(--border); border-radius: 3px; color: var(--text-secondary); }
+.run-script code { display: inline-block; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 
 /* Compare modal */
 .compare-modal-overlay {
@@ -2068,6 +2070,9 @@ input[type="checkbox"].toggle:disabled {
 .step-log.log-error { color: var(--danger); }
 .step-log { margin: 0; max-height: 420px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .step-command { font-family: var(--font-mono); font-size: 0.8rem; background: var(--bg-input); border-radius: 3px; padding: 0.5rem 0.75rem; margin-top: 0.4rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.step-inherited { list-style: none; margin: 0 0 0.6rem; padding: 0; font-size: 0.85rem; }
+.step-inherited li { padding: 0.15rem 0; }
+.step-inherited code { font-family: var(--font-mono); }
 #pipeline-runs tbody tr.selected { background: rgba(232, 185, 49, 0.08); box-shadow: inset 3px 0 0 var(--accent); }
 .field-reference-table { width: 100%; border-collapse: collapse; }
 .field-reference-table th { text-align: left; color: var(--accent); font-weight: 600; padding: 0.6rem 0.5rem 0.25rem; border-bottom: 1px solid var(--border); }
@@ -2150,6 +2155,15 @@ input[type="checkbox"].toggle:disabled {
 .step-insert-btn:hover, .step-insert-btn:focus-visible { opacity: 1; color: var(--accent); border-color: var(--accent); }
 .step-add-end { margin: 0.25rem 0 1.25rem 2.75rem; }
 .field-error { color: var(--danger); font-size: 0.8rem; margin-top: 0.25rem; }
+.field-fix { margin: 0.35rem 0 0.75rem; color: var(--text-primary); }
+.fix-note { font-size: 0.75rem; margin-top: 0.2rem; }
+#yaml-errors .field-fix { margin-left: 0; }
+.chip-list { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.3rem; }
+.chip-list:empty { display: none; }
+.chip { display: inline-flex; align-items: center; gap: 0.25rem; background: var(--bg-input); border: 1px solid var(--border); border-radius: 3px; padding: 0.1rem 0.25rem 0.1rem 0.45rem; font-size: 0.8rem; }
+.chip code { font-family: var(--font-mono); }
+.chip-remove { background: none; border: 0; color: var(--text-secondary); cursor: pointer; font-size: 0.9rem; line-height: 1; padding: 0 0.15rem; }
+.chip-remove:hover { color: var(--danger); }
 .step-editor > .field-error { padding: 0.4rem 0.75rem 0; margin: 0; }
 input.invalid, select.invalid, textarea.invalid { border-color: var(--danger); }
 @media (max-width: 600px) {

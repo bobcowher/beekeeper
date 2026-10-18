@@ -41,6 +41,8 @@ services/
   pipeline_store.py         Pipeline definitions and per-run storage paths
   pipeline_engine.py        Durable pipeline state machine over queue/run records
   pipeline_tasks.py         Inline task subprocess lifecycle and log capture
+  pipeline_checks.py        Pipeline checks that read project settings (inherit paths, local envs)
+  inherit.py                Seeds a step's run folder with the previous step's output paths
 
 models/
   project.py                Project dataclass — fields, save(), load(), to_dict()
@@ -82,6 +84,7 @@ BEEKEEPER_HOME/             = the directory beekeeper is installed/checked out i
       pipeline.yaml         Validated pipeline definition
       runs/
         run_<n>/            Pipeline run outputs and inline task logs
+          steps/<step>/     A plain task with inherit: its own folder, seeded with the inherited paths
   data/
     beekeeper.db            SQLite: users, sessions, api_keys, training_runs
   .secret_key               Flask session signing key (chmod 600, never committed)
@@ -111,8 +114,12 @@ BEEKEEPER_HOME/             = the directory beekeeper is installed/checked out i
    capacity/setup failures remain queued with a wait reason
 3. Its pipeline pass advances every running pipeline by one idempotent state-machine step
 4. Train steps enter the same project run queue as manual work; task steps run in their own
-   process groups and write logs beneath the pipeline run directory
-5. Cancelling stops the current queued/training/task step. If that step finishes during the
+   process groups and write logs beneath the pipeline run directory. A task with `project:` is a
+   run of that project (`training_runs.kind = 'task'`) and goes through its queue too
+5. A step with `inherit:` gets the previous step's output paths copied (`cp -a --reflink=auto`)
+   into its fresh run folder before the workspace links are made; the manifest is
+   `.beekeeper/inherited.json`. On Runpod the seeded run folder is pushed to `/bk/run`
+6. Cancelling stops the current queued/training/task step. If that step finishes during the
    race, the cancel response reports the true terminal status (`succeeded` or `failed`) rather
    than rewriting it to `cancelled`
 

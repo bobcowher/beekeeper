@@ -18,6 +18,7 @@ from services.run_refs import run_ref
 from services.run_folder_migration import archive_pk_named_log
 from services.run_storage_service import MARKER, delete_run_storage, persistent_runs_root
 from services.stats_service import get_gpu_stats
+from services import inherit as inherit_service
 from services import remote_runs
 
 log = logging.getLogger(__name__)
@@ -275,6 +276,7 @@ def get_runs_for_project(name: str) -> list:
                     "run_id": info["run_id"],
                     "run_ref": run_ref(name, info["run_id"]),
                     "branch": info.get("branch", ""),
+                    "kind": info.get("kind", "train"),
                     "status": "starting",
                     "pid": None,
                     "elapsed": None,
@@ -290,6 +292,7 @@ def get_runs_for_project(name: str) -> list:
                     "run_id": info["run_id"],
                     "run_ref": run_ref(name, info["run_id"]),
                     "branch": info.get("branch", ""),
+                    "kind": info.get("kind", "train"),
                     "status": "running",
                     "pid": pid,
                     "elapsed": now - info.get("started_at", now),
@@ -350,6 +353,8 @@ def _monitor_process(projects_dir, name, run_pk):  # NOSONAR — sequential clea
             run_id = info["run_id"]
 
         ret = proc.poll()
+        if ret is None and _task_timed_out(info):
+            ret = _kill_timed_out_task(info)
         if ret is not None:
             log_path = None
             started_at = None
@@ -391,7 +396,7 @@ def _monitor_process(projects_dir, name, run_pk):  # NOSONAR — sequential clea
                 except Exception as e:
                     log.warning("Failed to delete parallel workspace %s: %s", workspace_dir, e)
 
-            if ret == 0:
+            if ret == 0 and (info or {}).get("kind") != "task":
                 import threading as _threading
                 from services import tensorboard_service
                 _threading.Thread(
@@ -412,6 +417,35 @@ def _monitor_process(projects_dir, name, run_pk):  # NOSONAR — sequential clea
             return
 
         time.sleep(1)
+
+
+TASK_TIMEOUT_EXIT = 124   # what GNU timeout(1) exits with
+
+
+def _task_timed_out(info) -> bool:
+    timeout_s = info.get("timeout_s")
+    return bool(timeout_s) and time.time() - info.get("started_at", time.time()) > timeout_s
+
+
+def _kill_timed_out_task(info) -> int:
+    """SIGTERM the task's process group, SIGKILL after 5 s. The run is recorded as exit 124."""
+    proc = info["process"]
+    try:
+        with open(info["log_path"], "a") as f:
+            f.write(f"\n[beekeeper] Task timed out after {info['timeout_s']}s\n")
+    except (OSError, TypeError):
+        pass
+    for sig, wait in ((signal.SIGTERM, 5), (signal.SIGKILL, 3)):
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=wait)
+            break
+        except subprocess.TimeoutExpired:
+            continue
+    return TASK_TIMEOUT_EXIT
 
 
 def _collect_run_metadata(workspace_dir, python_bin, branch):
@@ -467,7 +501,7 @@ def _collect_run_metadata(workspace_dir, python_bin, branch):
     return meta
 
 
-def _write_run_header(log_fd, meta, project):
+def _write_run_header(log_fd, meta, project, kind="train"):
     """Write a banner to the log file at the start of a run."""
     sep = "=" * 60
     lines = [
@@ -480,6 +514,8 @@ def _write_run_header(log_fd, meta, project):
         f"  python  : {meta['python_version']}",
         f"  script  : {project.get('train_file', 'train.py')}",
     ]
+    if kind != "train":
+        lines.append(f"  kind    : {kind}")
     for i, g in enumerate(meta["gpu_info"]):
         label = "  gpu     :" if i == 0 else "           "
         lines.append(f"{label} {g}")
@@ -655,11 +691,41 @@ def can_start_training(projects_dir, name):
     return {"can_start": True, "code": None, "message": "Ready to start"}
 
 
-def start_training(projects_dir, name, branch=None, extra_env=None):  # NOSONAR — sequential pre-launch pipeline
-    """Validate, reserve a training slot, and launch the pre-launch sequence in background."""
+def _step_request(project, script, inherit):
+    """Check a pipeline step's script and inherited paths. Returns (project, error).
+
+    inherit is {"paths", "source_run_dir", "source_step", "source_run_ref"} or None.
+    The returned project has train_file replaced by script, so the header, the launch
+    and a remote run all use it.
+    """
+    from services.pipeline_schema import normalize_rel_path
+    if script is not None:
+        normalized = normalize_rel_path(script)
+        if normalized is None:
+            return None, {"error": "script must be a relative path inside the workspace", "code": "INVALID_SCRIPT"}
+        project = dict(project, train_file=normalized)
+    if inherit and inherit.get("paths"):
+        missing = inherit_service.missing_paths(inherit.get("source_run_dir"), inherit["paths"])
+        if missing:
+            source = inherit.get("source_run_ref") or inherit.get("source_run_dir")
+            return None, {"error": f"inherit: {missing[0]} not found in {source}'s run folder",
+                          "code": "INHERIT_SOURCE_MISSING"}
+    return project, None
+
+
+def start_training(projects_dir, name, branch=None, extra_env=None, script=None, inherit=None):  # NOSONAR — sequential pre-launch pipeline
+    """Validate, reserve a training slot, and launch the pre-launch sequence in background.
+
+    script and inherit come from a pipeline step: script replaces the project's train_file,
+    and inherit names output paths to copy from the previous step's run folder into this run's.
+    """
     project, python_bin, error = _training_request(projects_dir, name, extra_env)
     if error:
         return error
+    project, error = _step_request(project, script, inherit)
+    if error:
+        return error
+    inherit = inherit if inherit and inherit.get("paths") else None
 
     if branch is None:
         branch = project.get("branch", "main")
@@ -667,17 +733,34 @@ def start_training(projects_dir, name, branch=None, extra_env=None):  # NOSONAR 
     # A remote run's checks call Runpod, so they run before taking the lock.
     remote_plan = None
     if remote_runs.is_remote(project):
-        error, remote_plan = remote_runs.precheck(projects_dir, name, project, extra_env)
+        error, remote_plan = remote_runs.precheck(projects_dir, name, project, extra_env, inherit=inherit)
         if error:
             return error
 
+    error, slot = _reserve_run(projects_dir, name, project, branch, "train", remote=remote_plan is not None)
+    if error:
+        return error
+
+    thread = threading.Thread(
+        target=_execute_training,
+        args=(projects_dir, name, project, python_bin, slot["run_pk"], slot["run_id"], branch,
+              slot["workspace_dir"], slot["gpu_assignment"], extra_env, remote_plan, {"inherit": inherit}),
+        daemon=True,
+    )
+    thread.start()
+
+    return {"run_id": slot["run_id"], "run_ref": run_ref(name, slot["run_id"]), "status": "starting"}
+
+
+def _reserve_run(projects_dir, name, project, branch, kind, remote=False):
+    """Admit, number and track a new run. Returns (error, {run_pk, run_id, workspace_dir, gpu_assignment})."""
     primary_ws = os.path.join(projects_dir, name, "workspace")
 
     with _lock:
         active_runs = _get_runs_for_project(name)
-        error, gpu_assignment = _training_admission(name, project, remote_plan is not None)
+        error, gpu_assignment = _training_admission(name, project, remote)
         if error:
-            return error
+            return error, None
 
         # Number the run only after admission, so a refused start never consumes one.
         run_pk, run_id = get_db().create_training_run(
@@ -686,6 +769,8 @@ def start_training(projects_dir, name, branch=None, extra_env=None):  # NOSONAR 
                 "started_at": datetime.datetime.now(),
                 "status": "starting",
                 "branch": branch,
+                "kind": kind,
+                "train_file": project.get("train_file", "train.py"),
             }
         )
 
@@ -703,20 +788,56 @@ def start_training(projects_dir, name, branch=None, extra_env=None):  # NOSONAR 
             "run_id": run_id,
             "branch": branch,
             "workspace_dir": workspace_dir,
-            "remote": remote_plan is not None,
+            "remote": remote,
+            "kind": kind,
         }
 
     _update_project_json(projects_dir, name, train_status="starting")
+    return None, {"run_pk": run_pk, "run_id": run_id, "workspace_dir": workspace_dir,
+                  "gpu_assignment": gpu_assignment}
+
+
+def start_task(projects_dir, name, command, timeout_s, inherit=None, extra_env=None):
+    """Start a pipeline project task: `bash -c <command>` in the project's workspace (spec R1–R3).
+
+    A task is a run of its project (kind 'task'): it takes a slot under the project's
+    parallel-run setting, gets a run folder, the output-path links and inherited paths,
+    and is stopped, logged and pruned like any run. It runs on this server with the
+    project's local env first on PATH and no GPU, and is killed after timeout_s.
+    """
+    project, _, error = _training_request(projects_dir, name, extra_env)
+    if error:
+        return error
+    if not isinstance(command, str) or not command.strip():
+        return {"error": "A task needs a command", "code": "INVALID_COMMAND"}
+    python_bin = _resolve_python_binary(projects_dir, project)
+    if not python_bin:
+        if remote_runs.is_remote(project):
+            return {"error": f"{name} runs on Runpod and has no local environment for tasks",
+                    "code": "TASK_NEEDS_LOCAL_ENV"}
+        return {"error": "Could not find the project's Python environment", "code": "NO_PYTHON"}
+    project, error = _step_request(project, None, inherit)
+    if error:
+        return error
+    inherit = inherit if inherit and inherit.get("paths") else None
+    # The header's "script" line and the run's train_file show the command; no GPU is allocated.
+    project = dict(project, train_file=command, gpu_enabled=False)
+    branch = project.get("branch", "main")
+
+    error, slot = _reserve_run(projects_dir, name, project, branch, "task")
+    if error:
+        return error
 
     thread = threading.Thread(
         target=_execute_training,
-        args=(projects_dir, name, project, python_bin, run_pk, run_id, branch, workspace_dir, gpu_assignment, extra_env)
-        + ((remote_plan,) if remote_plan is not None else ()),
+        args=(projects_dir, name, project, python_bin, slot["run_pk"], slot["run_id"], branch,
+              slot["workspace_dir"], None, extra_env, None,
+              {"inherit": inherit, "task": {"command": command, "timeout_s": timeout_s}}),
         daemon=True,
     )
     thread.start()
 
-    return {"run_id": run_id, "run_ref": run_ref(name, run_id), "status": "starting"}
+    return {"run_id": slot["run_id"], "run_ref": run_ref(name, slot["run_id"]), "status": "starting"}
 
 
 def _archive_older_runs_pk_named_log(projects_dir: str, name: str, run_id: int, log_path: str):
@@ -734,12 +855,35 @@ def _archive_older_runs_pk_named_log(projects_dir: str, name: str, run_id: int, 
     get_db().update_training_run(old["id"], log_file_path=rel)
 
 
-def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, branch, workspace_dir, gpu_assignment=None, extra_env=None, remote_plan=None):  # NOSONAR — sequential pre-launch pipeline
+def _tracked_in_git(workspace_dir, rel) -> bool:
+    try:
+        r = subprocess.run(["git", "ls-files", "--", rel], cwd=workspace_dir,
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0 and bool((r.stdout or "").strip())
+
+
+def _inherit_clash(workspace_dir, paths) -> str | None:
+    """An inherited path must not replace a real, tracked file or folder in the workspace."""
+    for rel in paths:
+        target = os.path.join(workspace_dir, rel)
+        if os.path.lexists(target) and not os.path.islink(target) and _tracked_in_git(workspace_dir, rel):
+            return f"inherit: '{rel}' clashes with a tracked file or folder in the workspace"
+    return None
+
+
+def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, branch, workspace_dir, gpu_assignment=None, extra_env=None, remote_plan=None, step=None):  # NOSONAR — sequential pre-launch pipeline
     """Run the full pre-launch sequence and start the training subprocess (runs in background thread).
 
     With remote_plan, the setup script, pip install and training run on a Runpod pod instead
     (services/remote_runs.py); git sync, run storage, the log and TensorBoard stay here.
+    step carries a pipeline step's "inherit" (see start_training) and, for a project task,
+    "task": {"command", "timeout_s"} (see start_task). A task skips the setup script and pip
+    install: it runs in the environment as the last setup or training run left it.
     """
+    inherit = (step or {}).get("inherit")
+    task = (step or {}).get("task")
     is_parallel = workspace_dir != os.path.join(projects_dir, name, "workspace")
     log_path = os.path.join(projects_dir, name, f"train-{run_id}.log")
     _archive_older_runs_pk_named_log(projects_dir, name, run_id, log_path)
@@ -836,7 +980,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
 
     # Run setup script if configured
     setup_script = project.get("setup_script", "")
-    if setup_script and remote_plan is None:
+    if setup_script and remote_plan is None and not task:
         script_path = os.path.join(workspace_dir, setup_script)
         if os.path.isfile(script_path):
             try:
@@ -867,7 +1011,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
     # Install/update dependencies
     req_file = project.get("requirements_file", "requirements.txt")
     req_path = os.path.join(workspace_dir, req_file)
-    if remote_plan is None and os.path.isfile(req_path):
+    if remote_plan is None and not task and os.path.isfile(req_path):
         try:
             result = subprocess.run(
                 [python_bin, "-m", "pip", "install", "--upgrade", "--upgrade-strategy", "only-if-needed", "-r", req_path, "--quiet"],
@@ -882,7 +1026,7 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
 
     train_file = project.get("train_file", "train.py")
     train_path = os.path.join(workspace_dir, train_file)
-    if not os.path.isfile(train_path):
+    if not task and not os.path.isfile(train_path):
         return _abort(f"Training file not found: {train_file}")
 
     # Prepare persistent run storage before training starts. Fast scripts often
@@ -929,6 +1073,20 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
     except OSError as e:
         return _abort(f"Could not prepare {persistent_run_rel}: {e}")
 
+    # Inherited paths go into the run folder before the workspace links point at it.
+    inherit_lines = []
+    if inherit:
+        clash = _inherit_clash(workspace_dir, inherit["paths"])
+        if clash:
+            return _abort(clash)
+        try:
+            entries = inherit_service.seed_inherited(
+                inherit["source_run_dir"], persistent_run_dir, inherit["paths"],
+                inherit.get("source_step"), inherit.get("source_run_ref"))
+        except (inherit_service.InheritError, OSError) as e:
+            return _abort(str(e))
+        inherit_lines = inherit_service.log_lines(entries)
+
     _ensure_workspace_symlink(
         workspace_dir,
         tb_log_rel,
@@ -937,15 +1095,21 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
         "TensorBoard",
         is_parallel=is_parallel,
     )
+    inherited_paths = set(inherit["paths"]) if inherit else set()
     for output_rel in output_paths:
+        link_warnings = []
         _ensure_workspace_symlink(
             workspace_dir,
             output_rel,
             os.path.join(persistent_run_dir, output_rel),
-            prelaunch_warnings,
+            link_warnings,
             "output",
             is_parallel=is_parallel,
         )
+        if link_warnings and output_rel in inherited_paths:
+            # The script would not see the inherited files at that path.
+            return _abort(f"inherit: {link_warnings[0]}")
+        prelaunch_warnings.extend(link_warnings)
 
     get_db().update_training_run(
         run_pk,
@@ -962,7 +1126,9 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
             log.info("Auto-cleanup: deleted %s old run(s)", deleted_count)
 
     log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
-    _write_run_header(log_fd, run_meta, project)
+    _write_run_header(log_fd, run_meta, project, "task" if task else "train")
+    for line in inherit_lines:
+        os.write(log_fd, f"{line}\n".encode())
     for warning in prelaunch_warnings:
         os.write(log_fd, f"[beekeeper] WARNING: {warning}\n".encode())
     if prelaunch_warnings:
@@ -983,6 +1149,13 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
     proc_env["BEEKEEPER_RUN_REF"] = run_ref(name, run_id)
     proc_env["BEEKEEPER_TENSORBOARD_DIR"] = persistent_run_dir
     proc_env["TENSORBOARD_LOG_DIR"] = persistent_run_dir
+
+    if task:
+        # R2: no GPU. The project's env comes first on PATH, as if it were activated.
+        env_bin = os.path.dirname(python_bin)
+        proc_env["PATH"] = f"{env_bin}:{proc_env.get('PATH', '')}"
+        proc_env["VIRTUAL_ENV"] = os.path.dirname(env_bin)
+        proc_env["CUDA_VISIBLE_DEVICES"] = ""
 
     if gpu_assignment:
         preferred_mb = project.get("gpu_memory_preferred", 0)
@@ -1017,13 +1190,14 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
             "data_dir_local": project.get("data_dir_local", "data"),
             "setup_script": project.get("setup_script", ""), "requirements_file": req_file,
             "train_file": train_file, "env": project_env,
+            "inherited": bool(inherit),
         })
         return _register_launched(projects_dir, name, project, run_pk, run_id, branch, workspace_dir,
                                   proc, log_path, remote=True)
 
     try:
         proc = subprocess.Popen(
-            [python_bin, "-u", train_file],
+            ["bash", "-c", task["command"]] if task else [python_bin, "-u", train_file],
             cwd=workspace_dir,
             stdout=log_fd,
             stderr=subprocess.STDOUT,
@@ -1035,18 +1209,50 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
         return _abort(f"Failed to start training: {e}")
 
     os.close(log_fd)
-    _register_launched(projects_dir, name, project, run_pk, run_id, branch, workspace_dir, proc, log_path)
+    _register_launched(projects_dir, name, project, run_pk, run_id, branch, workspace_dir, proc, log_path,
+                       task=task)
 
 
 def _register_launched(projects_dir, name, project, run_pk, run_id, branch, workspace_dir, proc, log_path,
-                       remote=False, started_at=None):
+                       remote=False, started_at=None, task=None):
     """Start TensorBoard, track the launched run and start its monitor thread.
 
-    proc is a Popen, or a remote_runs.RemoteProcess for a run on a pod.
+    proc is a Popen, or a remote_runs.RemoteProcess for a run on a pod. A project task
+    (task = {"command", "timeout_s"}) gets no TensorBoard and is killed after timeout_s.
     """
+    tb_process, tb_port = (None, None) if task else _start_run_tensorboard(projects_dir, name, project, run_id)
+
+    with _lock:
+        _running[run_pk] = {
+            "process": proc,
+            "log_path": log_path,
+            "tb_process": tb_process,
+            "tb_port": tb_port,
+            "started_at": started_at or time.time(),
+            "run_pk": run_pk,
+            "run_id": run_id,
+            "project_name": name,
+            "branch": branch,
+            "workspace_dir": workspace_dir,
+            "remote": remote,
+            "kind": "task" if task else "train",
+            "timeout_s": task["timeout_s"] if task else None,
+        }
+
+    _update_project_json(projects_dir, name,
+                         train_status="running", train_pid=proc.pid,
+                         last_run_at=time.time())
+
+    thread = threading.Thread(
+        target=_monitor_process, args=(projects_dir, name, run_pk), daemon=True
+    )
+    thread.start()
+
+
+def _start_run_tensorboard(projects_dir, name, project, run_id):
+    """(process, port) of a TensorBoard for a starting run, or (None, None)."""
     tb_process = None
     tb_port = None
-
     # Kill any standalone TB for this project before starting a new one
     with _lock:
         old_tb = _tb_running.pop(name, None)
@@ -1069,30 +1275,7 @@ def _register_launched(projects_dir, name, project, run_pk, run_id, branch, work
             except Exception as e:
                 log.warning("Failed to start tensorboard for %s: %s", run_ref(name, run_id), e)
                 tb_port = None
-
-    with _lock:
-        _running[run_pk] = {
-            "process": proc,
-            "log_path": log_path,
-            "tb_process": tb_process,
-            "tb_port": tb_port,
-            "started_at": started_at or time.time(),
-            "run_pk": run_pk,
-            "run_id": run_id,
-            "project_name": name,
-            "branch": branch,
-            "workspace_dir": workspace_dir,
-            "remote": remote,
-        }
-
-    _update_project_json(projects_dir, name,
-                         train_status="running", train_pid=proc.pid,
-                         last_run_at=time.time())
-
-    thread = threading.Thread(
-        target=_monitor_process, args=(projects_dir, name, run_pk), daemon=True
-    )
-    thread.start()
+    return tb_process, tb_port
 
 
 def adopt_remote_runs(projects_dir):

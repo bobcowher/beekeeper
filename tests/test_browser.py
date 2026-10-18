@@ -29,6 +29,7 @@ def _fresh_rate_limit():
 
 
 XSS_FILENAME = """<img src=x onerror="window.__xss=1">;touch pwned'.txt"""
+LIVE = {}   # the live server's folders, for tests that add projects on disk
 
 
 @pytest.fixture(scope="module")
@@ -37,6 +38,7 @@ def live_server(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("browser_projects")
     projects_dir = tmp / "projects"
     projects_dir.mkdir()
+    LIVE["projects_dir"] = projects_dir
     remote_repo = tmp / "remote.git"
     subprocess.run(
         ["git", "init", "--bare", "--initial-branch=main", str(remote_repo)],
@@ -1513,5 +1515,179 @@ def test_history_groups_by_day_filters_and_pages(live_server):
         page.locator('.activity-filters button[data-filter="failed"]').click()
         page.wait_for_function("document.querySelectorAll('#history-list .activity-row').length === 1")
         assert page.url.endswith("/history?filter=failed")
+        assert errors == []
+        browser.close()
+
+
+def _write_project(name, **fields):
+    data = json.loads((LIVE["projects_dir"] / "demo" / "project.json").read_text())
+    data.update(name=name, **fields)
+    (LIVE["projects_dir"] / name).mkdir(exist_ok=True)
+    (LIVE["projects_dir"] / name / "project.json").write_text(json.dumps(data))
+
+
+@pytest.mark.browser
+def test_pipeline_editor_offers_add_output_path_fix(live_server):
+    from playwright.sync_api import sync_playwright
+
+    _write_project("inh-src", output_paths=["checkpoints"])
+    _write_project("inh-dst", output_paths=[])
+    yaml = ("name: inh-pipe\nsteps:\n"
+            "  - {name: pretrain, type: train, project: inh-src, script: pretrain.py}\n"
+            "  - {name: posttrain, type: train, project: inh-dst, script: posttrain.py, inherit: [checkpoints]}\n")
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        errors = []
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        page.goto(live_server + "/pipelines/new")
+        page.fill("#name", "inh-pipe")
+        page.click("button[type=submit]")
+        page.wait_for_url("**/pipelines/inh-pipe/edit")
+        page.locator(".step-editor").first.wait_for()
+        page.click("#tab-yaml")
+        page.fill("#pipeline-yaml", yaml)
+        page.click("#tab-graphical")
+        second = page.locator(".step-editor").nth(1)
+        second.wait_for()
+        assert "inherits checkpoints" in second.locator(".step-editor-summary").inner_text()
+
+        page.click("#btn-yaml-save")                       # refused: inh-dst doesn't declare it
+        fix = page.locator(".fix-btn")
+        fix.wait_for()
+        assert fix.inner_text() == "Add checkpoints to inh-dst’s output paths"
+        assert "standalone runs included" in page.locator(".fix-note").inner_text()
+        assert page.locator(".step-editor").nth(1).locator(".chip code").inner_text() == "checkpoints"
+        assert page.locator("#step-%s-script" % second.get_attribute("data-key")).input_value() == "posttrain.py"
+        page.screenshot(path="/tmp/beekeeper-pipeline-inherit-fix.png", full_page=True)
+        project = page.request.get(f"{live_server}/api/v1/projects/inh-dst").json()["data"]["project"]
+        assert project["output_paths"] == []              # nothing changes until the button is pressed
+
+        fix.click()
+        page.wait_for_function("document.getElementById('yaml-status').textContent === 'Valid'")
+        project = page.request.get(f"{live_server}/api/v1/projects/inh-dst").json()["data"]["project"]
+        assert project["output_paths"] == ["checkpoints"]
+        assert page.locator(".fix-btn").count() == 0
+
+        page.click("#btn-yaml-save")
+        page.wait_for_url("**/pipelines/inh-pipe")
+        saved = _pipeline_yaml(page, live_server, "inh-pipe")
+        assert "script: posttrain.py\n  inherit:\n  - checkpoints" in saved
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_editor_inherit_chips_suggest_previous_output_paths(live_server):
+    from playwright.sync_api import sync_playwright
+
+    _write_project("chip-proj", output_paths=["checkpoints", "data"])
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        errors = []
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        _create_pipeline(page, live_server, "name: chip-pipe\nsteps:\n"
+                         "  - {name: pre, type: train, project: chip-proj}\n"
+                         "  - {name: check, type: task, project: chip-proj, command: 'test -s checkpoints/x'}\n")
+        page.goto(live_server + "/pipelines/chip-pipe/edit")
+        second = page.locator(".step-editor").nth(1)
+        second.wait_for()
+        second.locator(".step-editor-toggle").click()
+        key = second.get_attribute("data-key")
+        assert page.locator(f"#step-{key}-project").input_value() == "chip-proj"
+        options = page.locator(f"#step-{key}-inherit-options option")
+        assert sorted(options.evaluate_all("els => els.map(e => e.value)")) == ["checkpoints", "data"]
+        page.fill(f"#step-{key}-inherit", "checkpoints/")
+        page.press(f"#step-{key}-inherit", "Enter")
+        assert second.locator(".chip code").all_inner_texts() == ["checkpoints"]
+        assert options.evaluate_all("els => els.map(e => e.value)") == ["data"]
+        page.click("#btn-yaml-save")
+        page.wait_for_url("**/pipelines/chip-pipe")
+        saved = _pipeline_yaml(page, live_server, "chip-pipe")
+        assert "type: task\n  project: chip-proj\n  command: test -s checkpoints/x\n  inherit:\n  - checkpoints" in saved
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.browser
+def test_pipeline_run_page_shows_inherited_line_and_task_run(live_server):
+    from playwright.sync_api import sync_playwright
+
+    _write_project("run-proj", output_paths=["model"])
+
+    def step(i, name, typ, **extra):
+        return {"index": i, "name": name, "type": typ, "status": "succeeded", "attempt": 1, "error": None,
+                "exit_code": 0, "started_at": "2026-10-17T10:00:00", "ended_at": "2026-10-17T10:05:00",
+                "run_dir": None, "project": "run-proj", "branch": None, **extra}
+
+    runs = [{"run_id": 1, "run_ref": "inh-run#1", "pipeline": "inh-run", "status": "succeeded", "started": True,
+             "current_step": 1, "error": None, "overrides": {}, "dismissed": False,
+             "started_at": "2026-10-17T10:00:00", "ended_at": "2026-10-17T10:10:00", "steps": [
+                 step(0, "produce", "train", run_id=4, run_ref="run-proj-4", script="produce.py"),
+                 step(1, "check", "task", run_id=5, run_ref="run-proj-5", inherit=["model"], inherited=[
+                     {"path": "model", "source_step": "produce", "source_run_ref": "run-proj-4",
+                      "files": 3, "bytes": 2_100_000_000}]),
+             ]}]
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        _create_pipeline(page, live_server, "name: inh-run\nsteps:\n"
+                         "  - {name: produce, type: train, project: run-proj, script: produce.py}\n"
+                         "  - {name: check, type: task, project: run-proj, command: 'test -s model/m.npz',"
+                         " inherit: [model]}\n")
+        page.route("**/api/v1/pipelines/inh-run/runs?limit=50",
+                   lambda route: route.fulfill(json={"success": True, "data": {"runs": runs}}))
+        page.goto(live_server + "/pipelines/inh-run")
+        page.locator("#step-chain .step-node").nth(1).wait_for()
+        assert "run-proj @" not in page.locator("#step-chain").inner_text()
+        assert "produce.py" in page.locator("#step-chain .step-node").nth(0).inner_text()
+        assert page.locator("[data-step-log]").count() == 0        # a project task's log is its run's
+        page.click('#step-chain .step-node:nth-child(2) .step-card')
+        body = page.locator("#step-panel-body")
+        assert "Inherited model/ from produce (run-proj-4), 2.1 GB" in body.inner_text()
+        assert body.locator(".step-inherited a").get_attribute("href") == "/projects/run-proj/history/4/log"
+        assert "Task run run-proj-5 succeeded." in body.inner_text()
+        assert page.locator("#step-panel-note").inner_text() == "task · run-proj"
+        page.screenshot(path="/tmp/beekeeper-pipeline-inherited.png", full_page=True)
+        assert errors == []
+        browser.close()
+
+
+@pytest.mark.browser
+def test_run_history_shows_script_and_filters_tasks(live_server):
+    from playwright.sync_api import sync_playwright
+
+    def run(n, kind, script):
+        return {"run_id": n, "run_ref": f"demo-{n}", "project_name": "demo", "kind": kind, "train_file": script,
+                "status": "completed", "started_at": "2026-10-17T10:00:00", "duration_seconds": 5,
+                "branch": "main", "commit_sha": "abcdef1234", "commit_message": "", "notable": 0, "tags": "",
+                "notes": "", "log_file_path": None}
+
+    history = {"runs": [run(3, "task", "test -s checkpoints/x"), run(2, "train", "posttrain.py"),
+                        run(1, "train", "pretrain.py")]}
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on("pageerror", lambda err: errors.append(str(err)))
+        page.route("**/projects/demo/history", lambda route: route.fulfill(json=history))
+        page.goto(live_server + "/projects/demo")
+        page.locator("#history-section .collapsible-header").click()
+        rows = page.locator(".run-history-table tbody tr[data-run-id]:not(.notes-row)")
+        rows.first.wait_for()
+        assert rows.count() == 3
+        assert "task" in rows.nth(0).locator(".run-script").inner_text().lower()
+        assert "posttrain.py" in rows.nth(1).locator(".run-script").inner_text()
+        page.click('.filter-kind-btn[data-kind="task"]')
+        assert rows.count() == 1 and "checkpoints/x" in rows.nth(0).inner_text()
+        page.click('.filter-kind-btn[data-kind="train"]')
+        assert rows.count() == 2
+        page.click('.filter-kind-btn[data-kind="all"]')
+        assert rows.count() == 3
+        assert page.locator('.filter-kind-btn[data-kind="all"]').get_attribute("aria-pressed") == "true"
+        page.locator("#history-section").screenshot(path="/tmp/beekeeper-history-kinds.png")
         assert errors == []
         browser.close()
