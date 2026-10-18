@@ -94,9 +94,9 @@ def rename_project_refs(pipelines_dir, old, new) -> list[str]:
     for defn in list_pipelines(pipelines_dir):
         if defn.get("error"):
             continue
-        if any(s["type"] == "train" and s["project"] == old for s in defn["steps"]):
+        if any(s.get("project") == old for s in defn["steps"]):
             for s in defn["steps"]:
-                if s["type"] == "train" and s["project"] == old:
+                if s.get("project") == old:   # train steps and project tasks
                     s["project"] = new
             save_pipeline(pipelines_dir, defn)
             changed.append(defn["name"])

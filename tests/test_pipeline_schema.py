@@ -137,7 +137,7 @@ def test_numeric_name_rejected():
     ({"name": "p", "steps": [{"name": "a", "type": "task", "command": "  "}]}, "steps[0].command"),
     ({"name": "p", "steps": [{"name": "a", "type": "task", "command": "x", "timeout_s": 0}]}, "steps[0].timeout_s"),
     ({"name": "p", "steps": [{"name": "a", "type": "task", "command": "x", "timeout_s": True}]}, "steps[0].timeout_s"),
-    ({"name": "p", "steps": [{"name": "a", "type": "task", "command": "x", "project": "y"}]}, "steps[0].project"),
+    ({"name": "p", "steps": [{"name": "a", "type": "task", "command": "x", "project": "../y"}]}, "steps[0].project"),
     ({"name": "p", "steps": [{"name": "a", "type": "train", "project": "x",
                                "env_vars": {"BEEKEEPER_RUN_DIR": "x"}}]}, "steps[0].env_vars.BEEKEEPER_RUN_DIR"),
     ({"name": "p", "steps": [{"name": "A", "type": "task", "command": "x"}]}, "steps[0].name"),
@@ -180,3 +180,107 @@ def test_to_yaml_quotes_ambiguous_strings():
 def test_falsy_non_string_description_rejected(text):
     errs = errors_for(f"name: p\ndescription: {text}\nsteps:\n  - {{name: a, type: task, command: x}}\n")
     assert "quote" in errs["description"]
+
+
+# --- script, inherit and project tasks ------------------------------------------
+
+def _steps(*steps):
+    return {"name": "p", "steps": list(steps)}
+
+
+TRAIN_A = {"name": "a", "type": "train", "project": "m"}
+
+
+def test_train_step_script_and_inherit():
+    d = validate(_steps(TRAIN_A, {"name": "b", "type": "train", "project": "m", "script": "posttrain.py",
+                                  "inherit": ["checkpoints/", "data"]}))
+    assert d["steps"][1]["script"] == "posttrain.py"
+    assert d["steps"][1]["inherit"] == ["checkpoints", "data"]
+    assert "script" not in d["steps"][0] and "inherit" not in d["steps"][0]
+
+
+def test_inherit_string_becomes_list():
+    d = validate(_steps(TRAIN_A, {"name": "b", "type": "train", "project": "m", "inherit": "checkpoints"}))
+    assert d["steps"][1]["inherit"] == ["checkpoints"]
+
+
+def test_empty_inherit_is_absent():
+    d = validate(_steps(TRAIN_A, {"name": "b", "type": "train", "project": "m", "inherit": []}))
+    assert "inherit" not in d["steps"][1]
+
+
+def test_inherit_nested_path_normalized():
+    d = validate(_steps(TRAIN_A, {"name": "b", "type": "train", "project": "m", "inherit": ["out//ckpt/"]}))
+    assert d["steps"][1]["inherit"] == ["out/ckpt"]
+
+
+@pytest.mark.parametrize("bad", ["../x", "/abs", "a/../../b", "", ".", 3])
+def test_inherit_bad_entries(bad):
+    errs = errors_for(_steps(TRAIN_A, {"name": "b", "type": "train", "project": "m", "inherit": [bad]}))
+    assert "steps[1].inherit" in errs
+
+
+def test_inherit_duplicates_after_normalizing():
+    errs = errors_for(_steps(TRAIN_A, {"name": "b", "type": "train", "project": "m",
+                                       "inherit": ["ckpt", "ckpt/"]}))
+    assert errs["steps[1].inherit"] == "'ckpt' is listed twice"
+
+
+def test_inherit_must_be_string_or_list():
+    errs = errors_for(_steps(TRAIN_A, {"name": "b", "type": "train", "project": "m", "inherit": {"a": 1}}))
+    assert errs["steps[1].inherit"] == "must be a path or a list of paths"
+
+
+def test_inherit_on_first_step():
+    errs = errors_for(_steps({"name": "a", "type": "train", "project": "m", "inherit": ["ckpt"]}))
+    assert errs["steps[0].inherit"] == "the first step has nothing to inherit from"
+
+
+@pytest.mark.parametrize("bad", ["../train.py", "/train.py", "", "a/../../t.py", "."])
+def test_script_must_be_relative_inside_workspace(bad):
+    errs = errors_for(_steps({"name": "a", "type": "train", "project": "m", "script": bad}))
+    assert errs["steps[0].script"] == "must be a relative path inside the workspace"
+
+
+def test_script_must_be_string():
+    errs = errors_for(_steps({"name": "a", "type": "train", "project": "m", "script": 5}))
+    assert "quote it" in errs["steps[0].script"]
+
+
+def test_script_not_allowed_on_task():
+    errs = errors_for(_steps({"name": "a", "type": "task", "command": "true", "script": "x.py"}))
+    assert errs["steps[0].script"] == "unknown key for a task step"
+
+
+def test_project_task():
+    d = validate(_steps(TRAIN_A, {"name": "check", "type": "task", "project": "m", "command": "test -s c/x",
+                                  "inherit": ["c"]}))
+    assert d["steps"][1] == {"name": "check", "type": "task", "command": "test -s c/x",
+                             "timeout_s": 3600, "project": "m", "inherit": ["c"]}
+
+
+def test_project_task_bad_project_name():
+    errs = errors_for(_steps({"name": "t", "type": "task", "project": "a b", "command": "true"}))
+    assert "steps[0].project" in errs
+
+
+def test_plain_task_previous_must_have_path():
+    errs = errors_for(_steps(
+        {"name": "a", "type": "task", "command": "true"},
+        {"name": "b", "type": "train", "project": "m", "inherit": ["ckpt"]}))
+    assert errs["steps[1].inherit"] == "'ckpt' isn't an output path of the previous step (a)"
+
+
+def test_plain_task_passes_on_what_it_inherited():
+    validate(_steps(TRAIN_A,
+                    {"name": "check", "type": "task", "command": "true", "inherit": ["ckpt"]},
+                    {"name": "c", "type": "train", "project": "m", "inherit": ["ckpt"]}))
+
+
+def test_round_trip_with_new_fields():
+    d = validate(_steps(TRAIN_A,
+                        {"name": "b", "type": "train", "project": "m", "script": "post.py", "inherit": ["ckpt"]},
+                        {"name": "c", "type": "task", "project": "m", "command": "true", "inherit": "ckpt"}))
+    text = to_yaml(d)
+    assert "script: post.py" in text
+    assert validate(parse_text(text)) == d

@@ -164,6 +164,16 @@ def test_run_dir_rejects_bad_names(pdir, bad):
         store.pipeline_run_dir(pdir, bad, 1)
 
 
+def test_rename_project_refs_covers_project_tasks(pdir):
+    store.save_pipeline(pdir, {"name": "pl", "steps": [
+        {"name": "a", "type": "train", "project": "old"},
+        {"name": "b", "type": "task", "project": "old", "command": "true"},
+        {"name": "c", "type": "task", "command": "true"}]})
+    assert store.rename_project_refs(pdir, "old", "new") == ["pl"]
+    steps = store.load_pipeline(pdir, "pl")[0]["steps"]
+    assert [s.get("project") for s in steps] == ["new", "new", None]
+
+
 def test_bad_names_not_found(pdir):
     assert store.pipeline_exists(pdir, "../x") is False
     store.save_pipeline_text(pdir, "pl", TEXT)
