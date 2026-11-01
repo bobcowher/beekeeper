@@ -210,7 +210,7 @@ def test_pip_install_runs_after_git_pull(tmp_path):
                         get_training_runs=MagicMock(return_value=[]))
 
     def fake_run(cmd, **kwargs):
-        if "fetch" in cmd or "reset" in cmd:
+        if "fetch" in cmd or "checkout" in cmd:
             call_order.append("git_sync")
         elif "pip" in cmd:
             call_order.append("pip_install")

@@ -449,6 +449,37 @@ def _kill_timed_out_task(info) -> int:
     return TASK_TIMEOUT_EXIT
 
 
+def _sync_workspace(workspace_dir, branch):
+    """Fetch and put the workspace on origin/<branch>. Returns an error message, or None.
+
+    The remote is always authoritative: local commits, edits and untracked files in the way
+    are discarded.
+    """
+    try:
+        fetch = subprocess.run(
+            ["git", "fetch", "origin"],
+            cwd=workspace_dir,
+            capture_output=True, text=True, timeout=60,
+            env=git_env(),
+        )
+        if fetch.returncode != 0:
+            return f"Git fetch failed: {fetch.stderr.strip()[-500:]}"
+        # checkout -B, not reset --hard: reset moves whatever branch is checked out, so an
+        # override run would train branch B's code with HEAD still naming the default branch.
+        checkout = subprocess.run(
+            ["git", "checkout", "-f", "-B", branch, f"origin/{branch}"],
+            cwd=workspace_dir,
+            capture_output=True, text=True, timeout=30,
+        )
+        if checkout.returncode != 0:
+            return f"Git checkout of origin/{branch} failed: {checkout.stderr.strip()[-500:]}"
+    except subprocess.TimeoutExpired:
+        return "Git sync timed out (60s)"
+    except Exception as e:
+        return f"Git sync failed: {e}"
+    return None
+
+
 def _collect_run_metadata(workspace_dir, python_bin, branch):
     """Collect environment metadata for the run header."""
     meta = {
@@ -931,27 +962,9 @@ def _execute_training(projects_dir, name, project, python_bin, run_pk, run_id, b
         except Exception as e:
             return _abort(f"Git clone failed: {e}")
 
-    # Sync to remote — remote is always authoritative
-    try:
-        fetch = subprocess.run(
-            ["git", "fetch", "origin"],
-            cwd=workspace_dir,
-            capture_output=True, text=True, timeout=60,
-            env=git_env(),
-        )
-        if fetch.returncode != 0:
-            return _abort(f"Git fetch failed: {fetch.stderr.strip()[-500:]}")
-        reset = subprocess.run(
-            ["git", "reset", "--hard", f"origin/{branch}"],
-            cwd=workspace_dir,
-            capture_output=True, text=True, timeout=30,
-        )
-        if reset.returncode != 0:
-            return _abort(f"Git reset failed: {reset.stderr.strip()[-500:]}")
-    except subprocess.TimeoutExpired:
-        return _abort("Git sync timed out (60s)")
-    except Exception as e:
-        return _abort(f"Git sync failed: {e}")
+    sync_error = _sync_workspace(workspace_dir, branch)
+    if sync_error:
+        return _abort(sync_error)
 
     run_meta = _collect_run_metadata(workspace_dir, python_bin, branch)
     run_meta["gpu_assignment"] = gpu_assignment
